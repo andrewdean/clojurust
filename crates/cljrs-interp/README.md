@@ -2,6 +2,14 @@
 
 Self-contained tree-walking interpreter for Clojure.
 
+## Cargo profiles
+
+The default `host-dependencies` feature preserves Git-backed versioned
+resolution. Disable default features to compile the interpreter without
+`cljrs-deps`, `cljrs-vcs`, or their transitive dependency trees. The
+restricted resolver keeps the same entry points and returns a stable
+`ForbiddenEffect` error for versioned lookups.
+
 **Phase:** Core interpreter — implemented.  `no-gc` region/static-sink support (Phases 4–5), blacklist integration (Phase 6), and integration tests (Phase 8) of `docs/no-gc-plan.md` — implemented.
 
 ---

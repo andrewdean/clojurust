@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+default = ["host-dependencies"]
+host-dependencies = [
+    "cljrs-env/host-dependencies",
+    "cljrs-interp/host-dependencies",
+]
 no-gc = [
     "cljrs-gc/no-gc",
     "cljrs-value/no-gc",
@@ -19,6 +24,6 @@ cljrs-gc = { workspace = true }
 cljrs-types = { workspace = true }
 cljrs-value = { workspace = true }
 cljrs-reader = { workspace = true }
-cljrs-env = { workspace = true }
-cljrs-interp = { workspace = true }
+cljrs-env = { path = "../cljrs-env", version = "0.1.0", default-features = false }
+cljrs-interp = { path = "../cljrs-interp", version = "0.1.0", default-features = false }
 thiserror = { workspace = true }

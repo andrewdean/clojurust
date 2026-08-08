@@ -3,6 +3,13 @@
 Built-in functions for clojurust (the `clojure.core`-equivalent runtime
 implemented in Rust, registered into a name → fn dispatch table).
 
+## Cargo profiles
+
+The default `host-dependencies` feature propagates
+`cljrs-env/host-dependencies`. Disable default features when the embedding
+must compile builtins without Clojurust's dependency and Git resolution
+subsystems. Other builtin behavior does not change.
+
 ## Map entries
 
 Map entries are a dedicated type, not plain 2-element vectors: seq'ing a map,

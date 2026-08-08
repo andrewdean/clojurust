@@ -1,6 +1,6 @@
 //! Namespace file loader: resolves `require` to source files and evaluates them.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,9 +20,15 @@ use crate::error::{EvalError, EvalResult};
 ///   `load_versioned_ns` which fetches source at the given commit.
 pub fn load_ns(globals: Arc<GlobalEnv>, spec: &RequireSpec, current_ns: &str) -> EvalResult<()> {
     // Versioned require: delegate entirely to the versioned loader.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     if let Some(ref commit) = spec.version {
         return load_versioned_ns(globals, spec, commit, current_ns);
+    }
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "host-dependencies")))]
+    if spec.version.is_some() {
+        return Err(EvalError::ForbiddenEffect(
+            "versioned namespace lookup".to_string(),
+        ));
     }
     #[cfg(target_arch = "wasm32")]
     if spec.version.is_some() {
@@ -154,7 +160,7 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
 
     // Record source location on the namespace for versioned resolution.
     // Only meaningful for real files (not builtins) and non-WASM targets.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     if !file_path.starts_with("<builtin:") {
         let repo_root =
             cljrs_vcs::find_repo_root(Path::new(&file_path)).map(|p| p.display().to_string());
@@ -220,7 +226,7 @@ fn try_native_require(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResul
 /// alias/refer from `spec` in `current_ns`.  The actual loading lives in
 /// `crate::versioned::ensure_versioned_ns_loaded`, shared with the per-symbol
 /// resolver used by all execution tiers.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 pub fn load_versioned_ns(
     globals: Arc<GlobalEnv>,
     spec: &RequireSpec,
@@ -235,7 +241,7 @@ pub fn load_versioned_ns(
 
 /// Apply the alias and refer clauses from `spec` into `current_ns`, using
 /// `effective_ns` as the source namespace (which may be `"base@commit"`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 fn apply_alias_refer(
     globals: &GlobalEnv,
     effective_ns: &Arc<str>,

@@ -12,7 +12,10 @@ pub mod gc_roots;
 pub mod loader;
 pub mod policy;
 pub mod taps;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
+pub mod versioned;
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "host-dependencies")))]
+#[path = "versioned_restricted.rs"]
 pub mod versioned;
 
 pub use async_hook::AsyncRuntime;

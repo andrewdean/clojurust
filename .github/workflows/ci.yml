@@ -8,6 +8,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  restricted-transaction:
+    name: Restricted transaction profile
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test restricted resolver
+        run: cargo test -p cljrs-env --no-default-features restricted_profile_returns_a_stable_policy_error
+
+      - name: Test restricted transaction runtime
+        run: cargo test -p cljrs-tx --no-default-features --features no-gc
+
+      - name: Check restricted dependency graph
+        shell: bash
+        run: |
+          forbidden='^(cljrs-deps|cljrs-vcs|gix|pgp|ssh-key) '
+          if cargo tree -p cljrs-tx --no-default-features --features no-gc \
+            --edges normal --prefix none | sort -u | grep -E "$forbidden"; then
+            echo "restricted transaction graph contains a forbidden package" >&2
+            exit 1
+          fi
+
   ci:
     name: Build, test, lint
     runs-on: ubuntu-latest

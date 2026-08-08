@@ -2,6 +2,30 @@
 
 Environments for running programs in.
 
+## Cargo profiles
+
+The default `host-dependencies` feature preserves dependency configuration,
+Git-backed versioned namespaces, and commit-signature verification. Disable
+default features when an embedding must exclude `cljrs-deps` and `cljrs-vcs`
+from its compiled dependency graph:
+
+```console
+cargo build -p cljrs-env --no-default-features
+```
+
+This restricted profile keeps the versioned-resolution API available.
+However, each versioned lookup returns
+`EvalError::ForbiddenEffect("versioned namespace lookup")` without accessing
+the filesystem, network, Git repository, or key store. The profile does not
+disable ordinary unversioned source-path loading. An embedding must apply its
+own execution policy if unversioned `require` is also forbidden.
+
+## File layout
+
+- `src/versioned.rs` implements Git-backed resolution for the default profile.
+- `src/versioned_restricted.rs` implements deterministic rejection when
+  `host-dependencies` is disabled.
+
 ## gas module
 
 Cooperative execution-credit metering shared dynamically across tree-walker,
@@ -52,6 +76,11 @@ otherwise.  `GlobalEnv::set_versioned_offline(true)` (called by AOT harness
 binaries) restricts versioned loading to embedded sources — a missing
 embedding fails with a clear "was not embedded at compile time" error
 instead of fetching from git.
+
+The `host-dependencies` feature selects this implementation. Without the
+feature, the module exposes the same resolver functions and rejects each
+operation with the stable policy error described in the Cargo profiles
+section.
 
 Native (Rust-backed) packages get a **verified HEAD binding**: the fallback
 checks the pin against `GlobalEnv::native_provenance` (recorded via
