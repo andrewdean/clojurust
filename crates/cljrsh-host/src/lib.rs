@@ -1,0 +1,47 @@
+//! cljrsh host library surface.
+//!
+//! Native `cljrsh.*` namespaces implemented in Rust (fs, json — more per
+//! milestone), plus the babashka-compatibility layer: thin portable-Clojure
+//! veneers (`babashka.fs`, `cheshire.core`, `clojure.java.shell`,
+//! `babashka.process`) registered as embedded builtin sources so they load
+//! lazily on `require` (the `cljrs-stdlib` pattern).
+
+use std::sync::Arc;
+
+use cljrs_env::env::GlobalEnv;
+use cljrs_interop::Registry;
+
+pub mod fs;
+pub mod json;
+
+/// Compat veneers shipped as embedded Clojure source, loaded on `require`.
+const COMPAT_SOURCES: &[(&str, &str)] = &[
+    ("babashka.fs", include_str!("clj/babashka/fs.cljrs")),
+    ("babashka.process", include_str!("clj/babashka/process.cljrs")),
+    ("cheshire.core", include_str!("clj/cheshire/core.cljrs")),
+    (
+        "clojure.java.shell",
+        include_str!("clj/clojure/java/shell.cljrs"),
+    ),
+];
+
+/// Register every native namespace and compat source into `globals`.
+/// Idempotent (keyed on the `cljrsh.fs` namespace).
+pub fn init(globals: &Arc<GlobalEnv>) {
+    if globals.is_loaded("cljrsh.fs") {
+        return;
+    }
+    for ns in ["cljrsh.fs", "cljrsh.json"] {
+        globals.get_or_create_ns(ns);
+        globals.refer_all(ns, "clojure.core");
+    }
+    let mut registry = Registry::for_require(globals.clone());
+    fs::register(&mut registry);
+    json::register(&mut registry);
+    globals.mark_loaded("cljrsh.fs");
+    globals.mark_loaded("cljrsh.json");
+
+    for (ns, src) in COMPAT_SOURCES {
+        globals.register_builtin_source(ns, src);
+    }
+}

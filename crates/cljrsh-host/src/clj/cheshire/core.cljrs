@@ -1,0 +1,18 @@
+;; cheshire.core compatibility veneer over the native cljrsh.json namespace.
+(ns cheshire.core
+  (:require [cljrsh.json]))
+
+(defn parse-string
+  "Parse a JSON string. Second arg truthy (or the keyword fn itself) →
+  keyword keys, matching cheshire's common usage."
+  ([s] (cljrsh.json/parse-string s))
+  ([s key-fn] (cljrsh.json/parse-string s (boolean key-fn))))
+
+(def decode parse-string)
+
+(defn generate-string
+  "Encode a value as a JSON string. Opts: {:pretty true}."
+  ([v] (cljrsh.json/generate-string v))
+  ([v opts] (cljrsh.json/generate-string v opts)))
+
+(def encode generate-string)

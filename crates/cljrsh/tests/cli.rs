@@ -205,3 +205,61 @@ fn classpath_adds_source_dir() {
     );
     assert_eq!(r.stdout, "42\n", "stderr: {}", r.stderr);
 }
+
+// ── Host-namespace / compat-layer coverage (cljrsh-host) ─────────────────────
+
+#[test]
+fn babashka_fs_compat() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[babashka.fs :as fs])
+         (fs/create-dirs (fs/path \"{d}\" \"sub\"))
+         (spit (str \"{d}\" \"/sub/x.clj\") \"1\")
+         [(fs/exists? (str \"{d}\" \"/sub/x.clj\"))
+          (count (fs/glob \"{d}\" \"**/*.clj\"))
+          (fs/file-name (str \"{d}\" \"/sub/x.clj\"))]"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[true 1 \"x.clj\"]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn cheshire_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[cheshire.core :as json])
+             (json/parse-string (json/generate-string {:a [1 2.5 nil] :b \"x\"}) true)",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "{:a [1 2.5 nil], :b \"x\"}\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn clojure_java_shell_compat() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clojure.java.shell :refer [sh]]) (:out (sh \"echo\" \"hi\"))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"hi\\n\"\n");
+}
+
+#[test]
+fn babashka_process_shell_throws_on_failure() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[babashka.process :as p]) (p/shell \"false\")",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.code, 1, "stderr: {}", r.stderr);
+}
