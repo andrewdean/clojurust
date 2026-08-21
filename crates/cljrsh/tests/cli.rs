@@ -263,3 +263,61 @@ fn babashka_process_shell_throws_on_failure() {
     );
     assert_eq!(r.code, 1, "stderr: {}", r.stderr);
 }
+
+// ── Streaming I/O flags (-i/-I/-o/-O/--stream) ───────────────────────────────
+
+#[test]
+fn input_lines_lazy_seq() {
+    let r = run(
+        &["-i", "-e", "(map clojure.string/upper-case *input*)", "-o"],
+        Some("apple\nbanana\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "APPLE\nBANANA\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn input_edn_values() {
+    let r = run(
+        &["-I", "-e", "(reduce + (map :n *input*))"],
+        Some("{:n 1}\n{:n 2}\n{:n 5}\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "8\n");
+}
+
+#[test]
+fn output_prn_is_readable() {
+    let r = run(&["-e", "[\"a\" \"b\"]", "-O"], None, &[]);
+    assert_eq!(r.stdout, "\"a\"\n\"b\"\n");
+}
+
+#[test]
+fn stream_edn_per_value() {
+    let r = run(
+        &["-I", "--stream", "-e", "(* *input* 10)"],
+        Some("1\n2\n3\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "10\n20\n30\n");
+}
+
+#[test]
+fn stream_lines_with_output_mode() {
+    let r = run(
+        &["-i", "--stream", "-e", "(count *input*)", "-o"],
+        Some("a\nbb\nccc\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "1\n2\n3\n");
+}
+
+#[test]
+fn combined_io_flag() {
+    let r = run(
+        &["-io", "-e", "(map clojure.string/reverse *input*)"],
+        Some("ab\ncd\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "ba\ndc\n");
+}

@@ -102,8 +102,15 @@ fn run(opts: Opts) -> i32 {
         .collect();
     let globals = exec::setup_globals(extra_paths, &opts.args);
 
+    let modes = |print_result: bool| exec::RunModes {
+        input: opts.input,
+        output: opts.output,
+        stream: opts.stream,
+        print_result,
+    };
+
     match opts.program {
-        Program::Eval(expr) => exec::run_program(&globals, &expr, "<expr>", true),
+        Program::Eval(expr) => exec::run_program(&globals, &expr, "<expr>", modes(true)),
         Program::File(path) => {
             let src = match std::fs::read_to_string(&path) {
                 Ok(s) => s,
@@ -122,7 +129,7 @@ fn run(opts: Opts) -> i32 {
                     .unwrap()
                     .push(parent.to_path_buf());
             }
-            exec::run_program(&globals, &src, &path, false)
+            exec::run_program(&globals, &src, &path, modes(false))
         }
         Program::Stdin => {
             let mut src = String::new();
@@ -131,7 +138,7 @@ fn run(opts: Opts) -> i32 {
                 eprintln!("cljrsh: cannot read stdin: {e}");
                 return 1;
             }
-            exec::run_program(&globals, &src, "<stdin>", false)
+            exec::run_program(&globals, &src, "<stdin>", modes(false))
         }
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),

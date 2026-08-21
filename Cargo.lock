@@ -1278,6 +1278,7 @@ dependencies = [
 name = "cljrsh-host"
 version = "0.1.0"
 dependencies = [
+ "cljrs-builtins",
  "cljrs-env",
  "cljrs-gc",
  "cljrs-interop",
