@@ -1,0 +1,8 @@
+;; babashka.terminal compatibility veneer.
+(ns babashka.terminal
+  (:require [cljrsh.term]))
+
+(defn tty?
+  "Is the given stream (:stdin/:stdout/:stderr, default :stdout) a terminal?"
+  ([] (cljrsh.term/tty?))
+  ([stream] (cljrsh.term/tty? stream)))
