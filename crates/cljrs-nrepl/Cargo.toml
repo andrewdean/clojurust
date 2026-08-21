@@ -13,6 +13,7 @@ cljrs-reader   = { workspace = true }
 cljrs-env      = { workspace = true }
 cljrs-eval     = { workspace = true }
 cljrs-builtins = { workspace = true }
+cljrs-bencode  = { workspace = true }
 miette    = { workspace = true }
 thiserror = { workspace = true }
 # The server needs async TCP plus a runtime; pin a richer tokio feature set

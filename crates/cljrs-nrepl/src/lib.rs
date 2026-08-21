@@ -29,7 +29,7 @@
 //! server.serve().unwrap(); // blocks this thread processing evals
 //! ```
 
-pub mod bencode;
+pub use cljrs_bencode as bencode;
 mod engine;
 pub mod protocol;
 mod server;

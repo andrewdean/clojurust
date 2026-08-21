@@ -790,6 +790,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-bencode"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "cljrs-blake3"
 version = "0.1.0"
 dependencies = [
@@ -1109,6 +1116,7 @@ dependencies = [
 name = "cljrs-nrepl"
 version = "0.1.0"
 dependencies = [
+ "cljrs-bencode",
  "cljrs-builtins",
  "cljrs-env",
  "cljrs-eval",

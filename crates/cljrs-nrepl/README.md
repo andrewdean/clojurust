@@ -26,7 +26,6 @@ Each session has its own `Env` (namespace) and its own `*1`/`*2`/`*3`/`*e`, boun
 | File | Purpose |
 |---|---|
 | `src/lib.rs` | Public API: `Config`, `start`, `Server`, `ShutdownHandle`, the `Job` bridge type |
-| `src/bencode.rs` | Hand-rolled bencode codec (the nREPL subset) with incremental decoding for TCP framing |
 | `src/protocol.rs` | `Request` decoding and the `Response` builder |
 | `src/server.rs` | Network thread: accept loop, per-connection reader/writer tasks, `describe`/`interrupt`, in-flight registry |
 | `src/engine.rs` | Interpreter thread: session registry, eval with output capture and `*1`/`*2`/`*3`/`*e`, completions, lookup |
@@ -41,5 +40,5 @@ Each session has its own `Env` (namespace) and its own `*1`/`*2`/`*3`/`*e`, boun
 - `Server::serve_with(self, eval_form: impl EvalForm) -> miette::Result<()>` — like `serve`, but each top-level form goes through the supplied evaluator (the CLI passes its async `LocalSet` driver).
 - `Server::shutdown_handle(&self) -> ShutdownHandle` — `Send + Clone`; `shutdown()` stops the network thread and ends `serve`.
 - `trait EvalForm: FnMut(&Form, &mut Env) -> Result<Value, EvalError>` — evaluator signature for `serve_with`.
-- `mod bencode` — `Bencode`, `encode`, `encode_to_vec`, `decode` (public for tests/clients).
+- `pub use cljrs_bencode as bencode` — `Bencode`, `encode`, `encode_to_vec`, `decode` re-exported for tests/clients (implementation in the `cljrs-bencode` crate).
 - `mod protocol` — `Request`, `Response`.
