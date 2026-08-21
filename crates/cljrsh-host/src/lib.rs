@@ -12,6 +12,7 @@ use cljrs_env::env::GlobalEnv;
 use cljrs_interop::Registry;
 
 pub mod fs;
+pub mod http;
 pub mod io;
 pub mod json;
 
@@ -19,6 +20,10 @@ pub mod json;
 const COMPAT_SOURCES: &[(&str, &str)] = &[
     ("babashka.fs", include_str!("clj/babashka/fs.cljrs")),
     ("babashka.process", include_str!("clj/babashka/process.cljrs")),
+    (
+        "babashka.http-client",
+        include_str!("clj/babashka/http_client.cljrs"),
+    ),
     ("cheshire.core", include_str!("clj/cheshire/core.cljrs")),
     (
         "clojure.java.shell",
@@ -32,7 +37,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     if globals.is_loaded("cljrsh.fs") {
         return;
     }
-    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io"] {
+    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http"] {
         globals.get_or_create_ns(ns);
         globals.refer_all(ns, "clojure.core");
     }
@@ -40,9 +45,11 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     fs::register(&mut registry);
     json::register(&mut registry);
     io::register(&mut registry);
+    http::register(&mut registry);
     globals.mark_loaded("cljrsh.fs");
     globals.mark_loaded("cljrsh.json");
     globals.mark_loaded("cljrsh.io");
+    globals.mark_loaded("cljrsh.http");
 
     for (ns, src) in COMPAT_SOURCES {
         globals.register_builtin_source(ns, src);

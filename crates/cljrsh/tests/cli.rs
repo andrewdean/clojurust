@@ -321,3 +321,28 @@ fn combined_io_flag() {
     );
     assert_eq!(r.stdout, "ba\ndc\n");
 }
+
+#[test]
+fn http_client_compat() {
+    use std::io::{Read as _, Write as _};
+    // One-shot HTTP server on an ephemeral port.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = sock.read(&mut buf);
+        sock.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+        )
+        .unwrap();
+    });
+    let expr = format!(
+        "(require '[babashka.http-client :as http])
+         (let [r (http/get \"http://127.0.0.1:{port}/\")]
+           [(:status r) (:body r)])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    server.join().unwrap();
+    assert_eq!(r.stdout, "[200 \"hello\"]\n", "stderr: {}", r.stderr);
+}
