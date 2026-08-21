@@ -1,0 +1,23 @@
+;; clojure.data.csv compatibility veneer over the native cljrsh.csv.
+;;
+;; Divergences: read-csv takes a STRING (data.csv also accepts readers) and is
+;; eager; write-csv without a writer object is spelled write-csv-string.
+(ns clojure.data.csv
+  (:require [cljrsh.csv]))
+
+(defn read-csv
+  "Parse CSV from a string into a vector of row vectors.
+  Options: :separator (char)."
+  [s & opts]
+  (apply cljrsh.csv/read-csv s opts))
+
+(defn write-csv-string
+  "Encode rows (vectors of fields) as a CSV string. Options: :separator."
+  [rows & opts]
+  (apply cljrsh.csv/write-csv-string rows opts))
+
+(defn write-csv
+  "Unsupported: cljrsh has no Writer objects yet. Use write-csv-string and
+  spit instead."
+  [& _]
+  (throw (ex-info "write-csv with a writer is not supported in cljrsh; use clojure.data.csv/write-csv-string + spit" {})))

@@ -346,3 +346,31 @@ fn http_client_compat() {
     server.join().unwrap();
     assert_eq!(r.stdout, "[200 \"hello\"]\n", "stderr: {}", r.stderr);
 }
+
+#[test]
+fn yaml_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clj-yaml.core :as yaml])
+             (yaml/parse-string (yaml/generate-string {:name \"x\" :tags [\"a\"]}))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "{:name \"x\", :tags [\"a\"]}\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn csv_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clojure.data.csv :as csv])
+             (csv/read-csv (csv/write-csv-string [[\"a\" \"b\"] [\"1\" \"2,x\"]]))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[[\"a\" \"b\"] [\"1\" \"2,x\"]]\n", "stderr: {}", r.stderr);
+}

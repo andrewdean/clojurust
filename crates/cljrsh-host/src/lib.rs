@@ -11,10 +11,12 @@ use std::sync::Arc;
 use cljrs_env::env::GlobalEnv;
 use cljrs_interop::Registry;
 
+pub mod csv;
 pub mod fs;
 pub mod http;
 pub mod io;
 pub mod json;
+pub mod yaml;
 
 /// Compat veneers shipped as embedded Clojure source, loaded on `require`.
 const COMPAT_SOURCES: &[(&str, &str)] = &[
@@ -25,6 +27,8 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         include_str!("clj/babashka/http_client.cljrs"),
     ),
     ("cheshire.core", include_str!("clj/cheshire/core.cljrs")),
+    ("clj-yaml.core", include_str!("clj/clj_yaml/core.cljrs")),
+    ("clojure.data.csv", include_str!("clj/clojure/data/csv.cljrs")),
     (
         "clojure.java.shell",
         include_str!("clj/clojure/java/shell.cljrs"),
@@ -37,7 +41,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     if globals.is_loaded("cljrsh.fs") {
         return;
     }
-    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http"] {
+    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv"] {
         globals.get_or_create_ns(ns);
         globals.refer_all(ns, "clojure.core");
     }
@@ -46,10 +50,14 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     json::register(&mut registry);
     io::register(&mut registry);
     http::register(&mut registry);
+    yaml::register(&mut registry);
+    csv::register(&mut registry);
     globals.mark_loaded("cljrsh.fs");
     globals.mark_loaded("cljrsh.json");
     globals.mark_loaded("cljrsh.io");
     globals.mark_loaded("cljrsh.http");
+    globals.mark_loaded("cljrsh.yaml");
+    globals.mark_loaded("cljrsh.csv");
 
     for (ns, src) in COMPAT_SOURCES {
         globals.register_builtin_source(ns, src);
