@@ -434,9 +434,32 @@ fn eval_tagged_literal(tag: &str, inner: &Form, env: &mut Env) -> EvalResult {
                 ))),
             }
         }
-        _ => Err(EvalError::Runtime(format!(
-            "unknown tagged literal: #{tag}"
-        ))),
+        _ => {
+            // User-extensible data readers: `*data-readers*` maps tag symbols
+            // to 1-arg reader fns; `*default-data-reader-fn*` (tag value)
+            // catches everything else. Both are dynamic vars in clojure.core.
+            let val = eval(inner, env)?;
+            if let Some(var) = env.globals.lookup_var("clojure.core", "*data-readers*")
+                && let Some(Value::Map(readers)) = cljrs_env::dynamics::deref_var(&var)
+            {
+                let key = Value::symbol(cljrs_value::Symbol::parse(tag));
+                if let Some(reader) = readers.get(&key) {
+                    return cljrs_env::apply::apply_value(&reader, vec![val], env);
+                }
+            }
+            if let Some(var) = env
+                .globals
+                .lookup_var("clojure.core", "*default-data-reader-fn*")
+                && let Some(f) = cljrs_env::dynamics::deref_var(&var)
+                && f != Value::Nil
+            {
+                let tag_sym = Value::symbol(cljrs_value::Symbol::parse(tag));
+                return cljrs_env::apply::apply_value(&f, vec![tag_sym, val], env);
+            }
+            Err(EvalError::Runtime(format!(
+                "No reader function for tag {tag}. Add it to *data-readers* or set *default-data-reader-fn*."
+            )))
+        }
     }
 }
 

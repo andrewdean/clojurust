@@ -393,6 +393,44 @@ pub fn expand_reader_conds(forms: &[Form]) -> Vec<Form> {
     out
 }
 
+
+// ── EDN reading with tag sentinels ────────────────────────────────────────────
+
+/// Convert a form to data for `clojure.edn`: like [`form_to_value`], but
+/// tagged literals other than the built-in `#uuid`/`#inst` become sentinel
+/// maps `{:cljrs.edn/tag tag-sym :cljrs.edn/form inner-value}`, which the
+/// Clojure-level `clojure.edn/read-string` resolves against its `:readers` /
+/// `:default` options (postwalk, innermost first).
+pub fn form_to_edn_value(form: &Form) -> Value {
+    form_to_value(&sentinelize_tags(form))
+}
+
+/// Rewrite unknown tagged literals into sentinel-map forms, recursively.
+fn sentinelize_tags(form: &Form) -> Form {
+    let span = form.span.clone();
+    let kind = match &form.kind {
+        FormKind::TaggedLiteral(tag, inner) if tag != "uuid" && tag != "inst" => FormKind::Map(vec![
+            Form::new(FormKind::Keyword("cljrs.edn/tag".into()), span.clone()),
+            Form::new(FormKind::Symbol(tag.clone()), span.clone()),
+            Form::new(FormKind::Keyword("cljrs.edn/form".into()), span.clone()),
+            sentinelize_tags(inner),
+        ]),
+        FormKind::TaggedLiteral(tag, inner) => {
+            FormKind::TaggedLiteral(tag.clone(), Box::new(sentinelize_tags(inner)))
+        }
+        FormKind::List(c) => FormKind::List(c.iter().map(sentinelize_tags).collect()),
+        FormKind::Vector(c) => FormKind::Vector(c.iter().map(sentinelize_tags).collect()),
+        FormKind::Set(c) => FormKind::Set(c.iter().map(sentinelize_tags).collect()),
+        FormKind::Map(c) => FormKind::Map(c.iter().map(sentinelize_tags).collect()),
+        FormKind::Meta(m, inner) => FormKind::Meta(
+            Box::new(sentinelize_tags(m)),
+            Box::new(sentinelize_tags(inner)),
+        ),
+        other => other.clone(),
+    };
+    Form::new(kind, span)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

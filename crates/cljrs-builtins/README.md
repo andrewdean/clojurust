@@ -35,6 +35,18 @@ passes it through and the hosting binary maps it to the process exit code.
 `clojure.core/*command-line-args*` (a dynamic var defined in bootstrap.cljrs;
 nil when empty).
 
+## Data readers and EDN
+
+Tagged literals beyond the built-in `#uuid`/`#inst` resolve at eval time
+against the `*data-readers*` dynamic var (map of tag symbol → 1-arg fn) and
+then `*default-data-reader-fn*` (fn of tag + value) — both defined in
+bootstrap.cljrs (interp tier; IR lowering still falls back to tree-walk for
+functions containing tagged literals). `form::form_to_edn_value` converts a
+form to *data* with unknown tags as `{:cljrs.edn/tag sym :cljrs.edn/form v}`
+sentinel maps; the `edn-read-string*` builtin exposes it (`:cljrs.edn/eof`
+keyword on empty input) and `clojure.edn` (cljrs-stdlib) resolves the
+sentinels against its `:readers`/`:default` options.
+
 ## Map entries
 
 Map entries are a dedicated type, not plain 2-element vectors: seq'ing a map,

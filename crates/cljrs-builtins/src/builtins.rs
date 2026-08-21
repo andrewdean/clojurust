@@ -1325,6 +1325,14 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("pr-str", Arity::Variadic { min: 0 }, builtin_pr_str),
         ("str", Arity::Variadic { min: 0 }, builtin_str),
         ("read-string", Arity::Fixed(1), builtin_read_string),
+        // clojure.edn support: parse one form as data, unknown tags become
+        // {:cljrs.edn/tag ... :cljrs.edn/form ...} sentinels; :cljrs.edn/eof
+        // keyword for empty input.
+        (
+            "edn-read-string*",
+            Arity::Fixed(1),
+            builtin_edn_read_string_star,
+        ),
         ("spit", Arity::Variadic { min: 2 }, builtin_spit),
         ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
         ("close", Arity::Fixed(1), builtin_close),
@@ -6215,6 +6223,24 @@ fn builtin_str(args: &[Value]) -> ValueResult<Value> {
         })
         .collect();
     Ok(Value::string(s))
+}
+
+fn builtin_edn_read_string_star(args: &[Value]) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Str(s) => {
+            let src = s.get().clone();
+            let mut parser = cljrs_reader::Parser::new(src, "<edn>".into());
+            match parser.parse_one() {
+                Ok(Some(form)) => Ok(crate::form::form_to_edn_value(&form)),
+                Ok(None) => Ok(Value::keyword(cljrs_value::Keyword::parse("cljrs.edn/eof"))),
+                Err(e) => Err(ValueError::Other(e.to_string())),
+            }
+        }
+        v => Err(ValueError::WrongType {
+            expected: "string",
+            got: v.type_name().to_string(),
+        }),
+    }
 }
 
 fn builtin_read_string(args: &[Value]) -> ValueResult<Value> {

@@ -1,1 +1,38 @@
-(ns clojure.edn)
+;; clojure.edn — EDN reading as data (no evaluation).
+;;
+;; Built on the native `edn-read-string*`, which parses one form and turns
+;; unknown tagged literals into {:cljrs.edn/tag sym :cljrs.edn/form value}
+;; sentinel maps; this namespace resolves them against :readers/:default
+;; (postwalk, innermost first). #uuid and #inst are built in.
+(ns clojure.edn
+  (:require [clojure.walk]))
+
+(defn- resolve-tags [opts v]
+  (clojure.walk/postwalk
+    (fn [x]
+      (if (and (map? x) (contains? x :cljrs.edn/tag))
+        (let [tag (:cljrs.edn/tag x)
+              form (:cljrs.edn/form x)
+              reader (clojure.core/get (:readers opts) tag)
+              default (:default opts)]
+          (cond
+            reader (reader form)
+            default (default tag form)
+            :else (throw (ex-info (str "No reader function for tag " tag)
+                                  {:tag tag :form form}))))
+        x))
+    v))
+
+(defn read-string
+  "Read one object from s. opts:
+    :readers — map of tag symbol -> reader fn
+    :default — fn of [tag value] for unknown tags
+    :eof     — value returned on empty input (default: throw)"
+  ([s] (read-string {} s))
+  ([opts s]
+   (let [v (edn-read-string* s)]
+     (if (= v :cljrs.edn/eof)
+       (if (contains? opts :eof)
+         (:eof opts)
+         (throw (ex-info "EOF while reading" {})))
+       (resolve-tags opts v)))))
