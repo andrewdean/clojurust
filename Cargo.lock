@@ -1130,6 +1130,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-process"
+version = "0.1.0"
+dependencies = [
+ "cljrs-env",
+ "cljrs-gc",
+ "cljrs-interop",
+ "cljrs-interp",
+ "cljrs-reader",
+ "cljrs-value",
+]
+
+[[package]]
 name = "cljrs-reader"
 version = "0.1.0"
 dependencies = [
