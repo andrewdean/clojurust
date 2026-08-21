@@ -34,6 +34,7 @@ members = [
     "crates/cljrsh",
     "crates/cljrsh-host",
     "crates/cljrsh-nu",
+    "crates/cljrsh-project",
     "crates/cljrs-base64",
     "crates/cljrs-jit",
     "crates/cljrs-dylib",
@@ -76,6 +77,7 @@ cljrs-bencode      = { path = "crates/cljrs-bencode",      version = "0.1.0" }
 cljrs-process      = { path = "crates/cljrs-process",      version = "0.1.0" }
 cljrsh-host        = { path = "crates/cljrsh-host",        version = "0.1.0" }
 cljrsh-nu          = { path = "crates/cljrsh-nu",          version = "0.1.0" }
+cljrsh-project     = { path = "crates/cljrsh-project",     version = "0.1.0" }
 cljrs-base64       = { path = "crates/cljrs-base64",       version = "0.1.0" }
 cljrs-jit          = { path = "crates/cljrs-jit",          version = "0.1.0" }
 cljrs-dylib        = { path = "crates/cljrs-dylib",        version = "0.1.0" }

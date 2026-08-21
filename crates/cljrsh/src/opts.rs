@@ -11,6 +11,10 @@ pub enum Program {
     Eval(String),
     /// Run a script file (`-f FILE` or a bare existing path).
     File(String),
+    /// A bare argument that is not an existing file: a project task name, or
+    /// the `tasks`/`run` subcommand. Resolved by `main` once the project file
+    /// is loaded (babashka's file > task > subcommand order).
+    FileOrTask(String),
     /// Interactive REPL (explicit `--repl`, or no program on a tty).
     Repl,
     /// Read the program from stdin (no program given, stdin not a tty).
@@ -150,10 +154,11 @@ pub fn parse(argv: &[String]) -> Result<Opts, String> {
                     if other.starts_with('-') && other.len() > 1 {
                         return Err(format!("unknown option {other} (see cljrsh --help)"));
                     }
-                    if !std::path::Path::new(other).exists() {
-                        return Err(format!("file not found: {other}"));
-                    }
-                    program = Some(Program::File(other.to_string()));
+                    program = Some(if std::path::Path::new(other).exists() {
+                        Program::File(other.to_string())
+                    } else {
+                        Program::FileOrTask(other.to_string())
+                    });
                 } else {
                     args.push(other.to_string());
                 }

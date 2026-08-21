@@ -1629,6 +1629,7 @@ dependencies = [
  "cljrs-value",
  "cljrsh-host",
  "cljrsh-nu",
+ "cljrsh-project",
  "libc",
  "rustyline",
  "tempfile",
@@ -1677,6 +1678,15 @@ dependencies = [
  "nu-parser",
  "nu-protocol",
  "uuid",
+]
+
+[[package]]
+name = "cljrsh-project"
+version = "0.1.0"
+dependencies = [
+ "cljrs-reader",
+ "cljrs-types",
+ "tempfile",
 ]
 
 [[package]]

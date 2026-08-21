@@ -13,6 +13,7 @@
 mod exec;
 mod opts;
 mod repl;
+mod tasks;
 
 use opts::{Opts, Program};
 
@@ -101,6 +102,9 @@ fn run(opts: Opts) -> i32 {
         .map(std::path::PathBuf::from)
         .collect();
     let globals = exec::setup_globals(extra_paths, &opts.args);
+    // Nearest bb.edn/cljrsh.edn: contributes :paths for every program kind
+    // and the task graph for FileOrTask.
+    let project = tasks::load_project(&globals);
 
     let modes = |print_result: bool| exec::RunModes {
         input: opts.input,
@@ -139,6 +143,40 @@ fn run(opts: Opts) -> i32 {
                 return 1;
             }
             exec::run_program(&globals, &src, "<stdin>", modes(false))
+        }
+        Program::FileOrTask(name) => {
+            // babashka order: an existing file was already matched in opts;
+            // here: task > subcommand. `run <task>` and `tasks` are the
+            // subcommands, shadowable by tasks of the same name.
+            let Some(project) = project else {
+                eprintln!("cljrsh: file not found: {name} (and no bb.edn project here)");
+                return 2;
+            };
+            let has_task = |n: &str| project.tasks.iter().any(|t| t.name == n);
+            if has_task(&name) {
+                return tasks::run(&globals, &project, &name);
+            }
+            match name.as_str() {
+                "tasks" => tasks::list(&project),
+                "run" => match opts.args.first() {
+                    Some(task) => {
+                        let task = task.clone();
+                        // Remaining args become *command-line-args*.
+                        cljrs_builtins::system::set_command_line_args(&globals, &opts.args[1..]);
+                        tasks::run(&globals, &project, &task)
+                    }
+                    None => {
+                        eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
+                        2
+                    }
+                },
+                _ => {
+                    eprintln!(
+                        "cljrsh: {name} is neither a file nor a task (see `cljrsh tasks`)"
+                    );
+                    2
+                }
+            }
         }
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),

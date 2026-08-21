@@ -443,3 +443,80 @@ fn nu_ls_returns_keyword_maps() {
     );
     assert_eq!(r.stdout, "true\n", "stderr: {}", r.stderr);
 }
+
+// ── bb.edn tasks (cljrsh-project + tasks.rs) ─────────────────────────────────
+
+fn run_in(dir: &std::path::Path, args: &[&str]) -> Outcome {
+    let mut cmd = cljrsh();
+    cmd.current_dir(dir)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = cmd.spawn().unwrap().wait_with_output().unwrap();
+    Outcome {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        code: out.status.code().unwrap_or(-1),
+    }
+}
+
+fn task_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("bb.edn"),
+        r#"{:paths ["src"]
+            :tasks {:init (def base 40)
+                    clean (println "cleaning")
+                    compile-it {:doc "Compile" :task (do (println "compiling") (+ base 2))}
+                    hidden {:task 1 :private true}
+                    build {:doc "Build" :depends [clean compile-it]
+                           :task (println "result" compile-it)}}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/my")).unwrap();
+    std::fs::write(
+        dir.path().join("src/my/lib.clj"),
+        "(ns my.lib) (def marker :from-project-paths)",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn tasks_listing_hides_private_and_shows_docs() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["tasks"]);
+    assert!(r.stdout.contains("compile-it Compile"), "stdout: {}", r.stdout);
+    assert!(r.stdout.contains("build"));
+    assert!(!r.stdout.contains("hidden"));
+}
+
+#[test]
+fn task_depends_order_and_result_binding() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["build"]);
+    assert_eq!(r.stdout, "cleaning\ncompiling\nresult 42\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn run_subcommand_invokes_task() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["run", "compile-it"]);
+    assert_eq!(r.stdout, "compiling\n");
+}
+
+#[test]
+fn project_paths_apply_to_eval() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["-e", "(require 'my.lib) my.lib/marker"]);
+    assert_eq!(r.stdout, ":from-project-paths\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn unknown_task_reports_cleanly() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["no-such-thing"]);
+    assert_eq!(r.code, 2);
+    assert!(r.stderr.contains("neither a file nor a task"));
+}

@@ -1,0 +1,14 @@
+[package]
+name = "cljrsh-project"
+version = "0.1.0"
+edition = "2024"
+description = "cljrsh project-file support: bb.edn discovery/parsing and the task graph (paths, tasks, :depends ordering)"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cljrs-reader = { workspace = true }
+cljrs-types  = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
