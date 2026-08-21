@@ -103,6 +103,17 @@ load registers a `:rust/load :dylib` dep's exports into the **unversioned**
 namespace (built at the dep's pinned `:git/sha`), so a plain
 `(require '[my.native.lib :as l])` of a pure-native package succeeds.
 
+Embedder source fallback: `GlobalEnv::set_source_fallback` installs a
+`SourceFallback` callback (`Fn(&str) -> Option<(source, display_path)>`,
+first writer wins). `loader::do_load` consults it when a `require`d
+namespace has no builtin source and no file on the source path, *before*
+the native-dylib loader; a `Some` result is evaluated exactly like a found
+source file. Embedding binaries (cljrsh) use it to serve namespaces from
+dependency caches and pod-backed registries. The source-path search itself
+probes `.cljrs`, `.bb`, `.clj`, `.cljc` in that order (babashka's probe
+order after `.cljrs`), so babashka/JVM-family libraries resolve directly
+from source paths.
+
 AOT-compiled namespaces: the binary produced by `cljrs compile` registers a
 `CompiledNsLoader` per required namespace via
 `GlobalEnv::register_compiled_ns_loader`.  `loader::do_load` checks

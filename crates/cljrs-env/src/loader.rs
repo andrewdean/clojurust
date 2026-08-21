@@ -144,6 +144,8 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
         (builtin.to_owned(), format!("<builtin:{ns_name}>"))
     } else if let Some(found) = find_source_file(&rel_path, &src_paths) {
         found
+    } else if let Some(found) = try_source_fallback(globals, ns_name) {
+        found
     } else {
         // No Clojure source on the path.  Before giving up, try loading the
         // namespace from a native dependency declared in `cljrs.edn` with
@@ -202,6 +204,16 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
     }
 
     Ok(())
+}
+
+/// Consult the embedder-installed source fallback (see
+/// `GlobalEnv::set_source_fallback`) for `ns_name`.  Runs after the builtin
+/// registry and the source-path search miss, and before the native-dylib
+/// loader.  Embedding binaries use it to serve namespaces from dependency
+/// caches or pod-backed registries.
+fn try_source_fallback(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> Option<(String, String)> {
+    let fallback = globals.source_fallback.read().unwrap().clone();
+    fallback.and_then(|f| f(ns_name.as_ref()))
 }
 
 /// Consult the native-dependency `require` loader (installed by `cljrs-dylib`)
@@ -263,7 +275,10 @@ pub(crate) fn find_source_file(
     src_paths: &[std::path::PathBuf],
 ) -> Option<(String, String)> {
     for dir in src_paths {
-        for ext in &[".cljrs", ".cljc"] {
+        // `.cljrs` first (this platform's own sources), then the babashka/JVM
+        // family in babashka's probe order: a `.bb` variant shadows a `.clj`
+        // one, and platform-specific files shadow portable `.cljc`.
+        for ext in &[".cljrs", ".bb", ".clj", ".cljc"] {
             let path = dir.join(format!("{rel}{ext}"));
             if path.exists() {
                 let src = std::fs::read_to_string(&path).ok()?;
