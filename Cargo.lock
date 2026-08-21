@@ -1252,6 +1252,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrsh"
+version = "0.1.0"
+dependencies = [
+ "cljrs-async",
+ "cljrs-builtins",
+ "cljrs-charset",
+ "cljrs-env",
+ "cljrs-gc",
+ "cljrs-interp",
+ "cljrs-io",
+ "cljrs-process",
+ "cljrs-reader",
+ "cljrs-stdlib",
+ "cljrs-types",
+ "cljrs-value",
+ "libc",
+ "rustyline",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "clru"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

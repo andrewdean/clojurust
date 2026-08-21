@@ -31,6 +31,7 @@ members = [
     "crates/cljrs-nrepl",
     "crates/cljrs-bencode",
     "crates/cljrs-process",
+    "crates/cljrsh",
     "crates/cljrs-base64",
     "crates/cljrs-jit",
     "crates/cljrs-dylib",
