@@ -374,3 +374,72 @@ fn csv_compat_roundtrip() {
     );
     assert_eq!(r.stdout, "[[\"a\" \"b\"] [\"1\" \"2,x\"]]\n", "stderr: {}", r.stderr);
 }
+
+// ── Embedded nushell (cljrsh-nu, feature "nu") ───────────────────────────────
+
+#[test]
+fn nu_eval_basic_and_tables() {
+    let r = run(&["-e", "(nu/eval \"2 + 2\")"], None, &[]);
+    assert_eq!(r.stdout, "4\n", "stderr: {}", r.stderr);
+    let r = run(
+        &[
+            "-e",
+            "(nu/eval \"[[name size]; [a 10] [b 2000]] | where size > 100 | get name | first\")",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"b\"\n");
+}
+
+#[test]
+fn nu_eval_pipeline_input_from_clojure() {
+    let r = run(
+        &[
+            "-e",
+            "(nu/eval \"$in | where price > 10 | get name\"
+                      {:in [{:name \"a\" :price 5} {:name \"b\" :price 20}]})",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[\"b\"]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn nu_session_persists_defs() {
+    let r = run(
+        &[
+            "-e",
+            "(let [s (nu/session)]
+               (nu/eval \"def greet [n] { $\\\"hi ($n)\\\" }\" {:session s})
+               (nu/eval \"greet world\" {:session s}))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"hi world\"\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn nu_parse_error_is_catchable() {
+    let r = run(
+        &[
+            "-e",
+            "(try (nu/eval \"definitely | | broken\") (catch Exception e :caught))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, ":caught\n");
+}
+
+#[test]
+fn nu_ls_returns_keyword_maps() {
+    let r = run(
+        &["-e", "(pos? (:size (first (nu/eval \"ls Cargo.toml\"))))"],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "true\n", "stderr: {}", r.stderr);
+}
