@@ -273,20 +273,72 @@ pub fn form_to_value(form: &Form) -> Value {
     }
 }
 
+/// Reader-conditional feature keys for this process. Unset means `["rust"]`.
+static READER_FEATURES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Set the feature keys `#?(...)` conditionals match against (e.g.
+/// `["bb", "cljrsh", "rust"]` for a babashka-compatible scripting host).
+/// `:default` always matches and need not be listed. Call once at startup,
+/// before any source is read; returns `false` if the set was already fixed.
+pub fn set_reader_features<I, S>(features: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    READER_FEATURES
+        .set(features.into_iter().map(Into::into).collect())
+        .is_ok()
+}
+
+fn feature_matches(key: &str) -> bool {
+    match READER_FEATURES.get() {
+        Some(features) => features.iter().any(|f| f == key),
+        None => key == "rust",
+    }
+}
+
 /// Resolve a `#?(...)` reader conditional to the selected branch form, or
-/// `None` if no `:rust` or `:default` clause is present.
+/// `None` if no clause key is in the process feature set (see
+/// [`set_reader_features`]; default `:rust`) and no `:default` clause is
+/// present. Clauses are tried in order, matching Clojure: an earlier
+/// `:default` shadows a later platform clause.
 pub fn select_reader_cond(clauses: &[Form]) -> Option<&Form> {
-    let mut default: Option<&Form> = None;
     let mut i = 0;
     while i + 1 < clauses.len() {
-        match &clauses[i].kind {
-            FormKind::Keyword(k) if k == "rust" => return Some(&clauses[i + 1]),
-            FormKind::Keyword(k) if k == "default" => default = Some(&clauses[i + 1]),
-            _ => {}
+        if let FormKind::Keyword(k) = &clauses[i].kind
+            && (k == "default" || feature_matches(k))
+        {
+            return Some(&clauses[i + 1]);
         }
         i += 2;
     }
-    default
+    warn_foreign_platform_cond(clauses);
+    None
+}
+
+/// A conditional with only `:clj`/`:cljs` branches silently expands to
+/// nothing on this platform — the most common porting surprise, so say so
+/// once per source location.
+fn warn_foreign_platform_cond(clauses: &[Form]) {
+    let has_foreign = clauses.chunks(2).any(|pair| {
+        matches!(&pair[0].kind, FormKind::Keyword(k) if k == "clj" || k == "cljs")
+    });
+    if !has_foreign {
+        return;
+    }
+    static WARNED: std::sync::Mutex<Option<std::collections::HashSet<(String, u32, u32)>>> =
+        std::sync::Mutex::new(None);
+    let span = &clauses[0].span;
+    let key = (span.file.as_str().to_owned(), span.line, span.col);
+    let mut warned = WARNED.lock().unwrap_or_else(|e| e.into_inner());
+    if warned.get_or_insert_with(Default::default).insert(key) {
+        eprintln!(
+            "WARNING: reader conditional at {}:{}:{} has no matching clause for this \
+             platform (only :clj/:cljs); it expands to nothing. Add a :default clause \
+             or a platform-specific branch.",
+            span.file, span.line, span.col
+        );
+    }
 }
 
 /// Expand reader conditionals in a flat slice of forms.
@@ -372,6 +424,47 @@ mod tests {
             panic!("expected deref form, got {:?}", body[1].kind);
         };
         assert_eq!(inner.kind, FormKind::Symbol("p__1".to_string()));
+    }
+
+    fn parse_reader_cond(src: &str) -> Vec<Form> {
+        let mut parser = Parser::new(src.to_string(), "<test>".to_string());
+        let form = parser.parse_one().unwrap().unwrap();
+        let FormKind::ReaderCond { clauses, .. } = form.kind else {
+            panic!("expected ReaderCond, got {:?}", form.kind);
+        };
+        clauses
+    }
+
+    #[test]
+    fn reader_cond_clauses_tried_in_order() {
+        // Clojure semantics: first matching clause wins, and :default matches
+        // when reached — an earlier :default shadows a later platform clause.
+        let clauses = parse_reader_cond("#?(:default 1 :rust 2)");
+        let selected = select_reader_cond(&clauses).expect("expected a match");
+        assert_eq!(selected.kind, FormKind::Int(1));
+    }
+
+    #[test]
+    fn reader_cond_rust_matches() {
+        let clauses = parse_reader_cond("#?(:clj 1 :rust 2)");
+        let selected = select_reader_cond(&clauses).expect("expected a match");
+        assert_eq!(selected.kind, FormKind::Int(2));
+    }
+
+    #[test]
+    fn reader_cond_foreign_platform_only_is_none() {
+        let clauses = parse_reader_cond("#?(:clj 1 :cljs 2)");
+        assert!(select_reader_cond(&clauses).is_none());
+    }
+
+    #[test]
+    fn reader_cond_honors_configured_features() {
+        // Keep "rust" in the set so the other tests hold regardless of the
+        // order this process-global OnceLock gets initialized in.
+        set_reader_features(["bb", "cljrsh", "rust"]);
+        let clauses = parse_reader_cond("#?(:bb 1 :rust 2)");
+        let selected = select_reader_cond(&clauses).expect("expected a match");
+        assert_eq!(selected.kind, FormKind::Int(1));
     }
 
     #[test]

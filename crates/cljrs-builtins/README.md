@@ -10,6 +10,17 @@ The default `host-dependencies` feature propagates
 must compile builtins without Clojurust's dependency and Git resolution
 subsystems. Other builtin behavior does not change.
 
+## Reader conditionals (`form::select_reader_cond`)
+
+`#?(...)`/`#?@(...)` clauses are tried **in order** (Clojure semantics: an
+earlier `:default` shadows a later platform clause) against a process-wide
+feature set. The default set is `["rust"]`; an embedding binary can widen it
+once at startup with `form::set_reader_features(["bb", "cljrsh", "rust"])`
+(`:default` always matches and is never listed). A conditional whose only
+clauses are `:clj`/`:cljs` expands to nothing on this platform; that prints a
+one-time-per-source-location warning to stderr, since it is the most common
+surprise when porting JVM/JS `.cljc` code.
+
 ## Map entries
 
 Map entries are a dedicated type, not plain 2-element vectors: seq'ing a map,
