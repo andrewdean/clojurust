@@ -253,6 +253,16 @@ pub fn form_to_value(form: &Form) -> Value {
             form_to_value(&expanded)
         }
         FormKind::TaggedLiteral(tag, inner) => match tag.as_str() {
+            "inst" => {
+                if let FormKind::Str(s) = &inner.kind {
+                    match cljrs_types::instant::parse_rfc3339_millis(s) {
+                        Ok(ms) => Value::Instant(ms),
+                        Err(_) => form_to_value(inner),
+                    }
+                } else {
+                    form_to_value(inner)
+                }
+            }
             "uuid" => {
                 if let FormKind::Str(s) = &inner.kind {
                     match uuid::Uuid::parse_str(s) {

@@ -11,9 +11,9 @@ use cljrs_value::value::{MapValue, SetValue};
 use cljrs_value::{Keyword, PersistentVector, Value};
 use nu_protocol::{Record, Span, Value as NuValue};
 
-/// Date seam: swap for `Value::Instant(millis)` when milestone A6 lands.
+/// nu dates become `#inst` instants (epoch milliseconds, UTC).
 fn date_to_value(dt: &chrono::DateTime<chrono::FixedOffset>) -> Value {
-    Value::string(dt.to_rfc3339())
+    Value::Instant(dt.timestamp_millis())
 }
 
 pub fn nu_to_clj(v: &NuValue, keywordize: bool) -> Result<Value, String> {
@@ -108,6 +108,12 @@ pub fn clj_to_nu(v: &Value) -> Result<NuValue, String> {
         Value::Keyword(k) => NuValue::string(qualified(&k.get().namespace, &k.get().name), span),
         Value::Symbol(s) => NuValue::string(qualified(&s.get().namespace, &s.get().name), span),
         Value::Uuid(u) => NuValue::string(uuid::Uuid::from_u128(*u).to_string(), span),
+        Value::Instant(ms) => NuValue::date(
+            chrono::DateTime::from_timestamp_millis(*ms)
+                .ok_or_else(|| format!("instant out of range: {ms}"))?
+                .fixed_offset(),
+            span,
+        ),
         Value::ByteArray(bytes) => NuValue::binary(
             bytes
                 .get()

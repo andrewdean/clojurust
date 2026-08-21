@@ -14,7 +14,7 @@
 - `(nu/eval code)` / `(nu/eval code {:session s :in data :keywordize? bool})` — `:in` becomes the pipeline's `$in`; records → keyword-keyed maps (`:keywordize? false` → string keys); tables → vectors of maps.
 - `(nu/session)` / `(nu/session {:cwd "..." :env {...}})` — explicit sessions are sticky (keep creation-time cwd/env) and persist `def`s/aliases/`let`s/env (incl. nu-side `cd`) across evals. The implicit default session persists state too but re-syncs cwd/env **from the process** at each eval; nu-side `cd` never changes the process cwd.
 - `(nu/parse code)` — syntax check: nil or a thrown parse error.
-- Value mapping: Filesize → bytes (Long), Duration → nanoseconds (Long), Date → RFC3339 string (single seam `convert::date_to_value`, to become `Value::Instant` with runtime milestone A6), Binary ↔ byte array, bounded ranges realize to vectors. Not convertible (throws): closures, custom values, unbounded ranges. Clojure keywords/symbols/uuids stringify going in.
+- Value mapping: Filesize → bytes (Long), Duration → nanoseconds (Long), Date ↔ `#inst` (`Value::Instant`, epoch millis), Binary ↔ byte array, bounded ranges realize to vectors. Not convertible (throws): closures, custom values, unbounded ranges. Clojure keywords/symbols/uuids stringify going in.
 - Externals (`^ls`, bare externals) run in-engine; a trailing external's output lands in the returned value. Stderr inherits the process's stderr.
 - Errors (parse and ShellError) surface as catchable exceptions with nu's rendered message.
 - Config files (`env.nu`/`config.nu`) are never loaded. Evaluation is synchronous on the calling thread.

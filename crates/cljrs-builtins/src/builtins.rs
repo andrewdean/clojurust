@@ -1496,6 +1496,10 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::system::builtin_getenv,
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
+        ("instant-now", Arity::Fixed(0), crate::time::builtin_instant_now),
+        ("instant", Arity::Fixed(1), crate::time::builtin_instant),
+        ("instant-ms", Arity::Fixed(1), crate::time::builtin_instant_ms),
+        ("instant?", Arity::Fixed(1), crate::time::builtin_instant_q),
         (
             "System/getProperty",
             Arity::Variadic { min: 1 },
@@ -7548,6 +7552,7 @@ fn value_compare_result(a: &Value, b: &Value) -> ValueResult<std::cmp::Ordering>
         ) => num_compare(a, b),
         (Value::Str(x), Value::Str(y)) => Ok(x.get().cmp(y.get())),
         (Value::Char(x), Value::Char(y)) => Ok(x.cmp(y)),
+        (Value::Instant(x), Value::Instant(y)) => Ok(x.cmp(y)),
         (Value::Keyword(x), Value::Keyword(y)) => {
             // Compare namespace first, then name (matching Clojure)
             let ns_cmp = match (&x.get().namespace, &y.get().namespace) {

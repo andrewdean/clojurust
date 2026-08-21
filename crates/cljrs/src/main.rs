@@ -1255,6 +1255,11 @@ fn format_eval_error(e: EvalError) -> miette::Report {
         }
         EvalError::Read(e) => miette::Report::from(e),
         EvalError::Recur(_) => miette::miette!("recur outside of loop/fn"),
+        // System/exit unwinds to here when a script calls it under `cljrs run`;
+        // honor it as the process exit code.
+        EvalError::Exit(code) => {
+            std::process::exit(code);
+        }
         EvalError::CommitSignatureVerificationFailed { commit, reason } => {
             miette::miette!("commit {commit:?} failed signature verification: {reason}")
         }

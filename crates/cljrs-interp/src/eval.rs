@@ -423,9 +423,16 @@ fn eval_tagged_literal(tag: &str, inner: &Form, env: &mut Env) -> EvalResult {
             }
         }
         "inst" => {
-            // TODO: implement #inst for date/time literals
             let val = eval(inner, env)?;
-            Ok(val)
+            match &val {
+                Value::Str(s) => cljrs_types::instant::parse_rfc3339_millis(s.get())
+                    .map(Value::Instant)
+                    .map_err(EvalError::Runtime),
+                _ => Err(EvalError::Runtime(format!(
+                    "#inst expects a string, got {}",
+                    val.type_name()
+                ))),
+            }
         }
         _ => Err(EvalError::Runtime(format!(
             "unknown tagged literal: #{tag}"
