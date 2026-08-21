@@ -92,6 +92,10 @@ pub fn check_native(name: &str) -> EvalResult<()> {
         "Exception.",
         "push-precision!",
         "pop-precision!",
+        "System/getenv",
+        "System/exit",
+        "System/getProperty",
+        "System/setProperty",
     ];
     if DENIED.contains(&name) {
         Err(forbidden(name))

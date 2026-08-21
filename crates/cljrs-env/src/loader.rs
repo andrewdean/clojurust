@@ -298,6 +298,8 @@ pub(crate) fn annotate(e: EvalError, ns_name: &Arc<str>) -> EvalError {
         EvalError::Read(_) => e,
         // Propagate recur unchanged (internal signal).
         EvalError::Recur(_) => e,
+        // Propagate exit unchanged (process-exit control signal).
+        EvalError::Exit(_) => e,
         // Annotate everything else with the namespace being loaded.
         other => EvalError::Runtime(format!("in {ns_name}: {other}")),
     }

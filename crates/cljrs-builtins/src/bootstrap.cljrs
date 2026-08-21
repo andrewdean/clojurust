@@ -1160,6 +1160,7 @@
 (def ^:dynamic *print-readably* true)
 (def ^:dynamic *print-length* nil)
 (def ^:dynamic *print-level* nil)
+(def ^:dynamic *command-line-args* nil)
 (def ^:dynamic *1 nil)
 (def ^:dynamic *2 nil)
 (def ^:dynamic *3 nil)

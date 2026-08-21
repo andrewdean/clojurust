@@ -1010,6 +1010,11 @@ fn eval_try(args: &[Form], env: &mut Env) -> EvalResult {
             result = Err(EvalError::GasExhausted);
             None
         }
+        // System/exit is a control signal, never a catchable condition.
+        Err(EvalError::Exit(code)) => {
+            result = Err(EvalError::Exit(code));
+            None
+        }
         Err(other) => Some(other),
     };
 
