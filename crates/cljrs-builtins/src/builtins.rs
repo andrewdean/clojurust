@@ -1325,8 +1325,8 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("pr-str", Arity::Variadic { min: 0 }, builtin_pr_str),
         ("str", Arity::Variadic { min: 0 }, builtin_str),
         ("read-string", Arity::Fixed(1), builtin_read_string),
-        ("spit", Arity::Fixed(2), builtin_spit),
-        ("slurp", Arity::Fixed(1), builtin_slurp),
+        ("spit", Arity::Variadic { min: 2 }, builtin_spit),
+        ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
         ("close", Arity::Fixed(1), builtin_close),
         // Misc
         ("gensym", Arity::Variadic { min: 0 }, builtin_gensym),
@@ -6231,6 +6231,50 @@ fn builtin_read_string(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
+/// Parse trailing `:key val ...` options (the `(slurp f :encoding "UTF-8")`
+/// convention). Only UTF-8 encodings are supported; `:append` must be a bool.
+struct IoOpts {
+    append: bool,
+}
+
+fn parse_io_opts(name: &str, opts: &[Value]) -> ValueResult<IoOpts> {
+    let mut parsed = IoOpts { append: false };
+    if opts.len() % 2 != 0 {
+        return Err(ValueError::Other(format!(
+            "{name} options must be :key value pairs"
+        )));
+    }
+    for pair in opts.chunks(2) {
+        let key = match &pair[0] {
+            Value::Keyword(k) => k.get().name.to_string(),
+            v => {
+                return Err(ValueError::Other(format!(
+                    "{name} option keys must be keywords, got {}",
+                    v.type_name()
+                )));
+            }
+        };
+        match key.as_str() {
+            "append" => parsed.append = matches!(pair[1], Value::Bool(true)),
+            "encoding" => {
+                let enc = match &pair[1] {
+                    Value::Str(s) => s.get().clone(),
+                    v => v.to_string(),
+                };
+                if !enc.eq_ignore_ascii_case("utf-8") && !enc.eq_ignore_ascii_case("utf8") {
+                    return Err(ValueError::Other(format!(
+                        "{name}: only UTF-8 encoding is supported, got {enc:?}"
+                    )));
+                }
+            }
+            other => {
+                return Err(ValueError::Other(format!("{name}: unknown option :{other}")));
+            }
+        }
+    }
+    Ok(parsed)
+}
+
 fn builtin_spit(args: &[Value]) -> ValueResult<Value> {
     let path = match &args[0] {
         Value::Str(s) => s.get().clone(),
@@ -6245,7 +6289,19 @@ fn builtin_spit(args: &[Value]) -> ValueResult<Value> {
         Value::Str(s) => s.get().clone(),
         v => v.to_string(),
     };
-    std::fs::write(&path, &content).map_err(|e| ValueError::Other(e.to_string()))?;
+    let opts = parse_io_opts("spit", &args[2..])?;
+    if opts.append {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| ValueError::Other(e.to_string()))?;
+        f.write_all(content.as_bytes())
+            .map_err(|e| ValueError::Other(e.to_string()))?;
+    } else {
+        std::fs::write(&path, &content).map_err(|e| ValueError::Other(e.to_string()))?;
+    }
     Ok(Value::Nil)
 }
 
@@ -6259,6 +6315,7 @@ fn builtin_slurp(args: &[Value]) -> ValueResult<Value> {
             });
         }
     };
+    parse_io_opts("slurp", &args[1..])?;
     let content = std::fs::read_to_string(&path).map_err(|e| ValueError::Other(e.to_string()))?;
     Ok(Value::string(content))
 }
