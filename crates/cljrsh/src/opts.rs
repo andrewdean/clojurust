@@ -173,11 +173,9 @@ fn finish(
 ) -> Opts {
     use std::io::IsTerminal;
     let program = program.unwrap_or_else(|| {
-        // A program is required for the streaming flags: with them present,
-        // stdin is data, not the program.
-        if modes.input.is_some() || modes.stream {
-            Program::Repl
-        } else if std::io::stdin().is_terminal() {
+        // With streaming flags present stdin is data, not the program, so
+        // fall back to the REPL as if on a terminal.
+        if modes.input.is_some() || modes.stream || std::io::stdin().is_terminal() {
             Program::Repl
         } else {
             Program::Stdin

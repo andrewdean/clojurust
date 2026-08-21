@@ -6239,7 +6239,7 @@ struct IoOpts {
 
 fn parse_io_opts(name: &str, opts: &[Value]) -> ValueResult<IoOpts> {
     let mut parsed = IoOpts { append: false };
-    if opts.len() % 2 != 0 {
+    if !opts.len().is_multiple_of(2) {
         return Err(ValueError::Other(format!(
             "{name} options must be :key value pairs"
         )));
