@@ -13,6 +13,7 @@ use cljrs_interop::Registry;
 
 pub mod csv;
 pub mod fs;
+pub mod hash;
 pub mod http;
 pub mod io;
 pub mod json;
@@ -54,7 +55,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     if globals.is_loaded("cljrsh.fs") {
         return;
     }
-    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv", "cljrsh.term"] {
+    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv", "cljrsh.term", "cljrsh.hash"] {
         globals.get_or_create_ns(ns);
         globals.refer_all(ns, "clojure.core");
     }
@@ -66,6 +67,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     yaml::register(&mut registry);
     csv::register(&mut registry);
     term::register(&mut registry);
+    hash::register(&mut registry);
     globals.mark_loaded("cljrsh.fs");
     globals.mark_loaded("cljrsh.json");
     globals.mark_loaded("cljrsh.io");
@@ -73,6 +75,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     globals.mark_loaded("cljrsh.yaml");
     globals.mark_loaded("cljrsh.csv");
     globals.mark_loaded("cljrsh.term");
+    globals.mark_loaded("cljrsh.hash");
 
     for (ns, src) in COMPAT_SOURCES {
         globals.register_builtin_source(ns, src);
