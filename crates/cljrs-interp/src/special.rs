@@ -224,20 +224,30 @@ fn eval_fn(args: &[Form], env: &mut Env) -> EvalResult {
         return Err(EvalError::Runtime("fn* requires params and body".into()));
     }
 
-    let arities = match &rest[0].kind {
+    // Return-type hints attach metadata to the params vector / arity clause
+    // (`(defn f ^Character [x] ...)`) — evaluation ignores them.
+    fn strip_meta(form: &Form) -> &Form {
+        match &form.kind {
+            FormKind::Meta(_, inner) => strip_meta(inner),
+            _ => form,
+        }
+    }
+
+    let head = strip_meta(&rest[0]);
+    let arities = match &head.kind {
         FormKind::Vector(_) => {
             // Single arity: (fn* [params] body...)
-            vec![parse_arity(&rest[0], &rest[1..])?]
+            vec![parse_arity(head, &rest[1..])?]
         }
         FormKind::List(_) => {
             // Multi-arity: (fn* ([params] body...) ...)
             rest.iter()
                 .map(|arity_form| {
-                    if let FormKind::List(forms) = &arity_form.kind {
+                    if let FormKind::List(forms) = &strip_meta(arity_form).kind {
                         if forms.is_empty() {
                             return Err(EvalError::Runtime("arity clause requires params".into()));
                         }
-                        parse_arity(&forms[0], &forms[1..])
+                        parse_arity(strip_meta(&forms[0]), &forms[1..])
                     } else {
                         Err(EvalError::Runtime("expected arity clause (list)".into()))
                     }

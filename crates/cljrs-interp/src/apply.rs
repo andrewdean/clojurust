@@ -328,6 +328,21 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
         Value::List(_) | Value::Cons(_) | Value::LazySeq(_) => {
             dispatch_seq_method(method, target, args)
         }
+        // Throwable interop on error values: the `(.getMessage e)` family,
+        // pervasive in catch handlers of JVM-flavored libraries.
+        Value::Error(e) => match method {
+            "getMessage" => Ok(Value::string(e.get().message())),
+            "toString" => Ok(Value::string(format!("{target}"))),
+            "getCause" => Ok(e
+                .get()
+                .cause()
+                .map(Value::Error)
+                .unwrap_or(Value::Nil)),
+            _ => Err(EvalError::Runtime(format!(
+                ".{method} not supported on type {}",
+                target.type_name()
+            ))),
+        },
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on type {}",
             target.type_name()

@@ -1504,6 +1504,43 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::system::builtin_getenv,
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
+        ("Long/parseLong", Arity::Fixed(1), crate::system::builtin_long_parse),
+        ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
+        (
+            "Double/parseDouble",
+            Arity::Fixed(1),
+            crate::system::builtin_double_parse,
+        ),
+        (
+            "Float/parseFloat",
+            Arity::Fixed(1),
+            crate::system::builtin_double_parse,
+        ),
+        (
+            "Boolean/parseBoolean",
+            Arity::Fixed(1),
+            crate::system::builtin_boolean_parse,
+        ),
+        (
+            "String/valueOf",
+            Arity::Fixed(1),
+            crate::system::builtin_string_value_of,
+        ),
+        (
+            "Character/isDigit",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_digit,
+        ),
+        (
+            "Character/isLetter",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_letter,
+        ),
+        (
+            "Character/isWhitespace",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_whitespace,
+        ),
         ("instant-now", Arity::Fixed(0), crate::time::builtin_instant_now),
         ("instant", Arity::Fixed(1), crate::time::builtin_instant),
         ("instant-ms", Arity::Fixed(1), crate::time::builtin_instant_ms),

@@ -506,6 +506,15 @@ async fn eval_call_async_inner(
     whole: &Form,
     env: &mut Env,
 ) -> EvalResult {
+    // `(.method target ...)` interop — mirror the sync eval_call routing
+    // (otherwise a top-level method call resolves `.method` as a symbol).
+    if let FormKind::Symbol(s) = &head.kind
+        && let Some(method) = s.strip_prefix('.')
+        && !method.is_empty()
+        && method != "."
+    {
+        return eval(whole, env);
+    }
     let callee = eval(head, env)?;
     match &callee {
         Value::NativeFunction(nf) if is_form_intercepted(&nf.get().name) => {
