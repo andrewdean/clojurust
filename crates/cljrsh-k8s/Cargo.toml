@@ -1,0 +1,26 @@
+[package]
+name = "cljrsh-k8s"
+version = "0.1.0"
+edition = "2024"
+description = "Data-driven Kubernetes client for cljrsh on kube-rs dynamic API: any resource (CRDs included) as Clojure maps"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cljrs-env     = { workspace = true }
+cljrs-interop = { workspace = true }
+cljrs-gc      = { workspace = true }
+cljrs-value   = { workspace = true }
+cljrsh-host   = { workspace = true }
+kube = { version = "3", default-features = false, features = ["client", "config", "rustls-tls", "ws"] }
+k8s-openapi = { version = "0.27", features = ["latest"] }
+serde_json = "1"
+http = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1.50", features = ["rt", "sync", "time", "net", "io-util", "macros"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+cljrs-interp = { workspace = true }
+cljrs-stdlib = { workspace = true }
+cljrs-reader = { workspace = true }

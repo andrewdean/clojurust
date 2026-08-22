@@ -874,3 +874,29 @@ fn aws_presign_and_anomaly() {
     let r = run(&["-e", expr], None, &[]);
     assert_eq!(r.stdout, "[true true true]\n", "stderr: {}", r.stderr);
 }
+
+// ── Built-in Kubernetes client (cljrsh-k8s, feature "k8s") ───────────────────
+
+/// Full e2e against a real cluster; set CLJRSH_K8S_TEST_CONTEXT (e.g. a k3d
+/// context) to enable. Skipped silently otherwise so CI without a cluster
+/// stays green.
+#[test]
+fn k8s_end_to_end_when_cluster_available() {
+    let Ok(context) = std::env::var("CLJRSH_K8S_TEST_CONTEXT") else {
+        eprintln!("skipping: CLJRSH_K8S_TEST_CONTEXT not set");
+        return;
+    };
+    let expr = format!(
+        "(def c (k8s/client {{:context \"{context}\"}}))
+         (k8s/apply c {{:apiVersion \"v1\" :kind \"ConfigMap\"
+                        :metadata {{:name \"cljrsh-test-cm\" :namespace \"default\"}}
+                        :data {{:k \"v\"}}}})
+         (let [got (get-in (k8s/get c :ConfigMap \"cljrsh-test-cm\" {{:namespace \"default\"}})
+                           [:data :k])
+               n (count (k8s/list c :namespaces))]
+           (k8s/delete c :ConfigMap \"cljrsh-test-cm\" {{:namespace \"default\"}})
+           [got (pos? n)])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[\"v\" true]\n", "stderr: {}", r.stderr);
+}

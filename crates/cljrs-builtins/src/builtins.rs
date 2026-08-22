@@ -1504,6 +1504,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::system::builtin_getenv,
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
+        ("Thread/sleep", Arity::Fixed(1), builtin_sleep),
         ("Long/parseLong", Arity::Fixed(1), crate::system::builtin_long_parse),
         ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
         (

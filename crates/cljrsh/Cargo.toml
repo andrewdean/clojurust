@@ -29,16 +29,20 @@ cljrsh-pods    = { workspace = true }
 cljrs-nrepl    = { workspace = true }
 cljrsh-nu      = { workspace = true, optional = true }
 cljrsh-aws     = { workspace = true, optional = true }
+cljrsh-k8s     = { workspace = true, optional = true }
+cljrs-base64   = { workspace = true }
 tokio = { version = "1.50.0", features = ["rt", "sync", "time", "macros"] }
 rustyline = { workspace = true }
 libc = "0.2"
 
 [features]
-default = ["nu", "aws"]
+default = ["nu", "aws", "k8s"]
 # Embedded nushell engine (the `nu` Clojure namespace). Off ⇒ faster builds.
 nu = ["dep:cljrsh-nu"]
 # Built-in AWS client (the `aws` namespace): S3 + awsJson services.
 aws = ["dep:cljrsh-aws"]
+# Built-in Kubernetes client (the `k8s` namespace) on kube-rs.
+k8s = ["dep:cljrsh-k8s"]
 
 [dev-dependencies]
 tempfile = "3"

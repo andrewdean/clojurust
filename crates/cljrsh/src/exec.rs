@@ -38,6 +38,12 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
     cljrsh_nu::init(&globals);
     #[cfg(feature = "aws")]
     cljrsh_aws::init(&globals);
+    cljrs_base64::init(&globals);
+    #[cfg(feature = "k8s")]
+    {
+        cljrsh_k8s::init(&globals);
+        cljrs_async::load_source(&globals, "k8s", cljrsh_k8s::K8S_SUGAR);
+    }
 
     cljrs_builtins::system::set_command_line_args(&globals, args);
     globals
