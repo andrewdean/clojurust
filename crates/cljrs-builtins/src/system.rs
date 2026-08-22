@@ -192,7 +192,17 @@ fn str_arg0<'a>(args: &'a [Value], who: &str) -> Result<&'a str, ValueError> {
 
 pub(crate) fn builtin_long_parse(args: &[Value]) -> ValueResult<Value> {
     let s = str_arg0(args, "Long/parseLong")?;
-    s.parse::<i64>()
+    // Optional radix arg, like Java's (Long/parseLong s radix).
+    let radix = match args.get(1) {
+        None => 10,
+        Some(Value::Long(r)) if (2..=36).contains(r) => *r as u32,
+        Some(other) => {
+            return Err(ValueError::Other(format!(
+                "Long/parseLong radix must be an integer in 2..36, got {other}"
+            )));
+        }
+    };
+    i64::from_str_radix(&s, radix)
         .map(Value::Long)
         .map_err(|e| ValueError::Other(format!("For input string: {s:?}: {e}")))
 }

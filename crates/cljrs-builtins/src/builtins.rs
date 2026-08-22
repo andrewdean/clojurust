@@ -1507,7 +1507,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
         ("Thread/sleep", Arity::Fixed(1), builtin_sleep),
-        ("Long/parseLong", Arity::Fixed(1), crate::system::builtin_long_parse),
+        ("Long/parseLong", Arity::Variadic { min: 1 }, crate::system::builtin_long_parse),
         ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
         (
             "Double/parseDouble",
