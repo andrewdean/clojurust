@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod apply;
 pub mod arity;
 pub mod destructure;
+pub mod trace;
 pub mod eval;
 pub mod macros;
 pub mod special;

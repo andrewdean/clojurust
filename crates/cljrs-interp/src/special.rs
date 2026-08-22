@@ -1026,6 +1026,9 @@ fn eval_try(args: &[Form], env: &mut Env) -> EvalResult {
         let mut handled = false;
         for c in &catches {
             if catch_type_matches(c.type_sym, &thrown_val) {
+                // The condition is handled: its recorded call trace no longer
+                // describes an escaping error.
+                crate::trace::clear_error_trace();
                 env.push_frame();
                 env.bind(Arc::from(c.binding), thrown_val.clone());
                 result = eval_body(c.body, env);

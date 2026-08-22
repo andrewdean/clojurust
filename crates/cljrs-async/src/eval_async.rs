@@ -347,6 +347,7 @@ async fn eval_try_async(args: &[Form], env: &mut Env) -> EvalResult {
         let mut handled = false;
         for c in &catches {
             if cljrs_interp::special::catch_type_matches(c.type_sym, &thrown_val) {
+                cljrs_interp::trace::clear_error_trace();
                 env.push_frame();
                 env.bind(std::sync::Arc::from(c.binding), thrown_val.clone());
                 result = eval_body_async(c.body, env).await;
@@ -482,6 +483,29 @@ async fn eval_loop_async(args: &[Form], env: &mut Env) -> EvalResult {
 /// special spreading/atom handling those builtins require. Such calls do not
 /// yield on awaits inside their arguments in Phase B.
 async fn eval_call_async(head: &Form, args: &[Form], whole: &Form, env: &mut Env) -> EvalResult {
+    // Mirror the sync eval_call's error-trace frame (crate cljrs-interp).
+    let frame_name = match &head.kind {
+        FormKind::Symbol(s) => s.clone(),
+        _ => "<anonymous>".to_string(),
+    };
+    let _frame = cljrs_interp::trace::FrameGuard::push(
+        frame_name,
+        env.current_ns.clone(),
+        head.span.clone(),
+    );
+    let result = eval_call_async_inner(head, args, whole, env).await;
+    if matches!(&result, Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_))) {
+        cljrs_interp::trace::record_error_trace();
+    }
+    result
+}
+
+async fn eval_call_async_inner(
+    head: &Form,
+    args: &[Form],
+    whole: &Form,
+    env: &mut Env,
+) -> EvalResult {
     let callee = eval(head, env)?;
     match &callee {
         Value::NativeFunction(nf) if is_form_intercepted(&nf.get().name) => {

@@ -181,6 +181,29 @@ impl Thunk for ClosureThunk {
 /// - The `swap!` function (needs env to call the function).
 /// - Regular function calls.
 pub fn eval_call(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalResult {
+    // Call-stack frame for error reports (crate::trace). Named after the
+    // callee as written; the guard pops on every exit path.
+    let name = match &func_form.kind {
+        FormKind::Symbol(s) => s.clone(),
+        _ => "<anonymous>".to_string(),
+    };
+    let _frame = crate::trace::FrameGuard::push(
+        name,
+        env.current_ns.clone(),
+        func_form.span.clone(),
+    );
+    let result = eval_call_inner(func_form, arg_forms, env);
+    // Control-flow signals (recur, exit) are not error conditions.
+    if matches!(
+        &result,
+        Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_))
+    ) {
+        crate::trace::record_error_trace();
+    }
+    result
+}
+
+fn eval_call_inner(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalResult {
     // Interop: (.methodName target args...) — method call syntax.
     if let FormKind::Symbol(s) = &func_form.kind
         && let Some(method) = s.strip_prefix('.')

@@ -701,3 +701,60 @@ fn nrepl_server_clone_and_eval() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+// ── Error reports (milestone A8) ─────────────────────────────────────────────
+
+#[test]
+fn error_report_has_type_data_location_and_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("boom.clj");
+    std::fs::write(
+        &path,
+        "(defn inner [x]\n  (throw (ex-info \"kaboom\" {:k x})))\n(defn outer []\n  (inner 7))\n(outer)\n",
+    )
+    .unwrap();
+    let r = run(&[path.to_str().unwrap()], None, &[]);
+    assert_eq!(r.code, 1);
+    let err = &r.stderr;
+    assert!(err.contains("Type:     clojure.lang.ExceptionInfo"), "{err}");
+    assert!(err.contains("Message:  kaboom"), "{err}");
+    assert!(err.contains("Data:     {:k 7}"), "{err}");
+    assert!(err.contains("boom.clj:4:4"), "location: {err}");
+    assert!(err.contains("^--- kaboom"), "caret: {err}");
+    // Innermost first.
+    let inner_pos = err.find("user/inner").expect("inner frame");
+    let outer_pos = err.find("user/outer").expect("outer frame");
+    assert!(inner_pos < outer_pos, "{err}");
+}
+
+#[test]
+fn caught_error_does_not_pollute_later_trace() {
+    let r = run(
+        &[
+            "-e",
+            "(defn safe [] (try (throw (ex-info \"handled\" {})) (catch Exception e :ok)))
+             (safe)
+             (defn fails [] (nth [1 2] 9))
+             (fails)",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.code, 1);
+    assert!(r.stderr.contains("user/fails"), "{}", r.stderr);
+    assert!(!r.stderr.contains("user/safe"), "{}", r.stderr);
+    // The context snippet may show source containing "handled"; the reported
+    // error itself must not be the caught one.
+    assert!(!r.stderr.contains("Message:  handled"), "{}", r.stderr);
+}
+
+#[test]
+fn unbound_symbol_report() {
+    let r = run(&["-e", "(defn f [] (no-such-fn 1)) (f)"], None, &[]);
+    assert!(
+        r.stderr.contains("Unable to resolve symbol: no-such-fn"),
+        "{}",
+        r.stderr
+    );
+    assert!(r.stderr.contains("user/f"), "{}", r.stderr);
+}

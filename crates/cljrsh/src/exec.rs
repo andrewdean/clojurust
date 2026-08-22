@@ -195,6 +195,7 @@ pub fn strip_shebang(src: &str) -> &str {
 /// Parse and evaluate every form of `src` in `env`, driving each top-level
 /// form on the shared LocalSet so async tasks make progress.
 pub fn eval_str(env: &mut Env, src: &str, filename: &str) -> Result<Value, ExecError> {
+    crate::error::register_source(filename, src);
     let mut parser = cljrs_reader::Parser::new(src.to_string(), filename.to_string());
     let forms = parser.parse_all().map_err(ExecError::Read)?;
     // Resolve top-level reader conditionals (nested ones are handled during
@@ -244,11 +245,11 @@ pub fn report_error(e: ExecError) -> i32 {
                 }
                 return code;
             }
-            eprintln!("cljrsh: unhandled exception: {val}");
+            crate::error::report(&EvalError::Thrown(val));
             1
         }
         ExecError::Eval(other) => {
-            eprintln!("cljrsh: {other}");
+            crate::error::report(&other);
             1
         }
     }

@@ -10,6 +10,7 @@
 //! real Rust stack) alongside a current-thread Tokio runtime + LocalSet that
 //! drives async tasks per top-level form (the `crates/cljrs` idiom).
 
+mod error;
 mod exec;
 mod opts;
 mod repl;
