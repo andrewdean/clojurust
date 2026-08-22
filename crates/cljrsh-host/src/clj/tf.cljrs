@@ -140,3 +140,30 @@
   (-> (run! dir ["output" "-json" "-no-color"])
       :out
       (cljrsh.json/parse-string true)))
+
+(defn plan-json!
+  "Plan and return the full plan as data (the show -json schema):
+  {:resource_changes [{:address ... :change {:actions [...] ...}} ...] ...}.
+  Perfect for policy checks in plain Clojure over :resource_changes."
+  ([dir] (plan-json! dir {}))
+  ([dir {:keys [vars]}]
+   (run! dir (concat ["plan" "-input=false" "-no-color" "-out=cljrsh.tfplan"]
+                     (mapcat (fn [[k v]] ["-var" (str (named k) "=" v)]) vars)))
+   (let [res (run! dir ["show" "-json" "cljrsh.tfplan"])]
+     (cljrsh.fs/delete (str dir "/cljrsh.tfplan"))
+     (cljrsh.json/parse-string (:out res) true))))
+
+(defn changes
+  "Summarize a plan: {:create [addr...] :update [...] :delete [...] :replace [...]}."
+  [plan]
+  (reduce (fn [acc rc]
+            (let [actions (set (get-in rc [:change :actions]))
+                  addr (:address rc)]
+              (cond
+                (and (actions "create") (actions "delete")) (update acc :replace conj addr)
+                (actions "create") (update acc :create conj addr)
+                (actions "delete") (update acc :delete conj addr)
+                (actions "update") (update acc :update conj addr)
+                :else acc)))
+          {:create [] :update [] :delete [] :replace []}
+          (:resource_changes plan)))
