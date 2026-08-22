@@ -1,0 +1,72 @@
+;; cljrsh.process — the primary subprocess API (babashka.process is a
+;; compatibility shim over this namespace).
+;;
+;; `sh` and `shell` are the two entry points nearly all scripts use, plus
+;; `process` returning a live handle, `check`, and `destroy`. Handles are
+;; ChildProcess native objects (see cljrs.process for the low-level surface).
+(ns cljrsh.process
+  (:require [clojure.string] [cljrs.process]))
+
+(defn tokenize
+  "Split a command string on whitespace (naive; no quote handling yet)."
+  [s]
+  (vec (remove clojure.string/blank? (clojure.string/split s #"\s+"))))
+
+(defn- normalize-cmd [args]
+  (let [args (vec args)]
+    (cond
+      (and (= 1 (count args)) (string? (first args))
+           (clojure.string/includes? (first args) " "))
+      (tokenize (first args))
+      (and (= 1 (count args)) (vector? (first args)))
+      (first args)
+      :else (mapv str args))))
+
+(defn sh
+  "Run to completion, capturing output: {:exit N :out s :err s}.
+  (sh \"ls\" \"-la\") or (sh \"ls -la\") or (sh [\"ls\" \"-la\"])."
+  [& args]
+  (let [[opts args] (if (map? (first args))
+                      [(first args) (rest args)]
+                      [{} args])
+        cmd (normalize-cmd args)
+        p (cljrs.process/spawn cmd (select-keys opts [:dir :env :extra-env :in]))]
+    (cljrs.process/wait p)))
+
+(defn shell
+  "Like babashka.process/shell: inherits stdio, throws on non-zero exit.
+  Returns {:exit 0 ...} on success."
+  [& args]
+  (let [[opts args] (if (map? (first args))
+                      [(first args) (rest args)]
+                      [{} args])
+        cmd (normalize-cmd args)
+        spawn-opts (merge {:out :inherit :err :inherit :in :inherit}
+                          (select-keys opts [:dir :env :extra-env :in :out :err]))
+        p (cljrs.process/spawn cmd spawn-opts)
+        res (cljrs.process/wait p)]
+    (if (and (not (:continue opts)) (not= 0 (:exit res)))
+      (throw (ex-info (str "shell failed with exit " (:exit res) ": "
+                           (clojure.string/join " " cmd))
+                      (assoc res :babashka/exit (:exit res))))
+      res)))
+
+(defn process
+  "Start a child process and return its handle (see cljrs.process)."
+  ([cmd] (process cmd {}))
+  ([cmd opts]
+   (cljrs.process/spawn (normalize-cmd [cmd])
+                        (select-keys opts [:dir :env :extra-env :in :out :err]))))
+
+(def wait cljrs.process/wait)
+(def alive? cljrs.process/alive?)
+(def destroy cljrs.process/destroy)
+(def destroy-tree cljrs.process/destroy) ; divergence: kills the child only
+
+(defn check
+  "Wait for the process; throw if exit is non-zero, else return the result."
+  [p]
+  (let [res (cljrs.process/wait p)]
+    (if (not= 0 (:exit res))
+      (throw (ex-info (str "process failed with exit " (:exit res)) res))
+      res)))
