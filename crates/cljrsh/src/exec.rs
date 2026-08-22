@@ -218,10 +218,20 @@ pub fn eval_str(env: &mut Env, src: &str, filename: &str) -> Result<Value, ExecE
 }
 
 /// Evaluate one form, driven on the shared LocalSet when available.
+/// CLJRSH_GAS=<credits> caps evaluation steps per top-level form — runaway
+/// recursion then reports GasExhausted with a Clojure stack trace instead of
+/// dying in a native stack overflow.
 pub fn eval_form(form: &cljrs_reader::Form, env: &mut Env) -> Result<Value, EvalError> {
-    crate::with_driver(|drv| match drv {
-        Some((rt, local)) => local.block_on(rt, cljrs_async::eval_async::eval_async(form, env)),
-        None => cljrs_interp::eval::eval(form, env),
+    let gas: Option<u64> = std::env::var("CLJRSH_GAS").ok().and_then(|v| v.parse().ok());
+    crate::with_driver(|drv| match (drv, gas) {
+        (Some((rt, local)), _) => {
+            let _guard = gas.map(|g| {
+                cljrs_env::gas::GasGuard::install(cljrs_env::gas::GasMeter::new(g))
+            });
+            local.block_on(rt, cljrs_async::eval_async::eval_async(form, env))
+        }
+        (None, Some(g)) => cljrs_interp::eval::eval_with_gas(form, env, g),
+        (None, None) => cljrs_interp::eval::eval(form, env),
     })
 }
 

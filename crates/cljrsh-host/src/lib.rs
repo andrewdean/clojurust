@@ -26,6 +26,7 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     // require; the babashka.* entries below are compatibility shims over
     // them).
     ("cljrsh.process", include_str!("clj/cljrsh/process.cljrs")),
+    ("borkdude.dynaload", include_str!("clj/borkdude/dynaload.cljrs")),
     ("cljrsh.wait", include_str!("clj/cljrsh/wait.cljrs")),
     ("cljrsh.http", include_str!("clj/cljrsh/http.cljrs")),
     // Vendored from org.babashka/cli 0.8.65 (EPL-1.0, github.com/babashka/cli)

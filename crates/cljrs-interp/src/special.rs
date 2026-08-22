@@ -53,6 +53,9 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "defmulti" => eval_defmulti(args, env),
         "defmethod" => eval_defmethod(args, env),
         "defrecord" => eval_defrecord(args, env),
+        // deftype: same type-tag machinery as defrecord (no map behavior
+        // distinction in this runtime; fields may carry ^long/^:private meta).
+        "deftype" => eval_defrecord(args, env),
         "reify" => eval_reify(args, env),
         "load-file" => eval_load_file(args, env),
         "binding" => eval_binding(args, env),
@@ -90,6 +93,10 @@ fn eval_def(args: &[Form], env: &mut Env) -> EvalResult {
         .globals
         .intern(&env.current_ns, Arc::from(name.as_str()), val.clone());
     let meta = merge_meta(meta_opt, docstring.as_deref().map(doc_meta));
+    let meta = merge_meta(
+        name_ns_meta(name.as_str(), &env.current_ns),
+        meta,
+    );
     if let Some(meta_val) = meta {
         var.get().set_meta(meta_val);
     }
@@ -108,6 +115,21 @@ fn doc_meta(doc: &str) -> Value {
 /// `Value::Fn`/`Value::Macro`'s parsed arities. `skip` elides leading fixed
 /// params that aren't part of the public signature (defmacro's implicit
 /// `&form`/`&env`).
+/// `{:name sym :ns ns-sym}` — identity metadata JVM vars always carry
+/// (libraries key registries on `(-> #'v meta :name)`; malli does).
+fn name_ns_meta(name: &str, ns: &str) -> Option<Value> {
+    Some(Value::Map(cljrs_value::MapValue::from_pairs(vec![
+        (
+            Value::keyword(Keyword::parse("name")),
+            Value::symbol(cljrs_value::Symbol::simple(name)),
+        ),
+        (
+            Value::keyword(Keyword::parse("ns")),
+            Value::symbol(cljrs_value::Symbol::simple(ns)),
+        ),
+    ])))
+}
+
 fn arglists_meta(fn_val: &Value, skip: usize) -> Option<Value> {
     let arities = match fn_val {
         Value::Fn(f) => &f.get().arities,
@@ -1174,6 +1196,7 @@ pub fn eval_defn(args: &[Form], env: &mut Env) -> EvalResult {
         meta = merge_meta(meta, Some(doc_meta(doc)));
     }
     meta = merge_meta(meta, arglists_meta(&fn_val, 0));
+    meta = merge_meta(name_ns_meta(name.as_str(), &env.current_ns), meta);
     if let Some(meta_val) = meta {
         var.get().set_meta(meta_val);
     }
@@ -1281,6 +1304,7 @@ fn eval_defmacro(args: &[Form], env: &mut Env) -> EvalResult {
     }
     // Skip the implicit &form/&env params when showing the macro's signature.
     meta = merge_meta(meta, arglists_meta(&macro_val, 2));
+    meta = merge_meta(name_ns_meta(name.as_str(), &env.current_ns), meta);
     if let Some(m) = meta {
         var.get().set_meta(m);
     }
@@ -2258,11 +2282,18 @@ fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
     let field_names: Vec<Arc<str>> = match &args[1].kind {
         FormKind::Vector(fields) => fields
             .iter()
-            .map(|f| match &f.kind {
-                FormKind::Symbol(s) => Ok(Arc::from(s.as_str())),
-                _ => Err(EvalError::Runtime(
-                    "defrecord field names must be symbols".into(),
-                )),
+            .map(|f| {
+                // Peel type/visibility hints: [^long hash ^:private f].
+                let mut f = f;
+                while let FormKind::Meta(_, inner) = &f.kind {
+                    f = inner;
+                }
+                match &f.kind {
+                    FormKind::Symbol(s) => Ok(Arc::from(s.as_str())),
+                    _ => Err(EvalError::Runtime(
+                        "defrecord field names must be symbols".into(),
+                    )),
+                }
             })
             .collect::<EvalResult<_>>()?,
         _ => {

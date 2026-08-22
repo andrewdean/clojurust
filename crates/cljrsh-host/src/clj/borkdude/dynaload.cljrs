@@ -1,0 +1,21 @@
+;; cljrsh-provided borkdude.dynaload (shadows the jar version, which reifies
+;; the JVM interface clojure.lang.IDeref). babashka ships its own dynaload
+;; for the same reason. Contract: (dynaload 'ns/sym opts) returns a deref-able
+;; that resolves the var on first deref, or yields :default / throws.
+(ns borkdude.dynaload)
+
+(defn dynaload
+  ([sym] (dynaload sym {}))
+  ([sym opts]
+   (delay
+     (let [ns-sym (symbol (namespace sym))
+           resolved (try
+                      (require ns-sym)
+                      (resolve sym)
+                      (catch Exception _ nil))]
+       (cond
+         (some? resolved) @resolved
+         (contains? opts :default) (:default opts)
+         :else (throw (ex-info (str "Var " sym " does not exist, "
+                                    (namespace sym) " never required")
+                               {:sym sym})))))))

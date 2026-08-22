@@ -322,6 +322,11 @@ fn eval_method_call(method: &str, arg_forms: &[Form], env: &mut Env) -> EvalResu
 /// `CallDirect` instructions here (see `dispatch_sentinel_by_name` in
 /// cljrs-eval) and behave exactly like the tree-walker's interop path.
 pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResult {
+    // (.iterator coll) — Java-style iteration in portable .cljc :clj branches.
+    if method == "iterator" && !matches!(target, Value::NativeObject(_)) {
+        return cljrs_builtins::javamap::iterator_of(target)
+            .map_err(|e| EvalError::Runtime(e.to_string()));
+    }
     match target {
         Value::Str(s) => dispatch_string_method(method, s.get(), args),
         Value::Vector(v) => dispatch_vector_method(method, v, args),
@@ -343,6 +348,15 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
                 target.type_name()
             ))),
         },
+        Value::NativeObject(obj) => {
+            if let Some(r) = cljrs_builtins::javamap::dispatch_any(obj.get(), method, args) {
+                return r.map_err(|e| EvalError::Runtime(e.to_string()));
+            }
+            Err(EvalError::Runtime(format!(
+                ".{method} not supported on native object {}",
+                obj.get().type_tag()
+            )))
+        }
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on type {}",
             target.type_name()
@@ -460,6 +474,19 @@ fn dispatch_vector_method(
     args: &[Value],
 ) -> EvalResult {
     match method {
+        // (.nth v i) / (.count v) — IPersistentVector interop in portable
+        // .cljc :clj branches (malli's schema parser).
+        "nth" => {
+            let idx = match args.first() {
+                Some(Value::Long(i)) => *i as usize,
+                _ => return Err(EvalError::Runtime(".nth requires an integer index".into())),
+            };
+            v.get()
+                .nth(idx)
+                .cloned()
+                .ok_or_else(|| EvalError::Runtime(format!(".nth index {idx} out of bounds")))
+        }
+        "count" => Ok(Value::Long(v.get().count() as i64)),
         "indexOf" => {
             let needle = args
                 .first()
@@ -562,15 +589,17 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
         // Bind params.
         bind_fn_params(arity, &current_args, &mut env)?;
 
-        // Self-reference for named functions: use self_ptr when available so
-        // the binding is pointer-equal to the outer Value::Fn holding this fn.
-        if let Some(ref name) = f.name {
-            let self_val = if let Some(ref p) = f.self_ptr {
-                Value::Fn(p.clone())
-            } else {
-                Value::Fn(GcPtr::new(f.clone()))
-            };
-            env.bind(name.clone(), self_val);
+        // Self-reference for named functions: bind only when self_ptr was
+        // wired (eval_fn does this for (fn name ...) / defn). Protocol METHOD
+        // fns carry a name for stack traces but must NOT self-bind — inside a
+        // reify/defrecord method the method's own name refers to the protocol
+        // dispatch fn (JVM semantics); self-binding sent every same-name
+        // protocol call back into the same method body (infinite recursion in
+        // malli's composite registry).
+        if let Some(ref name) = f.name
+            && let Some(ref p) = f.self_ptr
+        {
+            env.bind(name.clone(), Value::Fn(p.clone()));
         }
 
         // Eval body, catching Recur.

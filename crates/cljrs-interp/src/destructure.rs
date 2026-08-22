@@ -128,6 +128,7 @@ pub fn value_to_seq_vec(val: &Value) -> Vec<Value> {
         }
         Value::List(l) => l.get().iter().cloned().collect(),
         Value::Vector(v) => v.get().iter().cloned().collect(),
+        Value::ObjectArray(a) => a.get().0.lock().unwrap().clone(),
         Value::Set(s) => s.iter().cloned().collect(),
         Value::Map(m) => {
             let mut result = Vec::new();

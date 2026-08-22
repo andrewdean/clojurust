@@ -306,12 +306,25 @@ pub fn is_jvm_class_name(s: &str) -> bool {
     {
         return true;
     }
+    // General dotted class-name convention: last segment capitalized, at
+    // least one dot (malli.core.Schema, my.ns.RecordType). Only reached
+    // after var lookup fails, so this cannot shadow real bindings.
+    if let Some((_, last)) = s.rsplit_once('.')
+        && !last.is_empty()
+        && last.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    {
+        return true;
+    }
     // Bare capitalized names with no dots (Exception, Throwable, String, ...)
     !s.contains('.')
         && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
         && matches!(
             s,
             "Exception"
+                | "Pattern"
+                | "HashMap"
+                | "Map"
                 | "Throwable"
                 | "Error"
                 | "ExceptionInfo"
