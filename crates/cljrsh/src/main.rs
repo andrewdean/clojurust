@@ -177,6 +177,7 @@ fn run(opts: Opts) -> i32 {
             }
             match name.as_str() {
                 "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
+                "describe" => describe(),
                 "tasks" => match &project {
                     Some(project) => tasks::list(project),
                     None => {
@@ -225,6 +226,29 @@ fn run(opts: Opts) -> i32 {
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),
     }
+}
+
+/// `cljrsh describe` — machine-readable runtime info, bb-style EDN.
+fn describe() -> i32 {
+    println!(
+        "{{:cljrsh/version {:?}
+ :babashka/protocol-compat true
+ :feature/reader-conds [:bb :cljrsh :clj :rust]
+ :feature/nu {nu}
+ :feature/aws {aws}
+ :feature/k8s {k8s}
+ :feature/pods true
+ :feature/nrepl true
+ :os/name {:?}
+ :os/arch {:?}}}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        nu = cfg!(feature = "nu"),
+        aws = cfg!(feature = "aws"),
+        k8s = cfg!(feature = "k8s"),
+    );
+    0
 }
 
 /// `cljrsh nrepl-server [addr]` — addr as `PORT` or `HOST:PORT`; default
