@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use cljrs_reader::{Form, FormKind};
 
 pub mod maven;
+pub mod pods;
 
 /// A parsed project file.
 #[derive(Debug)]
@@ -33,6 +34,8 @@ pub struct Project {
     pub tasks: Vec<TaskDef>,
     /// `:tasks`' `:init` form, evaluated once before any task body.
     pub init: Option<Form>,
+    /// `:pods` — registry pods to load before evaluation: (name, version).
+    pub pods: Vec<(String, String)>,
 }
 
 /// A `:deps` coordinate.
@@ -124,6 +127,7 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
         deps: Vec::new(),
         tasks: Vec::new(),
         init: None,
+        pods: Vec::new(),
     };
 
     for pair in entries.chunks(2) {
@@ -152,11 +156,48 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
             FormKind::Keyword(key) if key == "deps" => {
                 parse_deps(v, &mut project)?;
             }
-            // :deps, :pods — later milestones; ignore unknown keys like bb.
+            FormKind::Keyword(key) if key == "pods" => {
+                parse_pods(v, &mut project)?;
+            }
+            // Ignore unknown keys, like bb.
             _ => {}
         }
     }
     Ok(project)
+}
+
+/// `:pods {org.babashka/go-sqlite3 {:version "0.1.0"}}`
+fn parse_pods(pods_form: &Form, project: &mut Project) -> Result<(), ProjectError> {
+    let FormKind::Map(entries) = &pods_form.kind else {
+        return Err(ProjectError::Shape(":pods must be a map".to_string()));
+    };
+    for pair in entries.chunks(2) {
+        let [k, v] = pair else {
+            return Err(ProjectError::Shape(":pods has an odd entry".to_string()));
+        };
+        let FormKind::Symbol(name) = &k.kind else {
+            return Err(ProjectError::Shape(
+                ":pods keys must be qualified symbols".to_string(),
+            ));
+        };
+        let FormKind::Map(coord) = &v.kind else {
+            return Err(ProjectError::Shape(format!(
+                "pod {name}: coordinate must be a map with :version"
+            )));
+        };
+        let version = coord
+            .chunks(2)
+            .find(|p| matches!(&p[0].kind, FormKind::Keyword(key) if key == "version"))
+            .and_then(|p| match &p[1].kind {
+                FormKind::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                ProjectError::Shape(format!("pod {name}: missing :version string"))
+            })?;
+        project.pods.push((name.clone(), version));
+    }
+    Ok(())
 }
 
 fn parse_deps(deps_form: &Form, project: &mut Project) -> Result<(), ProjectError> {

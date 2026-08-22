@@ -131,6 +131,24 @@ pub fn load_project(globals: &Arc<GlobalEnv>) -> Option<Project> {
                     Err(e) => eprintln!("cljrsh: warning: dependency resolution failed: {e}"),
                 }
             }
+            // :pods — registry pods, resolved (downloading on first use) and
+            // loaded before any evaluation so their namespaces are requirable.
+            for (name, version) in &project.pods {
+                let loaded = cljrsh_project::pods::ensure_registry_pod(
+                    name,
+                    version,
+                    &dep_cache_dir(),
+                )
+                .and_then(|exe| {
+                    cljrsh_pods::load_registry_pod(
+                        globals,
+                        &exe.to_string_lossy(),
+                    )
+                });
+                if let Err(e) = loaded {
+                    eprintln!("cljrsh: warning: pod {name} {version}: {e}");
+                }
+            }
             Some(project)
         }
         Err(e @ ProjectError::Parse(_)) | Err(e @ ProjectError::Shape(_)) => {
