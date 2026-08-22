@@ -260,10 +260,17 @@ fn nrepl(globals: &std::sync::Arc<cljrs_env::env::GlobalEnv>, addr: Option<&str>
         Some(a) if a.contains(':') => a.to_string(),
         Some(port) => format!("127.0.0.1:{port}"),
     };
-    let addr: std::net::SocketAddr = match addr.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("cljrsh: bad nREPL address {addr:?}: {e}");
+    // Resolve hostnames too — editors ask for "localhost:0" (CIDER's
+    // default babashka jack-in parameters). Prefer IPv4 (like babashka):
+    // clients dial 127.0.0.1.
+    use std::net::ToSocketAddrs as _;
+    let addr: std::net::SocketAddr = match addr.to_socket_addrs().ok().and_then(|resolved| {
+        let all: Vec<_> = resolved.collect();
+        all.iter().find(|a| a.is_ipv4()).copied().or_else(|| all.first().copied())
+    }) {
+        Some(a) => a,
+        None => {
+            eprintln!("cljrsh: bad nREPL address {addr:?}");
             return 2;
         }
     };
