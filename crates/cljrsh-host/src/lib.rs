@@ -43,6 +43,7 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "clojure.java.shell",
         include_str!("clj/clojure/java/shell.cljrs"),
     ),
+    ("clojure.java.io", include_str!("clj/clojure/java/io.cljrs")),
 ];
 
 /// Register every native namespace and compat source into `globals`.

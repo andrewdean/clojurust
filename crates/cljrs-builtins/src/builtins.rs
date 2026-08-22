@@ -1555,6 +1555,11 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::system::builtin_get_property,
         ),
         (
+            "System/getProperties",
+            Arity::Fixed(0),
+            crate::system::builtin_get_properties,
+        ),
+        (
             "System/setProperty",
             Arity::Fixed(2),
             crate::system::builtin_set_property,
@@ -6399,6 +6404,12 @@ fn builtin_spit(args: &[Value]) -> ValueResult<Value> {
 }
 
 fn builtin_slurp(args: &[Value]) -> ValueResult<Value> {
+    // Byte arrays decode directly (UTF-8) — the pod convention for stream
+    // payloads (S3 :Body and friends).
+    if let Value::ByteArray(bytes) = &args[0] {
+        let raw: Vec<u8> = bytes.get().lock().unwrap().iter().map(|&b| b as u8).collect();
+        return Ok(Value::string(String::from_utf8_lossy(&raw).into_owned()));
+    }
     let path = match &args[0] {
         Value::Str(s) => s.get().clone(),
         v => {
