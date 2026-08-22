@@ -608,3 +608,96 @@ fn pods_end_to_end_through_binary() {
         r.stderr
     );
 }
+
+// ── nREPL server (milestone B-M5) ────────────────────────────────────────────
+
+#[test]
+fn nrepl_server_clone_and_eval() {
+    use cljrs_bencode::{Bencode, decode, encode_to_vec};
+    use std::io::{Read as _, Write as _};
+
+    // Port 0 → OS-assigned; read the actual port from stdout.
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = cljrsh()
+        .args(["nrepl-server", "0"])
+        .current_dir(dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    {
+        use std::io::BufRead as _;
+        let mut reader = std::io::BufReader::new(child.stdout.as_mut().unwrap());
+        reader.read_line(&mut line).unwrap();
+    }
+    let port: u16 = line
+        .split("port ")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|p| p.parse().ok())
+        .expect("port in banner");
+
+    let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut read_msg = |sock: &mut std::net::TcpStream, buf: &mut Vec<u8>| -> Bencode {
+        loop {
+            if let Ok(Some((msg, used))) = decode(buf) {
+                buf.drain(..used);
+                return msg;
+            }
+            let mut chunk = [0u8; 4096];
+            let n = sock.read(&mut chunk).expect("nrepl read");
+            assert!(n > 0, "nrepl closed");
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    };
+    let dict = |entries: Vec<(&str, &str)>| {
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in entries {
+            m.insert(k.as_bytes().to_vec(), Bencode::str(v));
+        }
+        Bencode::Dict(m)
+    };
+    let get = |m: &Bencode, k: &str| -> Option<String> {
+        m.as_dict()?
+            .get(k.as_bytes())
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
+
+    sock.write_all(&encode_to_vec(&dict(vec![("op", "clone"), ("id", "1")])))
+        .unwrap();
+    let session = loop {
+        let m = read_msg(&mut sock, &mut buf);
+        if let Some(s) = get(&m, "new-session") {
+            break s;
+        }
+    };
+
+    sock.write_all(&encode_to_vec(&dict(vec![
+        ("op", "eval"),
+        ("code", "(reduce + (range 101))"),
+        ("id", "2"),
+        ("session", &session),
+    ])))
+    .unwrap();
+    let mut value = None;
+    loop {
+        let m = read_msg(&mut sock, &mut buf);
+        if let Some(v) = get(&m, "value") {
+            value = Some(v);
+        }
+        if let Some(Bencode::List(status)) = m.as_dict().and_then(|d| d.get(b"status".as_ref()))
+            && status.iter().any(|s| s.as_str() == Some("done"))
+        {
+            break;
+        }
+    }
+    assert_eq!(value.as_deref(), Some("5050"));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}

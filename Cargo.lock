@@ -1616,12 +1616,14 @@ name = "cljrsh"
 version = "0.1.0"
 dependencies = [
  "cljrs-async",
+ "cljrs-bencode",
  "cljrs-builtins",
  "cljrs-charset",
  "cljrs-env",
  "cljrs-gc",
  "cljrs-interp",
  "cljrs-io",
+ "cljrs-nrepl",
  "cljrs-process",
  "cljrs-reader",
  "cljrs-stdlib",
