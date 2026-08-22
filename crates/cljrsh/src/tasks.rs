@@ -18,6 +18,8 @@ const TASK_PRELUDE: &str = "
 (def sh babashka.process/sh)
 (defn clojure [& _]
   (throw (ex-info \"babashka.tasks/clojure requires a JVM; cljrsh has none\" {})))
+(def ^:dynamic *current-task* nil)
+(defn current-task [] *current-task*)
 ";
 
 /// List tasks bb-style. Returns the process exit code.
@@ -61,7 +63,22 @@ pub fn run(globals: &Arc<GlobalEnv>, project: &Project, target: &str) -> i32 {
         return crate::exec::report_error(e);
     }
 
+    if let Err(e) = eval_requires(&project.requires, &mut env) {
+        return crate::exec::report_error(e);
+    }
+
     for task in order {
+        if let Err(e) = eval_requires(&task.requires, &mut env) {
+            return crate::exec::report_error(e);
+        }
+        // (current-task) → this task's map, for :enter/:leave/body.
+        globals.intern("user", Arc::from("*current-task*"), task_map(task));
+        // Task-local :enter/:leave override the :tasks-level hooks.
+        if let Some(enter) = task.enter.as_ref().or(project.enter.as_ref())
+            && let Err(e) = eval_form_checked(enter, &mut env)
+        {
+            return crate::exec::report_error(e);
+        }
         // A bare symbol body names a fn to call: {:task my.ns/main}.
         let body = match &task.body.kind {
             FormKind::Symbol(_) => Form::new(
@@ -76,8 +93,56 @@ pub fn run(globals: &Arc<GlobalEnv>, project: &Project, target: &str) -> i32 {
             }
             Err(e) => return crate::exec::report_error(e),
         }
+        if let Some(leave) = task.leave.as_ref().or(project.leave.as_ref())
+            && let Err(e) = eval_form_checked(leave, &mut env)
+        {
+            return crate::exec::report_error(e);
+        }
     }
     0
+}
+
+/// The map (current-task) returns: {:name <symbol> [:doc <str>] [:private true]}.
+fn task_map(task: &cljrsh_project::TaskDef) -> cljrs_value::Value {
+    use cljrs_value::value::MapValue;
+    use cljrs_value::{Keyword, Symbol, Value};
+    let mut pairs = vec![(
+        Value::keyword(Keyword::simple("name")),
+        Value::symbol(Symbol::parse(&task.name)),
+    )];
+    if let Some(doc) = &task.doc {
+        pairs.push((
+            Value::keyword(Keyword::simple("doc")),
+            Value::string(doc.clone()),
+        ));
+    }
+    if task.private {
+        pairs.push((Value::keyword(Keyword::simple("private")), Value::Bool(true)));
+    }
+    Value::Map(MapValue::from_pairs(pairs))
+}
+
+/// Evaluate `(require '<spec>)` for each `:requires` libspec form.
+fn eval_requires(specs: &[Form], env: &mut Env) -> Result<(), ExecError> {
+    for spec in specs {
+        let span = spec.span.clone();
+        let quoted = Form::new(
+            FormKind::List(vec![
+                Form::new(FormKind::Symbol("quote".to_string()), span.clone()),
+                spec.clone(),
+            ]),
+            span.clone(),
+        );
+        let call = Form::new(
+            FormKind::List(vec![
+                Form::new(FormKind::Symbol("require".to_string()), span.clone()),
+                quoted,
+            ]),
+            span,
+        );
+        eval_form_checked(&call, env)?;
+    }
+    Ok(())
 }
 
 fn eval_form_checked(

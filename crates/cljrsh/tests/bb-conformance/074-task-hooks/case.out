@@ -1,0 +1,6 @@
+-> prep
+prep b.txt
+<- prep
+=> main
+MAIN
+<- main

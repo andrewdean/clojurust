@@ -153,10 +153,13 @@ fn bb_conformance_corpus() {
     let mut failures: Vec<Failure> = Vec::new();
     for script in &scripts {
         if let Err(detail) = run_case(script) {
-            failures.push(Failure {
-                name: script.file_stem().unwrap().to_string_lossy().into_owned(),
-                detail,
-            });
+            let name = script
+                .strip_prefix(&dir)
+                .unwrap_or(script)
+                .with_extension("")
+                .to_string_lossy()
+                .into_owned();
+            failures.push(Failure { name, detail });
         }
     }
 

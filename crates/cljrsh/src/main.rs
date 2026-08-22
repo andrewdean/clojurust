@@ -184,11 +184,21 @@ fn run(opts: Opts) -> i32 {
                         2
                     }
                 },
-                "run" => match (&project, opts.args.first()) {
+                "run" => {
+                    // bb compat: accept --parallel but run sequentially (the
+                    // interpreter is single-threaded by design).
+                    let mut run_args = opts.args.clone();
+                    if run_args.first().map(String::as_str) == Some("--parallel") {
+                        eprintln!(
+                            "cljrsh: warning: --parallel is not supported; running tasks sequentially"
+                        );
+                        run_args.remove(0);
+                    }
+                    match (&project, run_args.first()) {
                     (Some(project), Some(task)) => {
                         let task = task.clone();
                         // Remaining args become *command-line-args*.
-                        cljrs_builtins::system::set_command_line_args(&globals, &opts.args[1..]);
+                        cljrs_builtins::system::set_command_line_args(&globals, &run_args[1..]);
                         tasks::run(&globals, project, &task)
                     }
                     (None, _) => {
@@ -199,7 +209,7 @@ fn run(opts: Opts) -> i32 {
                         eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
                         2
                     }
-                },
+                }},
                 _ => {
                     if project.is_some() {
                         eprintln!(

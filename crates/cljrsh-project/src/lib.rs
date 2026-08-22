@@ -36,6 +36,12 @@ pub struct Project {
     pub init: Option<Form>,
     /// `:pods` — registry pods to load before evaluation: (name, version).
     pub pods: Vec<(String, String)>,
+    /// `:tasks`-level `:requires` libspec forms, required before any task.
+    pub requires: Vec<Form>,
+    /// `:tasks`-level `:enter` / `:leave` hooks, run around every task
+    /// (unless a task defines its own).
+    pub enter: Option<Form>,
+    pub leave: Option<Form>,
 }
 
 /// A `:deps` coordinate.
@@ -61,6 +67,12 @@ pub struct TaskDef {
     pub body: Form,
     /// `:private` tasks are hidden from `cljrsh tasks`.
     pub private: bool,
+    /// Task-local `:requires` libspec forms.
+    pub requires: Vec<Form>,
+    /// Task-local `:enter` / `:leave` hooks (override the `:tasks`-level
+    /// ones for this task).
+    pub enter: Option<Form>,
+    pub leave: Option<Form>,
 }
 
 #[derive(Debug)]
@@ -128,6 +140,9 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
         tasks: Vec::new(),
         init: None,
         pods: Vec::new(),
+        requires: Vec::new(),
+        enter: None,
+        leave: None,
     };
 
     for pair in entries.chunks(2) {
@@ -326,7 +341,17 @@ fn parse_tasks(tasks_form: &Form, project: &mut Project) -> Result<(), ProjectEr
             FormKind::Keyword(key) if key == "init" => {
                 project.init = Some(v.clone());
             }
-            // :requires / :enter / :leave at the tasks level: later milestone.
+            FormKind::Keyword(key) if key == "requires" => {
+                if let FormKind::Vector(items) | FormKind::List(items) = &v.kind {
+                    project.requires.extend(items.iter().cloned());
+                }
+            }
+            FormKind::Keyword(key) if key == "enter" => {
+                project.enter = Some(v.clone());
+            }
+            FormKind::Keyword(key) if key == "leave" => {
+                project.leave = Some(v.clone());
+            }
             FormKind::Keyword(_) => {}
             FormKind::Symbol(name) => {
                 project.tasks.push(parse_task_def(name.clone(), v)?);
@@ -348,6 +373,9 @@ fn parse_task_def(name: String, v: &Form) -> Result<TaskDef, ProjectError> {
         depends: Vec::new(),
         body: v.clone(),
         private: false,
+        requires: Vec::new(),
+        enter: None,
+        leave: None,
     };
     if let FormKind::Map(entries) = &v.kind {
         // Map form: {:task expr :depends [...] :doc "..." :private true}
@@ -378,6 +406,13 @@ fn parse_task_def(name: String, v: &Form) -> Result<TaskDef, ProjectError> {
                 FormKind::Keyword(key) if key == "private" => {
                     def.private = matches!(val.kind, FormKind::Bool(true));
                 }
+                FormKind::Keyword(key) if key == "requires" => {
+                    if let FormKind::Vector(items) | FormKind::List(items) = &val.kind {
+                        def.requires.extend(items.iter().cloned());
+                    }
+                }
+                FormKind::Keyword(key) if key == "enter" => def.enter = Some(val.clone()),
+                FormKind::Keyword(key) if key == "leave" => def.leave = Some(val.clone()),
                 _ => {}
             }
         }

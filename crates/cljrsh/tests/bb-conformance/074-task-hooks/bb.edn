@@ -1,0 +1,8 @@
+{:tasks {:requires ([babashka.fs :as fs])
+         :enter (println "->" (:name (current-task)))
+         :leave (println "<-" (:name (current-task)))
+         prep {:doc "prep" :task (println "prep" (fs/file-name "/a/b.txt"))}
+         main {:depends [prep]
+               :requires ([clojure.string :as cstr])
+               :enter (println "=>" (:name (current-task)))
+               :task (println (cstr/upper-case "main"))}}}
