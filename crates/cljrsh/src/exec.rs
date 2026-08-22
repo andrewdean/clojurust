@@ -12,7 +12,7 @@ use cljrs_value::{Keyword, Value};
 pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> Arc<GlobalEnv> {
     // Widen reader conditionals before any source is read: bb-flavored .cljc
     // picks its :bb branch, cljrsh-specific code its :cljrsh branch.
-    cljrs_builtins::form::set_reader_features(["bb", "cljrsh", "rust"]);
+    cljrs_builtins::form::set_reader_features(["bb", "cljrsh", "clj", "rust"]);
 
     let globals = cljrs_stdlib::standard_env_with_paths_and_config(
         extra_paths,

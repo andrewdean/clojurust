@@ -758,3 +758,59 @@ fn unbound_symbol_report() {
     );
     assert!(r.stderr.contains("user/f"), "{}", r.stderr);
 }
+
+// ── deps (:deps in bb.edn) + babashka.cli + -x (milestone B-M3) ──────────────
+
+#[test]
+fn local_root_dep_resolves() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("mylib/src/coollib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("core.clj"), "(ns coollib.core) (def marker :dep-loaded)").unwrap();
+    std::fs::write(
+        dir.path().join("bb.edn"),
+        r#"{:deps {coollib/coollib {:local/root "mylib"}}}"#,
+    )
+    .unwrap();
+    let r = run_in(
+        dir.path(),
+        &["-e", "(require 'coollib.core) coollib.core/marker"],
+    );
+    assert_eq!(r.stdout, ":dep-loaded\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn babashka_cli_is_builtin() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[babashka.cli :as cli])
+             (cli/parse-opts [\"--port\" \"8080\" \"--who\" \":admin\" \"-v\"]
+                             {:alias {:v :verbose}})",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(
+        r.stdout, "{:port 8080, :who :admin, :verbose true}\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn exec_flag_calls_fn_with_parsed_opts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/my")).unwrap();
+    std::fs::write(dir.path().join("bb.edn"), r#"{:paths ["src"]}"#).unwrap();
+    std::fs::write(
+        dir.path().join("src/my/tool.clj"),
+        "(ns my.tool)\n(defn hello [{:keys [name times] :or {times 1}}]\n  (dotimes [_ times] (println \"hi\" name)))",
+    )
+    .unwrap();
+    let r = run_in(
+        dir.path(),
+        &["-x", "my.tool/hello", "--name", "x", "--times", "2"],
+    );
+    assert_eq!(r.stdout, "hi x\nhi x\n", "stderr: {}", r.stderr);
+}
