@@ -1,0 +1,86 @@
+;; cljrsh.config — layered configuration with CUE-style unification and
+;; malli validation.
+;;
+;; The model: configuration is EDN maps merged in layers. Merging UNIFIES
+;; rather than overrides — two layers giving the SAME key DIFFERENT scalar
+;; values is an error (with the offending path), unless the later layer
+;; wraps its value in `(override v)`. A malli schema then supplies defaults,
+;; coerces strings (env-var friendly), and validates, with humanized errors.
+;;
+;; malli is fetched per-project: add {:deps {metosin/malli {:mvn/version
+;; "0.17.0"}}} to bb.edn. `merge-layers`/`override` work without it.
+(ns cljrsh.config
+  (:require [clojure.string :as str]))
+
+;; ── Unifying merge ──────────────────────────────────────────────────────────
+
+(defn override
+  "Mark a value as deliberately overriding earlier layers at its path."
+  [v]
+  {::override v})
+
+(defn- override? [v] (and (map? v) (contains? v ::override)))
+
+(defn- unify
+  [path a b]
+  (cond
+    (override? b) (::override b)
+    (override? a) (unify path (::override a) b)
+    (nil? a) b
+    (nil? b) a
+    (and (map? a) (map? b))
+    (reduce-kv (fn [acc k bv]
+                 (assoc acc k (unify (conj path k) (get acc k) bv)))
+               a b)
+    (= a b) a
+    :else (throw (ex-info (str "config conflict at " (pr-str path)
+                               ": " (pr-str a) " vs " (pr-str b)
+                               " (wrap one in cljrsh.config/override to allow)")
+                          {:path path :values [a b]}))))
+
+(defn merge-layers
+  "Unify config layers left-to-right. Maps merge recursively; equal values
+  unify; conflicting values throw with their path unless wrapped in
+  `override`. nil layers are skipped."
+  [& layers]
+  (reduce (fn [acc layer] (unify [] acc (or layer {})))
+          {}
+          (remove nil? layers)))
+
+;; ── Schema-checked loading (malli) ──────────────────────────────────────────
+
+(defn- require-malli! []
+  (try
+    (require 'malli.core 'malli.transform 'malli.error)
+    (catch Exception e
+      (throw (ex-info (str "cljrsh.config validation needs malli on the "
+                           "classpath: add {:deps {metosin/malli "
+                           "{:mvn/version \"0.17.0\"}}} to bb.edn")
+                      {:cause (ex-message e)})))))
+
+(defn load-config
+  "Merge LAYERS (see merge-layers), then apply SCHEMA: defaults fill
+  missing keys, strings coerce to schema types (:coerce? false disables),
+  and validation failures throw with malli's humanized errors in ex-data.
+
+    (load-config [base profile env-overrides] Schema)"
+  ([layers schema] (load-config layers schema {}))
+  ([layers schema {:keys [coerce?] :or {coerce? true}}]
+   (require-malli!)
+   (let [decode (resolve 'malli.core/decode)
+         validate (resolve 'malli.core/validate)
+         explain (resolve 'malli.core/explain)
+         humanize (resolve 'malli.error/humanize)
+         transformer (resolve 'malli.transform/transformer)
+         string-t (resolve 'malli.transform/string-transformer)
+         default-t (resolve 'malli.transform/default-value-transformer)
+         merged (apply merge-layers layers)
+         t (if coerce?
+             (transformer (string-t) (default-t))
+             (transformer (default-t)))
+         value (decode schema merged t)]
+     (if (validate schema value)
+       value
+       (let [problems (humanize (explain schema value))]
+         (throw (ex-info (str "invalid configuration: " (pr-str problems))
+                         {:errors problems :value value})))))))

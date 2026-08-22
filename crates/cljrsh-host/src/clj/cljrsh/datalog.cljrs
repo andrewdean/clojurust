@@ -1,0 +1,66 @@
+;; cljrsh.datalog — Datomic-flavored Datalog for scripts.
+;;
+;; Backed by the huahaiy/datalevin pod (fetched from the pod registry on
+;; first use, cached under ~/.cache/cljrsh). Two modes:
+;;
+;;   - `q` over plain collections: query any in-memory relations
+;;     (vectors of tuples, or maps via `facts`) — no database needed.
+;;   - `conn`/`transact!`/`db`: a durable LMDB store when facts should
+;;     outlive the process.
+(ns cljrsh.datalog
+  (:require [cljrsh.pods]))
+
+(def ^:private pod-version "1.0.2")
+
+(defonce ^:private pod
+  (delay
+    (cljrsh.pods/load-pod 'huahaiy/datalevin pod-version)
+    ;; The pod returns Datom values under a custom transit tag; read them
+    ;; as [e a v] vectors. (The handler registry lives in the babashka.pods
+    ;; compat ns because the native transit decoder consults that var.)
+    (require 'babashka.pods 'pod.huahaiy.datalevin)
+    ((resolve 'babashka.pods/add-transit-read-handler!) "datalevin/Datom" vec)
+    true))
+
+(defn- pod-fn [name*]
+  (force pod)
+  (or (resolve (symbol "pod.huahaiy.datalevin" name*))
+      (throw (ex-info (str "datalevin pod does not expose " name*) {:fn name*}))))
+
+(defn q
+  "Run a Datomic-style query. Inputs may be database values or plain
+  collections of tuples: (q '[:find ?n :where [?e :name ?n]] [[1 :name \"x\"]])."
+  [query & inputs]
+  (apply @(pod-fn "q") query inputs))
+
+(defn facts
+  "Turn maps into [entity attr value] triples with generated entity ids,
+  ready to pass to `q`:
+    (q '[:find ?n :where [?e :kind \"Pod\"] [?e :name ?n]]
+       (facts pods))"
+  [maps]
+  (vec (mapcat (fn [id m]
+                 (for [[k v] m]
+                   [id k v]))
+               (range 1 (inc (count maps)))
+               maps)))
+
+(defn conn
+  "Open (creating if needed) a durable connection at dir, with an optional
+  datalevin schema map."
+  ([dir] (@(pod-fn "get-conn") dir))
+  ([dir schema] (@(pod-fn "get-conn") dir schema)))
+
+(defn db [conn] (@(pod-fn "db") conn))
+
+(defn transact! [conn txs] (@(pod-fn "transact!") conn txs))
+
+(defn close [conn] (@(pod-fn "close") conn))
+
+(defn entity
+  "Pull a whole entity map by id (via q; the pod's entity handle does not
+  cross the pod boundary)."
+  [db eid]
+  (into {:db/id eid}
+        (map (fn [[a v]] [a v]))
+        (q '[:find ?a ?v :in $ ?e :where [?e ?a ?v]] db eid)))

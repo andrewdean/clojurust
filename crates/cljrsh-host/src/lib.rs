@@ -29,6 +29,8 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     ("borkdude.dynaload", include_str!("clj/borkdude/dynaload.cljrs")),
     ("cljrsh.wait", include_str!("clj/cljrsh/wait.cljrs")),
     ("cljrsh.http", include_str!("clj/cljrsh/http.cljrs")),
+    ("cljrsh.datalog", include_str!("clj/cljrsh/datalog.cljrs")),
+    ("cljrsh.config", include_str!("clj/cljrsh/config.cljrs")),
     // Vendored from org.babashka/cli 0.8.65 (EPL-1.0, github.com/babashka/cli)
     // verbatim — it runs unmodified on cljrsh's :clj-featured runtime.
     ("babashka.cli", include_str!("clj/babashka/cli.cljc")),

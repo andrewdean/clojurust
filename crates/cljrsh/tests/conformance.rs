@@ -48,6 +48,25 @@ fn run_case(script: &Path) -> Result<(), String> {
     if let Some(requires) = sidecar("requires") {
         for cap in requires.split_whitespace() {
             match cap {
+                // Maven-vendored deps already in the local cache (network-free).
+                cap if cap.starts_with("cached-dep:") => {
+                    let dep = cap.trim_start_matches("cached-dep:");
+                    let cache = std::env::var("XDG_CACHE_HOME")
+                        .map(std::path::PathBuf::from)
+                        .or_else(|_| {
+                            std::env::var("HOME")
+                                .map(|h| std::path::PathBuf::from(h).join(".cache"))
+                        })
+                        .map(|c| c.join("cljrsh/mvn-extracted").join(dep))
+                        .ok();
+                    if !cache.as_deref().is_some_and(std::path::Path::exists) {
+                        eprintln!(
+                            "skipping {}: dep {dep} not in the local Maven cache",
+                            script.display()
+                        );
+                        return Ok(());
+                    }
+                }
                 "test-pod" => match test_pod_path() {
                     Some(pod) => envs.push((
                         "CLJRSH_TEST_POD".to_string(),

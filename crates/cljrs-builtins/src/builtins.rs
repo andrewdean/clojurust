@@ -3379,10 +3379,13 @@ fn builtin_case_eq(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(same_numeric_type && args[0] == args[1]))
 }
 fn builtin_map_q(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Bool(matches!(
-        args[0].unwrap_meta(),
-        Value::Map(_) | Value::TypeInstance(_)
-    )))
+    // Records are maps; reify instances are NOT (they share the
+    // TypeInstance representation, distinguished by the synthetic tag).
+    Ok(Value::Bool(match args[0].unwrap_meta() {
+        Value::Map(_) => true,
+        Value::TypeInstance(ti) => !ti.get().type_tag.starts_with("reify__"),
+        _ => false,
+    }))
 }
 fn builtin_vector_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
