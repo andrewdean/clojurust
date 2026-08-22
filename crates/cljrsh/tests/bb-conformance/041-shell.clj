@@ -1,0 +1,6 @@
+(require '[clojure.java.shell :refer [sh]])
+(prn (:exit (sh "true")))
+(prn (:out (sh "echo" "-n" "hi")))
+(require '[babashka.process :as p])
+(prn (:out (p/sh "printf %s-%s a b")))
+(prn (:exit (p/sh ["false"])))

@@ -1,0 +1,1 @@
+(reduce + (map :n *input*))

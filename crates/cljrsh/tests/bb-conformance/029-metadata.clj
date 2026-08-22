@@ -1,0 +1,5 @@
+(def x (with-meta [1 2] {:tag :v}))
+(prn (meta x))
+(prn (meta (vary-meta x assoc :extra 1)))
+(defn documented "docs here" [x] x)
+(prn (:doc (meta #'documented)))

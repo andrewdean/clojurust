@@ -1,0 +1,7 @@
+(prn @(future (+ 40 2)))
+(prn (mapv deref (mapv #(future (* % 10)) [1 2 3])))
+(prn (vec (pmap inc [1 2 3])))
+(def p (promise))
+(deliver p :delivered)
+(prn @p)
+(prn (deref (promise) 10 :timed-out))

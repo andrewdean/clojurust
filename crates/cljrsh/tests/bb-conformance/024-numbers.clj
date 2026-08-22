@@ -1,0 +1,7 @@
+(prn (+ 1 2/3))
+(prn (* 99999999999999 99999999999999))
+(prn (quot 17 5) (rem 17 5) (mod -7 3))
+(prn (max 1 2.5 2) (min 1 2.5 2))
+(prn (int 3.7) (double 3))
+(prn (parse-long "42") (parse-double "2.5"))
+(prn (abs -5) (even? 4) (pos? 0))

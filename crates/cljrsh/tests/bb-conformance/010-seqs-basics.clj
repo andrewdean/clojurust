@@ -1,0 +1,6 @@
+(prn (map inc [1 2 3]))
+(prn (filter even? (range 10)))
+(prn (reduce + (range 101)))
+(prn (take 3 (drop 2 (range))))
+(prn (interleave [:a :b :c] [1 2 3]))
+(prn (partition 2 [1 2 3 4 5]))

@@ -1,0 +1,8 @@
+(prn (assoc-in {} [:a :b] 1))
+(prn (update-in {:a {:n 1}} [:a :n] + 10))
+(prn (get-in {:a {:b {:c 42}}} [:a :b :c]))
+(prn (merge-with + {:a 1} {:a 2 :b 3}))
+(prn (select-keys {:a 1 :b 2 :c 3} [:a :c]))
+(prn (frequencies "abracadabra"))
+(prn (group-by odd? (range 6)))
+(prn (sort-by :n > [{:n 1} {:n 3} {:n 2}]))

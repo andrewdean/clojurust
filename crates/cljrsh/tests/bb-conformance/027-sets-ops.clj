@@ -1,0 +1,6 @@
+(require '[clojure.set :as set])
+(prn (set/union #{1 2} #{2 3}))
+(prn (set/intersection #{1 2 3} #{2 3 4}))
+(prn (set/difference #{1 2 3} #{2}))
+(prn (set/rename-keys {:a 1} {:a :b}))
+(prn (contains? #{:a} :a))

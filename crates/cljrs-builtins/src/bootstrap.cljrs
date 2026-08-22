@@ -142,12 +142,14 @@
           (rf result input)
           result)))))
   ([pred coll]
-   (loop [s (seq coll) acc []]
-     (if s
-       (if (pred (first s))
-         (recur (next s) (conj acc (first s)))
-         (recur (next s) acc))
-       (or (seq acc) '())))))
+   (lazy-seq
+     (when-let [s (seq coll)]
+       (loop [s s]
+         (when s
+           (let [f (first s)]
+             (if (pred f)
+               (cons f (filter pred (rest s)))
+               (recur (next s))))))))))
 
 (defn remove
   "Returns a lazy sequence of the items in coll for which (pred item)
@@ -168,13 +170,14 @@
         (let [v (f input)]
           (if (nil? v) result (rf result v)))))))
   ([f coll]
-   (loop [s (seq coll) acc []]
-     (if s
-       (let [v (f (first s))]
-         (if (nil? v)
-           (recur (next s) acc)
-           (recur (next s) (conj acc v))))
-       (or (seq acc) '())))))
+   (lazy-seq
+     (when-let [s (seq coll)]
+       (loop [s s]
+         (when s
+           (let [v (f (first s))]
+             (if (nil? v)
+               (recur (next s))
+               (cons v (keep f (rest s)))))))))))
 
 (defn cat
   "A transducer which concatenates the contents of each input, which must
@@ -377,7 +380,27 @@
   "Returns a vector consisting of the result of applying f to the set of
   first items of each coll, followed by applying f to the set of second
   items, until any one coll is exhausted."
-  [f coll] (vec (map f coll)))
+  ([f coll] (vec (map f coll)))
+  ([f c1 c2] (vec (map f c1 c2)))
+  ([f c1 c2 c3] (vec (map f c1 c2 c3)))
+  ([f c1 c2 c3 & colls] (vec (apply map f c1 c2 c3 colls))))
+
+(defn merge-with
+  "Returns a map that consists of the rest of the maps conj-ed onto the
+  first. If a key occurs in more than one map, the mapping(s) from the
+  latter (left-to-right) will be combined with the mapping in the result
+  by calling (f val-in-result val-in-latter)."
+  [f & maps]
+  (when (some identity maps)
+    (reduce (fn [acc m]
+              (reduce (fn [a entry]
+                        (let [k (key entry) v (val entry)]
+                          (if (contains? a k)
+                            (assoc a k (f (get a k) v))
+                            (assoc a k v))))
+                      acc
+                      (seq m)))
+            maps)))
 
 (defn filterv
   "Returns a vector of the items in coll for which (pred item) returns
@@ -529,10 +552,9 @@
   that binding, then binds name to that result, repeating for each
   successive form, returning the result of the last form."
   [expr name & forms]
-  (list 'let (vector name expr)
-        (if (seq forms)
-          (list* 'as-> name forms)
-          name)))
+  (list 'let
+        (vec (cons name (cons expr (mapcat (fn [form] [name form]) (butlast forms)))))
+        (if (seq forms) (last forms) name)))
 
 (defmacro doto
   "Evaluates x, then calls each of the forms with x as the first argument,
@@ -599,13 +621,23 @@
     (emit (seq bindings) nil)))
 
 (defmacro for
-  "List comprehension. binding => [name coll-expr]. Returns a lazy sequence
-  of the results of evaluating body for each name bound to successive
-  elements of coll-expr."
-  [binding & body]
-  (let [x (first binding)
-        coll (second binding)]
-    (list 'map (list 'fn (vector x) (cons 'do body)) coll)))
+  "List comprehension. Takes a vector of one or more binding-form/coll-expr
+  pairs, plus the modifiers :let [..] and :when test, and yields a lazy
+  sequence of evaluations of body-expr. (:while is not supported.)"
+  [seq-exprs body-expr]
+  (letfn [(emit [pairs]
+            (if (empty? pairs)
+              (list 'list body-expr)
+              (let [pair (first pairs)
+                    binding (first pair)
+                    expr (second pair)
+                    more (rest pairs)]
+                (cond
+                  (= binding :when) (list 'if expr (emit more) (list 'list))
+                  (= binding :let) (list 'let expr (emit more))
+                  (= binding :while) (throw (ex-info "for does not support :while" {}))
+                  :else (list 'mapcat (list 'fn (vector binding) (emit more)) expr)))))]
+    (emit (partition 2 seq-exprs))))
 
 (defn second
   "Same as (first (rest x))."
@@ -1161,6 +1193,8 @@
 (def ^:dynamic *print-length* nil)
 (def ^:dynamic *print-level* nil)
 (def ^:dynamic *command-line-args* nil)
+(def ^:dynamic *warn-on-reflection* false)
+(def ^:dynamic *unchecked-math* false)
 (def ^:dynamic *data-readers* nil)
 (def ^:dynamic *default-data-reader-fn* nil)
 (def ^:dynamic *1 nil)

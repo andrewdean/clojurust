@@ -1,0 +1,3 @@
+{:a [1 2.5 nil], :b true}
+{"name":"x","tags":["a"]}
+{:n 1}

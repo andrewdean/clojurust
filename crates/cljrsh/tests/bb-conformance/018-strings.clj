@@ -1,0 +1,8 @@
+(require '[clojure.string :as str])
+(prn (str/join ", " ["a" "b"]))
+(prn (str/split "a-b-c" #"-"))
+(prn (str/upper-case "abc"))
+(prn (str/replace "aaa" #"a" "b"))
+(prn (str/trim "  x  "))
+(prn (str/starts-with? "hello" "he"))
+(prn (format "%s=%d" "n" 42))

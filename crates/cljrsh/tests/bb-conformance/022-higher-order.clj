@@ -1,0 +1,8 @@
+(prn ((comp inc (partial * 2)) 5))
+(prn ((juxt inc dec) 5))
+(prn ((fnil + 0) nil 5))
+(prn (map (fn [[k v]] [k (inc v)]) {:a 1 :b 2}))
+(prn ((every-pred pos? even?) 4))
+(prn (keep #(when (odd? %) (* % %)) (range 6)))
+(prn (mapv + [1 2 3] [10 20 30]))
+(prn (apply max 3 [1 4 2]))

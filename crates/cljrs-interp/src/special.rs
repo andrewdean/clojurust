@@ -34,6 +34,8 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "set!" => eval_set_bang(args, env),
         "throw" => eval_throw(args, env),
         "try" => eval_try(args, env),
+        "macroexpand" => eval_macroexpand(args, env, false),
+        "macroexpand-1" => eval_macroexpand(args, env, true),
         "defn" | "defn-" => eval_defn(args, env),
         "defmacro" => eval_defmacro(args, env),
         "defonce" => eval_defonce(args, env),
@@ -2114,7 +2116,98 @@ fn eval_binding(args: &[Form], env: &mut Env) -> EvalResult {
     // _guard drops here → pop_frame()
 }
 
+/// `(macroexpand form)` / `(macroexpand-1 form)` — the argument is evaluated
+/// (normally a quoted list), converted back to a Form, expanded, and returned
+/// as data.
+fn eval_macroexpand(args: &[Form], env: &mut Env, once: bool) -> EvalResult {
+    let Some(arg) = args.first() else {
+        return Err(EvalError::Runtime("macroexpand requires a form".into()));
+    };
+    let val = crate::eval::eval(arg, env)?;
+    let form = crate::macros::value_to_form(&val, arg.span.clone())?;
+    let expanded = if once {
+        crate::macros::macroexpand_1(&form, env)?
+    } else {
+        crate::macros::macroexpand(&form, env)?
+    };
+    Ok(cljrs_builtins::form::form_to_value(&expanded))
+}
+
 // ── defrecord ─────────────────────────────────────────────────────────────────
+
+/// Wrap a `(method [this & params] body...)` impl form so the record's fields
+/// are in scope, looked up on the first (this) parameter.
+fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
+    use cljrs_reader::form::FormKind as FK;
+    let FK::List(items) = &form.kind else {
+        return form.clone();
+    };
+    let (Some(_method), Some(params_form)) = (items.first(), items.get(1)) else {
+        return form.clone();
+    };
+    let FK::Vector(params) = &params_form.kind else {
+        return form.clone();
+    };
+    let param_names: Vec<&str> = params
+        .iter()
+        .filter_map(|p| match &p.kind {
+            FK::Symbol(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+    let Some(FK::Symbol(this_name)) = params.first().map(|p| &p.kind) else {
+        return form.clone();
+    };
+    // `_` as the this-param still needs a referable name for field lookups.
+    let (this_name, params_form) = if this_name == "_" {
+        let renamed = "this__record".to_string();
+        let mut new_params = params.clone();
+        new_params[0] = Form {
+            kind: FK::Symbol(renamed.clone()),
+            span: params_form.span.clone(),
+        };
+        (
+            renamed,
+            Form {
+                kind: FK::Vector(new_params),
+                span: params_form.span.clone(),
+            },
+        )
+    } else {
+        (this_name.clone(), params_form.clone())
+    };
+
+    let span = form.span.clone();
+    let mk = |kind: FK| Form {
+        kind,
+        span: span.clone(),
+    };
+    let mut bindings: Vec<Form> = Vec::new();
+    for field in fields {
+        if param_names.contains(&field.as_ref()) {
+            continue; // params shadow fields
+        }
+        bindings.push(mk(FK::Symbol(field.as_ref().to_string())));
+        bindings.push(mk(FK::List(vec![
+            mk(FK::Symbol("get".into())),
+            mk(FK::Symbol(this_name.clone())),
+            mk(FK::Keyword(field.as_ref().to_string())),
+        ])));
+    }
+    if bindings.is_empty() {
+        return form.clone();
+    }
+    let mut let_form = vec![mk(FK::Symbol("let*".into())), mk(FK::Vector(bindings))];
+    let_form.extend(items[2..].iter().cloned());
+    Form {
+        kind: FK::List(vec![
+            items[0].clone(),
+            params_form,
+            mk(FK::List(let_form)),
+        ]),
+        span: form.span.clone(),
+    }
+}
 
 fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
     // (defrecord TypeName [field1 field2 ...] Proto1 (method [this] body) ...)
@@ -2144,8 +2237,16 @@ fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
         }
     };
 
-    // Register protocol implementations (same as extend-type inner logic).
-    register_impls_for_tag(&type_tag, &args[2..], env)?;
+    // Register protocol implementations (same as extend-type inner logic),
+    // with record FIELDS bound in every method body: each `(method [this ...]
+    // body)` becomes `(method [this ...] (let* [f (get this :f) ...] body))`,
+    // skipping fields shadowed by params (params win, as in Clojure). A
+    // non-symbol first param disables injection for that method.
+    let impls: Vec<Form> = args[2..]
+        .iter()
+        .map(|form| inject_record_fields(form, &field_names))
+        .collect();
+    register_impls_for_tag(&type_tag, &impls, env)?;
 
     // Generate constructors in clojure.core.
     // ->TypeName: positional constructor
