@@ -1731,6 +1731,44 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_hashmap_new,
         ),
+        (
+            "ArrayDeque.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_deque_new,
+        ),
+        (
+            "java.util.ArrayDeque.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_deque_new,
+        ),
+        (
+            "DateTimeFormatterBuilder.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        (
+            "DateTimeFormatter/ofPattern",
+            Arity::Variadic { min: 1 },
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        (
+            "ZoneId/of",
+            Arity::Fixed(1),
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        ("Date/from", Arity::Fixed(1), builtin_identity_cast),
+        ("Instant/from", Arity::Fixed(1), builtin_identity_cast),
+        (
+            "Instant/ofEpochMilli",
+            Arity::Fixed(1),
+            crate::javamap::builtin_instant_of_epoch_milli,
+        ),
+        ("UUID/fromString", Arity::Fixed(1), builtin_parse_uuid),
+        (
+            "MapEntry.",
+            Arity::Fixed(2),
+            crate::javamap::builtin_map_entry_new,
+        ),
         // time utils
         ("nanotime", Arity::Fixed(0), builtin_nanotime),
     ];
@@ -1766,6 +1804,24 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         Value::Double(std::f64::consts::PI),
     );
     globals.intern(ns, Arc::from("Math/E"), Value::Double(std::f64::consts::E));
+
+    // java.time ChronoField constants — only ever passed to the inert
+    // DateTimeFormatter builder chain; identity keywords suffice.
+    for field in [
+        "MICRO_OF_SECOND",
+        "NANO_OF_SECOND",
+        "MILLI_OF_SECOND",
+        "HOUR_OF_DAY",
+        "MINUTE_OF_HOUR",
+        "SECOND_OF_MINUTE",
+        "OFFSET_SECONDS",
+    ] {
+        globals.intern(
+            ns,
+            Arc::from(format!("ChronoField/{field}")),
+            Value::keyword(Keyword::parse(field)),
+        );
+    }
 
     // JVM wrapper-class constant statics (portable .cljc code reads these).
     for (name, value) in [

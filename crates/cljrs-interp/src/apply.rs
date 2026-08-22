@@ -327,6 +327,14 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
         return cljrs_builtins::javamap::iterator_of(target)
             .map_err(|e| EvalError::Runtime(e.to_string()));
     }
+    // Boxed-number interop: (.longValue n) etc.
+    match (method, target) {
+        ("longValue" | "intValue", Value::Long(n)) => return Ok(Value::Long(*n)),
+        ("longValue" | "intValue", Value::Double(d)) => return Ok(Value::Long(*d as i64)),
+        ("doubleValue" | "floatValue", Value::Long(n)) => return Ok(Value::Double(*n as f64)),
+        ("doubleValue" | "floatValue", Value::Double(d)) => return Ok(Value::Double(*d)),
+        _ => {}
+    }
     match target {
         Value::Str(s) => dispatch_string_method(method, s.get(), args),
         Value::Vector(v) => dispatch_vector_method(method, v, args),
@@ -348,6 +356,18 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
                 target.type_name()
             ))),
         },
+        // deftype/defrecord instances: (.-field x) and bare (.field x) read
+        // fields (JVM interop field access).
+        Value::TypeInstance(ti) => {
+            let field = method.strip_prefix('-').unwrap_or(method);
+            let key = Value::keyword(cljrs_value::Keyword::simple(field));
+            ti.get().fields.get(&key).ok_or_else(|| {
+                EvalError::Runtime(format!(
+                    ".{method} not supported on {} (no such field)",
+                    ti.get().type_tag
+                ))
+            })
+        }
         Value::NativeObject(obj) => {
             if let Some(r) = cljrs_builtins::javamap::dispatch_any(obj.get(), method, args) {
                 return r.map_err(|e| EvalError::Runtime(e.to_string()));

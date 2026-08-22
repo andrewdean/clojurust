@@ -169,7 +169,11 @@ pub fn bind_associative(pattern: &[Form], val: &Value, env: &mut Env) -> EvalRes
                 let mut j = 0;
                 while j + 1 < or_forms.len() {
                     if let FormKind::Symbol(sym) = &or_forms[j].kind {
-                        defaults.insert(sym.clone(), form_to_value(&or_forms[j + 1]));
+                        // Defaults are EXPRESSIONS ({:or {g some-fn}} binds
+                        // the fn, not the symbol). Evaluated eagerly; JVM
+                        // Clojure defers to first use — a timing divergence
+                        // only visible with side-effecting defaults.
+                        defaults.insert(sym.clone(), crate::eval::eval(&or_forms[j + 1], env)?);
                     }
                     j += 2;
                 }
@@ -281,7 +285,13 @@ pub fn bind_associative(pattern: &[Form], val: &Value, env: &mut Env) -> EvalRes
                 // Regular {binding-form lookup-key} pair.
                 // In Clojure map destructuring {a :x}, the key position is the
                 // binding target and the value position is the lookup key.
-                let lookup_key = form_to_value(v);
+                // The key is an EXPRESSION: {pattern method} looks up the
+                // VALUE of the local `method` (malli does this). Literals
+                // evaluate to themselves, so eval is right for both.
+                let lookup_key = match &v.kind {
+                    FormKind::Symbol(_) | FormKind::List(_) => crate::eval::eval(v, env)?,
+                    _ => form_to_value(v),
+                };
                 let mut bound_val = get_val(&lookup_key);
                 // Apply defaults for simple symbol bindings.
                 if matches!(bound_val, Value::Nil)

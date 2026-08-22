@@ -76,6 +76,18 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(vals))))
         }
         FormKind::Map(forms) => {
+            // Expand any reader-conditional entries first — #?@ splices
+            // change the form count (the reader defers the evenness check).
+            let expanded;
+            let forms: &Vec<Form> = if forms
+                .iter()
+                .any(|f| matches!(&f.kind, FormKind::ReaderCond { .. }))
+            {
+                expanded = cljrs_builtins::form::expand_reader_conds(forms);
+                &expanded
+            } else {
+                forms
+            };
             if forms.len() % 2 != 0 {
                 return Err(EvalError::Runtime(
                     "map literal must have an even number of forms".into(),
@@ -284,6 +296,18 @@ fn eval_symbol(s: &str, env: &mut Env) -> EvalResult {
             .globals
             .lookup_in_ns(&resolved, &sym.name)
             .ok_or_else(|| EvalError::UnboundSymbol(s.to_string()));
+    }
+
+    // Dot-constructor sugar: (TypeName. args) calls ->TypeName (the
+    // constructor deftype/defrecord interned). Tried before class-name
+    // self-eval so user types win over the JVM-class fallback.
+    if let Some(type_name) = s.strip_suffix('.')
+        && !type_name.is_empty()
+        && let Some(ctor) = env
+            .globals
+            .lookup_in_ns(&env.current_ns, &format!("->{type_name}"))
+    {
+        return Ok(ctor);
     }
 
     // JVM class names resolve to themselves as symbols (for instance?, catch, etc.)

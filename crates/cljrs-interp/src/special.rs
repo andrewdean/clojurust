@@ -946,6 +946,21 @@ fn eval_set_bang(args: &[Form], env: &mut Env) -> EvalResult {
     } else {
         Value::Nil
     };
+    // (set! field v) inside a deftype method: mutate the instance through the
+    // hidden deftype-this* binding (unsynchronized-mutable semantics), and
+    // shadow the injected local so later reads in this scope see the write.
+    if !sym.contains('/')
+        && let Some(Value::TypeInstance(ti)) = env.lookup_local_frames("deftype-this*")
+    {
+        let key = Value::keyword(cljrs_value::Keyword::simple(sym.as_str()));
+        if ti.get().fields.contains_key(&key) {
+            let mut ptr = ti.clone();
+            let inst = ptr.get_mut();
+            inst.fields = inst.fields.assoc(key, val.clone());
+            env.bind(std::sync::Arc::from(sym.as_str()), val.clone());
+            return Ok(val);
+        }
+    }
     let parsed = cljrs_value::Symbol::parse(&sym);
     let ns = parsed.namespace.as_deref().unwrap_or(&env.current_ns);
     let var = env
@@ -2242,6 +2257,10 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
         span: span.clone(),
     };
     let mut bindings: Vec<Form> = Vec::new();
+    // Hidden handle for `set!` on mutable deftype fields: eval_set_bang
+    // mutates the instance through this binding.
+    bindings.push(mk(FK::Symbol("deftype-this*".into())));
+    bindings.push(mk(FK::Symbol(this_name.clone())));
     for field in fields {
         if param_names.contains(&field.as_ref()) {
             continue; // params shadow fields
@@ -2253,7 +2272,8 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
             mk(FK::Keyword(field.as_ref().to_string())),
         ])));
     }
-    if bindings.is_empty() {
+    if bindings.len() <= 2 {
+        // Only the deftype-this* handle — no real fields to expose.
         return form.clone();
     }
     let mut let_form = vec![mk(FK::Symbol("let*".into())), mk(FK::Vector(bindings))];
@@ -2442,9 +2462,10 @@ fn register_impls_for_tag(type_tag: &Arc<str>, forms: &[Form], env: &mut Env) ->
     for form in forms {
         match &form.kind {
             FormKind::Symbol(s) => {
-                let val = env.globals.lookup_in_ns(&env.current_ns, s);
-                match val {
-                    Some(Value::Protocol(p)) => {
+                // Evaluate the symbol so alias-qualified protocols resolve
+                // ((reify m/Transformer ...)).
+                match crate::eval::eval(form, env) {
+                    Ok(Value::Protocol(p)) => {
                         current_proto = Some(p);
                     }
                     _ => {

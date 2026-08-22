@@ -159,5 +159,153 @@ pub fn dispatch_any(
     if let Some(it) = obj.downcast_ref::<JavaIterator>() {
         return dispatch_iterator(it, method, args);
     }
+    if let Some(dq) = obj.downcast_ref::<JavaArrayDeque>() {
+        return dispatch_deque(dq, method, args);
+    }
+    if obj.downcast_ref::<JavaDateFormatter>().is_some() {
+        return dispatch_date_formatter(method, args);
+    }
     None
+}
+
+// ── java.util.ArrayDeque (used as a stack by malli's regex drivers) ─────────
+
+#[derive(Debug)]
+pub struct JavaArrayDeque {
+    items: Mutex<std::collections::VecDeque<Value>>,
+}
+
+impl NativeObject for JavaArrayDeque {
+    fn type_tag(&self) -> &str {
+        "java.util.ArrayDeque"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaArrayDeque {
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        for v in self.items.lock().unwrap().iter() {
+            v.trace(visitor);
+        }
+    }
+}
+
+pub fn builtin_array_deque_new(_args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaArrayDeque {
+            items: Mutex::new(std::collections::VecDeque::new()),
+        },
+    )))
+}
+
+fn dispatch_deque(dq: &JavaArrayDeque, method: &str, args: &[Value]) -> Option<ValueResult<Value>> {
+    let mut items = dq.items.lock().unwrap();
+    Some(match method {
+        // Deque-as-stack: push/pop/peek work on the head.
+        "push" | "addFirst" => {
+            items.push_front(args.first().cloned().unwrap_or(Value::Nil));
+            Ok(Value::Nil)
+        }
+        "add" | "addLast" | "offer" => {
+            items.push_back(args.first().cloned().unwrap_or(Value::Nil));
+            Ok(Value::Bool(true))
+        }
+        "pop" | "removeFirst" => match items.pop_front() {
+            Some(v) => Ok(v),
+            None => Err(cljrs_value::ValueError::Other(
+                "NoSuchElementException: deque is empty".into(),
+            )),
+        },
+        "poll" | "pollFirst" => Ok(items.pop_front().unwrap_or(Value::Nil)),
+        "peek" | "peekFirst" => Ok(items.front().cloned().unwrap_or(Value::Nil)),
+        "isEmpty" => Ok(Value::Bool(items.is_empty())),
+        "size" => Ok(Value::Long(items.len() as i64)),
+        "clear" => {
+            items.clear();
+            Ok(Value::Nil)
+        }
+        _ => return None,
+    })
+}
+
+// ── java.time.format.DateTimeFormatter (enough for malli.transform) ─────────
+//
+// Builder-chain methods return a fresh stateless formatter; parse/format
+// speak RFC3339 through the native Instant machinery. Pattern arguments are
+// accepted and ignored — cljrsh instants are RFC3339-only.
+
+#[derive(Debug)]
+pub struct JavaDateFormatter;
+
+impl NativeObject for JavaDateFormatter {
+    fn type_tag(&self) -> &str {
+        "java.time.format.DateTimeFormatter"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaDateFormatter {
+    fn trace(&self, _visitor: &mut cljrs_gc::MarkVisitor) {}
+}
+
+pub fn builtin_date_formatter_new(_args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaDateFormatter,
+    )))
+}
+
+fn dispatch_date_formatter(method: &str, args: &[Value]) -> Option<ValueResult<Value>> {
+    Some(match method {
+        // Builder / configuration chain — stateless, return a formatter.
+        "appendPattern" | "optionalStart" | "optionalEnd" | "appendFraction"
+        | "appendOffset" | "parseDefaulting" | "toFormatter" | "withZone"
+        | "appendValue" | "appendLiteral" | "parseLenient" | "parseStrict" => {
+            builtin_date_formatter_new(&[])
+        }
+        "parse" => match args.first() {
+            Some(Value::Str(s)) => {
+                match cljrs_types::instant::parse_rfc3339_millis(s.get().as_str()) {
+                    Ok(ms) => Ok(Value::Instant(ms)),
+                    Err(e) => Err(cljrs_value::ValueError::Other(format!(
+                        "DateTimeFormatter.parse: {e}"
+                    ))),
+                }
+            }
+            _ => Err(cljrs_value::ValueError::Other(
+                ".parse expects a string".into(),
+            )),
+        },
+        "format" => match args.first() {
+            Some(Value::Instant(ms)) => Ok(Value::string(
+                cljrs_types::instant::format_rfc3339_millis(*ms),
+            )),
+            Some(Value::Long(ms)) => Ok(Value::string(
+                cljrs_types::instant::format_rfc3339_millis(*ms),
+            )),
+            _ => Err(cljrs_value::ValueError::Other(
+                ".format expects an instant".into(),
+            )),
+        },
+        _ => return None,
+    })
+}
+
+/// `(Instant/ofEpochMilli ms)` → native instant.
+pub fn builtin_instant_of_epoch_milli(args: &[Value]) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Long(ms) => Ok(Value::Instant(*ms)),
+        other => Err(cljrs_value::ValueError::Other(format!(
+            "Instant/ofEpochMilli expects an integer, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `(MapEntry. k v)` — clojure.lang.MapEntry constructor.
+pub fn builtin_map_entry_new(args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::map_entry(args[0].clone(), args[1].clone()))
 }

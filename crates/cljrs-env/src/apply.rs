@@ -192,8 +192,12 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
 
             let tag = type_tag_of(dispatch_val);
             let impls = pf_ref.protocol.get().impls.lock().unwrap();
+            // Fall back to the catch-all registrations: (extend-type Object …)
+            // on the JVM, (extend-type default …) in cljs-flavored code.
             let impl_fn = impls
                 .get(tag.as_ref())
+                .or_else(|| impls.get("Object"))
+                .or_else(|| impls.get("default"))
                 .and_then(|m| m.get(pf_ref.method_name.as_ref()))
                 .cloned()
                 .ok_or_else(|| {

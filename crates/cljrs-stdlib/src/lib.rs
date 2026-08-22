@@ -34,6 +34,7 @@ const CLOJURE_TEMPLATE_SRC: &str = include_str!("clojure/template.cljrs");
 const CLOJURE_RUST_IO_SRC: &str = include_str!("clojure/rust/io.cljrs");
 #[cfg(not(target_arch = "wasm32"))]
 const CLOJURE_EDN_SRC: &str = include_str!("clojure/edn.cljrs");
+const CLOJURE_MATH_SRC: &str = include_str!("clojure/math.cljrs");
 const CLOJURE_WALK_SRC: &str = include_str!("clojure/walk.cljrs");
 const CLOJURE_DATA_SRC: &str = include_str!("clojure/data.cljrs");
 const COLJURE_ZIP_SRC: &str = include_str!("clojure/zip.cljrs");
@@ -78,6 +79,7 @@ pub fn register(globals: &Arc<GlobalEnv>) {
     // clojure.set ─ same pattern.
     set::register(globals, "clojure.set");
     globals.register_builtin_source("clojure.set", CLOJURE_SET_SRC);
+    globals.register_builtin_source("clojure.math", CLOJURE_MATH_SRC);
 
     // clojure.template ─ pure Clojure, no native helpers.
     globals.register_builtin_source("clojure.template", CLOJURE_TEMPLATE_SRC);
