@@ -1,0 +1,91 @@
+;; kustomize — Kubernetes manifest trees as Clojure data.
+;;
+;; Two complementary modes:
+;;
+;; 1. **Clojure as the overlay engine** (preferred for new code): manifests
+;;    are maps, overlays are function composition — (overlay base patch ...)
+;;    is a strategic-merge-lite (maps deep-merge, everything else replaces).
+;;    Feed results straight to (k8s/apply c m); no kustomize involved.
+;;
+;; 2. **Kustomize interop** (for existing trees / GitOps): (write! dir
+;;    {:kustomization {...} :resources {"file.yaml" manifest-or-vec}})
+;;    emits a kustomize-compatible directory, and (build dir) renders any
+;;    kustomization via `kubectl kustomize` into a vector of manifest maps —
+;;    which (apply-all! c manifests) server-side-applies.
+(ns kustomize
+  (:require [cljrsh.yaml] [cljrsh.fs] [cljrs.process] [clojure.string]))
+
+;; ── overlay composition ──────────────────────────────────────────────────────
+
+(defn overlay
+  "Strategic-merge-lite: maps merge recursively, nil deletes a key,
+  anything else replaces. (overlay base patch1 patch2 ...)"
+  [base & patches]
+  (letfn [(merge2 [a b]
+            (if (and (map? a) (map? b))
+              (reduce (fn [acc [k v]]
+                        (if (nil? v)
+                          (dissoc acc k)
+                          (assoc acc k (merge2 (clojure.core/get acc k) v))))
+                      a (seq b))
+              b))]
+    (reduce merge2 base (remove nil? patches))))
+
+(defn manifest
+  "Convenience constructor: (manifest \"apps/v1\" :Deployment \"web\"
+  {:namespace \"x\" :labels {...}} spec-map)."
+  ([api-version kind name*] (manifest api-version kind name* {} nil))
+  ([api-version kind name* meta*] (manifest api-version kind name* meta* nil))
+  ([api-version kind name* meta* spec]
+   (cond-> {:apiVersion api-version
+            :kind (if (keyword? kind) (name kind) (str kind))
+            :metadata (assoc meta* :name (str name*))}
+     spec (assoc :spec spec))))
+
+;; ── YAML emission ────────────────────────────────────────────────────────────
+
+(defn yaml
+  "One manifest map (or a vector of them, joined as a multi-doc stream)."
+  [m]
+  (if (sequential? m)
+    (clojure.string/join "---\n" (map cljrsh.yaml/generate-string m))
+    (cljrsh.yaml/generate-string m)))
+
+(defn write!
+  "Write a kustomize-compatible tree:
+  {:kustomization {...}                     ; kustomization.yaml body
+   :resources {\"deploy.yaml\" manifest     ; single or vector per file
+               \"svc.yaml\" [m1 m2]}}
+  :resources listed in the kustomization default to the file names given.
+  Returns dir."
+  [dir {:keys [kustomization resources]}]
+  (cljrsh.fs/create-dirs dir)
+  (doseq [[file m] resources]
+    (spit (str dir "/" file) (yaml m)))
+  (let [k (if (contains? kustomization :resources)
+            kustomization
+            (assoc kustomization :resources (vec (sort (keys resources)))))]
+    (spit (str dir "/kustomization.yaml")
+          (cljrsh.yaml/generate-string
+            (merge {:apiVersion "kustomize.config.k8s.io/v1beta1"
+                    :kind "Kustomization"}
+                   k))))
+  dir)
+
+;; ── kustomize interop ────────────────────────────────────────────────────────
+
+(defn build
+  "Render a kustomization directory via `kubectl kustomize` into a vector of
+  manifest maps."
+  [dir]
+  (let [res (cljrs.process/sh "kubectl" "kustomize" (str dir))]
+    (when-not (zero? (:exit res))
+      (throw (ex-info (str "kubectl kustomize failed:\n" (:err res)) res)))
+    (let [parsed (cljrsh.yaml/parse-string (:out res))]
+      (if (map? parsed) [parsed] (vec parsed)))))
+
+(defn apply-all!
+  "Server-side-apply every manifest with the given k8s client; returns the
+  applied objects."
+  [c manifests]
+  (mapv #(k8s/invoke c {:op :apply :manifest %}) manifests))

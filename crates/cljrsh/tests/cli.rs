@@ -900,3 +900,105 @@ fn k8s_end_to_end_when_cluster_available() {
     let r = run(&["-e", &expr], None, &[]);
     assert_eq!(r.stdout, "[\"v\" true]\n", "stderr: {}", r.stderr);
 }
+
+// ── Infrastructure DSLs: tf + kustomize (cljrsh-host) ────────────────────────
+
+#[test]
+fn tf_stack_emission_and_conflicts() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[tf])
+             (let [s (tf/stack (tf/provider :aws {:region \"us-east-1\"})
+                               (tf/resource :aws_s3_bucket :content {:bucket \"b\"})
+                               (tf/output :arn {:value (tf/ref :aws_s3_bucket.content.arn)}))]
+               [(get-in s [:resource :aws_s3_bucket :content :bucket])
+                (get-in s [:output :arn :value])
+                (tf/var-ref :region)
+                (try (tf/stack (tf/resource :a :x {:v 1}) (tf/resource :a :x {:v 2}))
+                     (catch Exception e :duplicate-detected))])",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(
+        r.stdout,
+        "[\"b\" \"${aws_s3_bucket.content.arn}\" \"${var.region}\" :duplicate-detected]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn tf_engine_loop_when_tofu_available() {
+    if std::process::Command::new("tofu")
+        .arg("version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skipping: tofu not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[tf])
+         (tf/write! \"{d}\" (tf/stack
+           (tf/terraform {{:required_providers {{:local {{:source \"hashicorp/local\"}}}}}})
+           (tf/resource :local_file :f {{:filename \"${{path.module}}/out.txt\"
+                                        :content \"from-cljrsh\"}})))
+         (tf/init! \"{d}\") (tf/validate! \"{d}\") (tf/apply! \"{d}\")
+         (slurp \"{d}/out.txt\")"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "\"from-cljrsh\"\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn kustomize_overlay_and_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[kustomize :as k])
+         (let [base (k/manifest \"apps/v1\" :Deployment \"web\" {{}} {{:replicas 1 :extra {{:keep 1 :drop 2}}}})
+               prod (k/overlay base {{:spec {{:replicas 3 :extra {{:drop nil}}}}}})]
+           (k/write! \"{d}\" {{:kustomization {{:namespace \"x\"}}
+                              :resources {{\"deploy.yaml\" prod}}}})
+           [(get-in prod [:spec :replicas])
+            (get-in prod [:spec :extra])
+            (cljrsh.fs/exists? \"{d}/kustomization.yaml\")
+            (some? (clojure.string/index-of (slurp \"{d}/kustomization.yaml\") \"deploy.yaml\"))])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(
+        r.stdout, "[3 {:keep 1} true true]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn kustomize_build_when_kubectl_available() {
+    if std::process::Command::new("kubectl")
+        .arg("version")
+        .arg("--client")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skipping: kubectl not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[kustomize :as k])
+         (k/write! \"{d}\" {{:kustomization {{:namespace \"ns1\"}}
+                            :resources {{\"cm.yaml\" (k/manifest \"v1\" :ConfigMap \"c\" {{}})}}}})
+         (let [rendered (k/build \"{d}\")]
+           [(mapv :kind rendered) (get-in (first rendered) [:metadata :namespace])])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[[\"ConfigMap\"] \"ns1\"]\n", "stderr: {}", r.stderr);
+}

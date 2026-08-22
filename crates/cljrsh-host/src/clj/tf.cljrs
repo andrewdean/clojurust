@@ -1,0 +1,142 @@
+;; tf — Terraform/OpenTofu as Clojure data.
+;;
+;; Terraform natively reads JSON configuration (*.tf.json), so a stack is
+;; nothing but an EDN map in exactly that shape; every helper here returns a
+;; plain map fragment and (tf/stack ...) merges fragments with duplicate
+;; detection. Nothing is hidden: whatever the JSON syntax allows, the map
+;; allows. References are ordinary "${...}" strings built by tf/ref.
+;;
+;;   (tf/stack
+;;     (tf/provider :aws {:region "us-east-1"})
+;;     (tf/resource :aws_s3_bucket :content {:bucket "causeway-content"})
+;;     (tf/output :bucket-arn {:value (tf/ref :aws_s3_bucket.content.arn)}))
+;;
+;; Emission: (tf/write! dir stack) → dir/main.tf.json.
+;; Engine:   (tf/init! dir), (tf/validate! dir), (tf/plan! dir),
+;;           (tf/apply! dir {:auto-approve true}) — shell out to the
+;;           configured binary (*bin*, default "tofu", or "terraform").
+(ns tf
+  (:require [cljrsh.json] [cljrsh.fs] [cljrs.process] [clojure.string]))
+
+(def ^:dynamic *bin* "tofu")
+
+;; ── fragments ────────────────────────────────────────────────────────────────
+
+(defn- named [k] (if (keyword? k) (name k) (str k)))
+
+(defn resource
+  "One resource block: {:resource {type {name body}}}."
+  [type name* body]
+  {:resource {(keyword (named type)) {(keyword (named name*)) body}}})
+
+(defn data
+  "One data source block."
+  [type name* body]
+  {:data {(keyword (named type)) {(keyword (named name*)) body}}})
+
+(defn module [name* body]
+  {:module {(keyword (named name*)) body}})
+
+(defn provider [name* body]
+  {:provider {(keyword (named name*)) body}})
+
+(defn variable [name* body]
+  {:variable {(keyword (named name*)) body}})
+
+(defn output [name* body]
+  {:output {(keyword (named name*)) body}})
+
+(defn locals [m]
+  {:locals m})
+
+(defn terraform
+  "The settings block: required_providers, backend, required_version."
+  [body]
+  {:terraform body})
+
+(defn backend [type body]
+  {:terraform {:backend {(keyword (named type)) body}}})
+
+;; ── references / expressions ─────────────────────────────────────────────────
+
+(defn expr
+  "A raw Terraform expression string: (expr \"length(var.xs)\")."
+  [s]
+  (str "${" s "}"))
+
+(defn ref
+  "An address reference. Accepts one dotted keyword or segments:
+  (ref :aws_s3_bucket.content.arn), (ref :var :region),
+  (ref :aws_s3_bucket :content :arn)."
+  [& parts]
+  (expr (clojure.string/join "." (map named parts))))
+
+(defn var-ref [name*] (ref :var (named name*)))
+(defn local-ref [name*] (ref :local (named name*)))
+
+;; ── stack assembly ───────────────────────────────────────────────────────────
+
+(defn- merge-frag [path a b]
+  (cond
+    (nil? a) b
+    (and (map? a) (map? b))
+    (reduce (fn [acc [k v]] (assoc acc k (merge-frag (conj path k) (clojure.core/get acc k) v)))
+            a (seq b))
+    :else (throw (ex-info (str "duplicate definition at " (clojure.string/join "." (map named path)))
+                          {:path path}))))
+
+(defn stack
+  "Merge fragments into one tf.json-shaped map; colliding definitions throw."
+  [& fragments]
+  (reduce (fn [acc frag] (merge-frag [] acc frag)) {} (remove nil? fragments)))
+
+;; ── emission ─────────────────────────────────────────────────────────────────
+
+(defn json
+  "The stack as pretty-printed Terraform JSON."
+  [stack*]
+  (cljrsh.json/generate-string stack* {:pretty true}))
+
+(defn write!
+  "Write the stack to dir/main.tf.json (creating dir); returns the file path."
+  ([dir stack*] (write! dir "main.tf.json" stack*))
+  ([dir file stack*]
+   (cljrsh.fs/create-dirs dir)
+   (let [path (str dir "/" file)]
+     (spit path (json stack*))
+     path)))
+
+;; ── engine invocation ────────────────────────────────────────────────────────
+
+(defn- run! [dir args]
+  (let [res (apply cljrs.process/sh *bin* (concat args [:dir (str dir)]))]
+    (if (zero? (:exit res))
+      res
+      (throw (ex-info (str *bin* " " (first args) " failed:\n" (:err res) (:out res))
+                      res)))))
+
+(defn init! [dir] (run! dir ["init" "-input=false" "-no-color"]))
+(defn validate! [dir] (run! dir ["validate" "-no-color"]))
+(defn plan!
+  ([dir] (plan! dir {}))
+  ([dir {:keys [vars]}]
+   (run! dir (concat ["plan" "-input=false" "-no-color"]
+                     (mapcat (fn [[k v]] ["-var" (str (named k) "=" v)]) vars)))))
+(defn apply!
+  ([dir] (apply! dir {}))
+  ([dir {:keys [vars auto-approve] :or {auto-approve true}}]
+   (run! dir (concat ["apply" "-input=false" "-no-color"]
+                     (when auto-approve ["-auto-approve"])
+                     (mapcat (fn [[k v]] ["-var" (str (named k) "=" v)]) vars)))))
+(defn destroy!
+  ([dir] (destroy! dir {}))
+  ([dir {:keys [auto-approve] :or {auto-approve true}}]
+   (run! dir (concat ["destroy" "-input=false" "-no-color"]
+                     (when auto-approve ["-auto-approve"])))))
+
+(defn output!
+  "Read the stack's outputs as data."
+  [dir]
+  (-> (run! dir ["output" "-json" "-no-color"])
+      :out
+      (cljrsh.json/parse-string true)))
