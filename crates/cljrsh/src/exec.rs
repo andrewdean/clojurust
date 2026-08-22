@@ -33,6 +33,7 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
     });
     cljrs_process::init(&globals);
     cljrsh_host::init(&globals);
+    cljrsh_pods::init(&globals);
     #[cfg(feature = "nu")]
     cljrsh_nu::init(&globals);
 

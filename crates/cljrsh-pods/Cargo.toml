@@ -1,0 +1,31 @@
+[package]
+name = "cljrsh-pods"
+version = "0.1.0"
+edition = "2024"
+description = "babashka pod protocol client for cljrsh: bencode over stdio, pod namespaces registered as native fns"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cljrs-bencode = { workspace = true }
+cljrs-env     = { workspace = true }
+cljrs-interop = { workspace = true }
+cljrs-interp  = { workspace = true }
+cljrs-gc      = { workspace = true }
+cljrs-value   = { workspace = true }
+cljrs-builtins = { workspace = true }
+cljrs-reader  = { workspace = true }
+cljrsh-host   = { workspace = true }
+serde_json    = "1"
+cljrs-types   = { workspace = true }
+uuid          = { workspace = true }
+
+[dev-dependencies]
+cljrs-stdlib = { workspace = true }
+cljrs-interp = { workspace = true }
+cljrs-reader = { workspace = true }
+cljrs-env    = { workspace = true }
+
+[[bin]]
+name = "cljrsh-test-pod"
+path = "src/bin/test_pod.rs"

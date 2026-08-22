@@ -81,6 +81,8 @@ fn main() {
             let local = tokio::task::LocalSet::new();
             ASYNC_DRIVER.with(|d| *d.borrow_mut() = Some(AsyncDriver { rt, local }));
             let code = run(opts);
+            // Clean pod shutdown before process::exit (which skips Drop).
+            cljrsh_pods::shutdown_all();
             ASYNC_DRIVER.with(|d| *d.borrow_mut() = None);
             code
         })

@@ -1629,6 +1629,7 @@ dependencies = [
  "cljrs-value",
  "cljrsh-host",
  "cljrsh-nu",
+ "cljrsh-pods",
  "cljrsh-project",
  "libc",
  "rustyline",
@@ -1677,6 +1678,25 @@ dependencies = [
  "nu-engine",
  "nu-parser",
  "nu-protocol",
+ "uuid",
+]
+
+[[package]]
+name = "cljrsh-pods"
+version = "0.1.0"
+dependencies = [
+ "cljrs-bencode",
+ "cljrs-builtins",
+ "cljrs-env",
+ "cljrs-gc",
+ "cljrs-interop",
+ "cljrs-interp",
+ "cljrs-reader",
+ "cljrs-stdlib",
+ "cljrs-types",
+ "cljrs-value",
+ "cljrsh-host",
+ "serde_json",
  "uuid",
 ]
 

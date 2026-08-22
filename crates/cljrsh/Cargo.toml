@@ -25,6 +25,7 @@ cljrs-charset  = { workspace = true }
 cljrs-process  = { workspace = true }
 cljrsh-host    = { workspace = true }
 cljrsh-project = { workspace = true }
+cljrsh-pods    = { workspace = true }
 cljrsh-nu      = { workspace = true, optional = true }
 tokio = { version = "1.50.0", features = ["rt", "sync", "time", "macros"] }
 rustyline = { workspace = true }

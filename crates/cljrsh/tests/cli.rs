@@ -580,3 +580,31 @@ fn pmap_and_promise() {
     );
     assert_eq!(r.stdout, "[[2 3 4] :d]\n", "stderr: {}", r.stderr);
 }
+
+// ── Pods (cljrsh-pods, bundled test pod) ─────────────────────────────────────
+
+#[test]
+fn pods_end_to_end_through_binary() {
+    // The test pod binary lives in the same target dir as cljrsh.
+    let pod = std::path::Path::new(env!("CARGO_BIN_EXE_cljrsh"))
+        .with_file_name("cljrsh-test-pod");
+    if !pod.exists() {
+        eprintln!("skipping: cljrsh-test-pod not built");
+        return;
+    }
+    let expr = format!(
+        "(require '[babashka.pods :as pods])
+         (pods/load-pod \"{}\")
+         [(pod.test-pod/add-sync 40 2)
+          (pod.test-pod/from-code)
+          (try (pod.test-pod/error-fn)
+               (catch Exception e (:pod-var (ex-data e))))]",
+        pod.display()
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(
+        r.stdout, "[42 :evaluated-client-side :error-fn]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
