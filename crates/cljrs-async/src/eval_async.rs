@@ -140,6 +140,12 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
     // each element with eval_async so awaits yield cooperatively instead of
     // blocking the LocalSet thread via the sync condvar path.
     match &form.kind {
+        // `@x` sugar: a future/promise derefs cooperatively (yield to the
+        // executor) instead of blocking the LocalSet thread.
+        FormKind::Deref(inner) => {
+            let v = Box::pin(eval_async(inner, env)).await?;
+            return deref_async(v, env).await;
+        }
         FormKind::Vector(elems) => {
             let elems = elems.clone();
             let mut vals: Vec<Value> = Vec::with_capacity(elems.len());
@@ -190,6 +196,12 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
     if let FormKind::Symbol(s) = &forms[0].kind {
         match s.as_str() {
             "await" => return eval_await_async(&forms[1..], env).await,
+            // 1-arity deref of a future/promise yields cooperatively; other
+            // deref targets (and the 3-arity timeout form) take the sync path.
+            "deref" if forms.len() == 2 => {
+                let v = Box::pin(eval_async(&forms[1], env)).await?;
+                return deref_async(v, env).await;
+            }
             "do" => return eval_body_async(&forms[1..], env).await,
             "if" => return eval_if_async(&forms[1..], env).await,
             "let*" | "let" => return eval_let_async(&forms[1..], env).await,
@@ -211,6 +223,22 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
 
     // Non-symbol head (e.g. `((f) args)`): no yielding in Phase B.
     eval(&expanded, env)
+}
+
+/// Cooperative deref: futures/promises await on the executor; anything else
+/// goes through the ordinary `deref` builtin (atoms, delays, vars, ...).
+async fn deref_async(v: Value, env: &mut Env) -> EvalResult {
+    match &v {
+        Value::Future(_) | Value::Promise(_) => await_value(v).await,
+        _ => {
+            let deref_fn = env
+                .globals
+                .lookup_var("clojure.core", "deref")
+                .and_then(|var| cljrs_env::dynamics::deref_var(&var))
+                .ok_or_else(|| EvalError::UnboundSymbol("deref".into()))?;
+            cljrs_env::apply::apply_value(&deref_fn, vec![v], env)
+        }
+    }
 }
 
 /// `(await x)` — evaluate `x`, then yield until the resulting future/promise

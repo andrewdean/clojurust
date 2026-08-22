@@ -1508,6 +1508,10 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("instant", Arity::Fixed(1), crate::time::builtin_instant),
         ("instant-ms", Arity::Fixed(1), crate::time::builtin_instant_ms),
         ("instant?", Arity::Fixed(1), crate::time::builtin_instant_q),
+        ("future-done?", Arity::Fixed(1), builtin_future_done_q),
+        ("future-cancelled?", Arity::Fixed(1), builtin_future_cancelled_q),
+        ("future-cancel", Arity::Fixed(1), builtin_future_cancel),
+        ("future?", Arity::Fixed(1), builtin_future_q),
         (
             "System/getProperty",
             Arity::Variadic { min: 1 },
@@ -6044,6 +6048,28 @@ fn builtin_deref(args: &[Value]) -> ValueResult<Value> {
                     "deref on a future is not allowed inside an ^:async function; use (await ...) instead".into(),
                 ));
             }
+            // Work-stealing: on the single-threaded runtime a blocking wait
+            // can never be satisfied by a same-thread task, so if the body
+            // has not started yet, claim it and run it inline right now.
+            if let Some(thunk) = f.get().claim_thunk() {
+                let outcome = cljrs_env::callback::invoke(&thunk, Vec::new());
+                let mut state = f.get().state.lock().unwrap();
+                if matches!(&*state, FutureState::Running) {
+                    *state = match outcome {
+                        Ok(v) => FutureState::Done(v),
+                        Err(ValueError::Thrown(v)) => FutureState::Failed(v),
+                        Err(ValueError::GasExhausted) => FutureState::GasExhausted,
+                        Err(other) => {
+                            let msg = other.to_string();
+                            FutureState::Failed(Value::Error(GcPtr::new(
+                                cljrs_value::ExceptionInfo::new(other, msg, None, None),
+                            )))
+                        }
+                    };
+                }
+                drop(state);
+                f.get().cond.notify_all();
+            }
             if with_timeout {
                 let timeout_ms = match &args[1] {
                     Value::Long(n) => *n as u64,
@@ -8156,8 +8182,10 @@ fn builtin_deliver(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-// These functions are kept for future use but are not currently registered.
-#[allow(dead_code)]
+fn builtin_future_q(args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Future(_))))
+}
+
 fn builtin_future_done_q(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => Ok(Value::Bool(f.get().is_done())),
@@ -8168,7 +8196,6 @@ fn builtin_future_done_q(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-#[allow(dead_code)]
 fn builtin_future_cancelled_q(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => Ok(Value::Bool(f.get().is_cancelled())),
@@ -8179,7 +8206,6 @@ fn builtin_future_cancelled_q(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-#[allow(dead_code)]
 fn builtin_future_cancel(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => {

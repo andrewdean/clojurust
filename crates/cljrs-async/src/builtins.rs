@@ -255,6 +255,52 @@ fn builtin_put_blocking(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(chan_ref(ch.get()).put_blocking(val)))
 }
 
+/// `(future-call thunk)` — babashka/Clojure `future` support on the
+/// single-threaded runtime. The zero-arg `thunk` is stored on the returned
+/// `Value::Future` as a **claimable body**: an executor task claims and runs
+/// it in an async context when the LocalSet gets driven, while a synchronous
+/// `deref` that arrives first steals it and runs it inline (see
+/// `CljxFuture::claim_thunk`) — so `(mapv deref futs)` can never deadlock the
+/// executor thread, and evaluation that yields (channel ops, `await`,
+/// top-level form boundaries) gets genuine interleaving.
+fn builtin_future_call(args: &[Value]) -> ValueResult<Value> {
+    let thunk = args.first().cloned().unwrap_or(Value::Nil);
+    let (globals, ns) = cljrs_env::callback::capture_eval_context()
+        .ok_or_else(|| ValueError::Other("future-call called outside an eval context".into()))?;
+    let rt = globals.async_runtime().ok_or_else(|| {
+        ValueError::Other("future-call requires the async runtime".into())
+    })?;
+    let future = GcPtr::new(cljrs_value::CljxFuture::new_with_thunk(thunk));
+    let fut_val = Value::Future(future.clone());
+    // Outside a Tokio context (a plain sync embedding) there is no executor
+    // to queue the body on; the future stays claimable and the first deref
+    // runs it inline.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let task_future = future.clone();
+        let call_env = Env::new(globals, &ns);
+        spawn_future(async move {
+            if let Some(body) = task_future.get().claim_thunk() {
+                let inner = rt.spawn_async_call(body, Vec::new(), call_env);
+                let result = await_value(inner).await;
+                crate::eval_async::settle_future(&task_future, result);
+            }
+            Ok(Value::Nil)
+        });
+    }
+    Ok(fut_val)
+}
+
+/// Intern `future-call` into clojure.core (it belongs there, not in
+/// clojure.core.async) and evaluate the `future`/`pmap` layer.
+pub fn register_core(globals: &std::sync::Arc<GlobalEnv>) {
+    let nf = NativeFn::new("future-call", Arity::Fixed(1), builtin_future_call);
+    globals.intern(
+        "clojure.core",
+        std::sync::Arc::from("future-call"),
+        Value::NativeFunction(GcPtr::new(nf)),
+    );
+}
+
 /// `(async-spawn thunk)` — run a zero-arg function as an async task on the
 /// `LocalSet`, returning a `Value::Future`. The thunk body runs in an async
 /// context, so `await` inside it yields. This is the runtime behind `go`.

@@ -520,3 +520,63 @@ fn unknown_task_reports_cleanly() {
     assert_eq!(r.code, 2);
     assert!(r.stderr.contains("neither a file nor a task"));
 }
+
+// ── Futures / pmap / promise (milestone A7) ──────────────────────────────────
+
+#[test]
+fn future_deref_top_level() {
+    let r = run(&["-e", "@(future (+ 40 2))"], None, &[]);
+    assert_eq!(r.stdout, "42\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn mapv_deref_futures_no_deadlock() {
+    let r = run(
+        &["-e", "(mapv deref (mapv (fn [i] (future (* i 10))) [1 2 3]))"],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[10 20 30]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn future_error_propagates_with_ex_data() {
+    let r = run(
+        &[
+            "-e",
+            "(try @(future (throw (ex-info \"boom\" {:k 1})))
+                  (catch Exception e [(ex-message e) (:k (ex-data e))]))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[\"boom\" 1]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn future_predicates_and_single_run() {
+    let r = run(
+        &[
+            "-e",
+            "(let [f (future (println \"ran\") :done)]
+               [(future? f) @f @f (future-done? f)])",
+        ],
+        None,
+        &[],
+    );
+    // Body printed exactly once even with two derefs.
+    assert_eq!(r.stdout, "ran\n[true :done :done true]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn pmap_and_promise() {
+    let r = run(
+        &[
+            "-e",
+            "[(vec (pmap inc [1 2 3])) (let [p (promise)] (deliver p :d) @p)]",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[[2 3 4] :d]\n", "stderr: {}", r.stderr);
+}

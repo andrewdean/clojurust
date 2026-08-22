@@ -172,36 +172,37 @@ fn defn_attr_map_marks_async() {
     });
 }
 
-// ── Phase C: deref enforcement in async context ────────────────────────────
+// ── Phase C: deref in async context ─────────────────────────────────────────
+// Since the future-call milestone, a 1-arity `deref`/`@` of a future inside
+// an ^:async body is intercepted by eval_async and awaits cooperatively —
+// matching Clojure instead of erroring. (The sync builtin path still rejects
+// higher-order deref inside async contexts.)
 
 #[test]
-fn deref_of_future_in_async_fn_errors() {
+fn deref_of_future_in_async_fn_awaits() {
     let globals = async_env();
     block_on_local(async move {
         let mut env = Env::new(globals, "user");
         eval_sync("(defn ^:async producer [] 42)", &mut env);
-        eval_sync("(defn ^:async bad [] (deref (producer)))", &mut env);
-        let r = eval_async(&parse_one("(await (bad))"), &mut env).await;
-        let err = format!("{:?}", r.unwrap_err());
-        assert!(err.contains("await"), "error should steer to await: {err}");
+        eval_sync("(defn ^:async ok [] (deref (producer)))", &mut env);
+        let r = eval_async(&parse_one("(await (ok))"), &mut env).await;
+        assert_eq!(r.unwrap(), Value::Long(42));
     });
 }
 
 #[test]
-fn at_deref_of_future_in_async_fn_errors() {
+fn at_deref_of_future_in_async_fn_awaits() {
     let globals = async_env();
     block_on_local(async move {
         let mut env = Env::new(globals, "user");
         eval_sync("(defn ^:async producer [] 42)", &mut env);
-        eval_sync("(defn ^:async bad [] @(producer))", &mut env);
-        let r = eval_async(&parse_one("(await (bad))"), &mut env).await;
-        let err = format!("{:?}", r.unwrap_err());
-        assert!(err.contains("await"), "error should steer to await: {err}");
+        eval_sync("(defn ^:async ok [] @(producer))", &mut env);
+        let r = eval_async(&parse_one("(await (ok))"), &mut env).await;
+        assert_eq!(r.unwrap(), Value::Long(42));
     });
 }
 
 #[test]
-#[ignore = "future/thread spawn not yet implemented (Phase A1 — GcPtr: !Send)"]
 fn deref_of_future_in_sync_context_still_works() {
     // With the async runtime registered, a *sync* (non-^:async) deref of a
     // thread-based future must still block-and-return, not error.

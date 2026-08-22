@@ -117,6 +117,23 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
                     "deref (@) on a future is not allowed inside an ^:async function; use (await ...) instead".into(),
                 ));
             }
+            // Work-stealing (see the deref builtin): a sync wait can never be
+            // satisfied by a same-thread executor task, so run an unstarted
+            // future body inline before falling into the blocking wait.
+            if let Value::Future(f) = &v
+                && let Some(thunk) = f.get().claim_thunk()
+            {
+                let outcome = cljrs_env::apply::apply_value(&thunk, Vec::new(), env);
+                let mut state = f.get().state.lock().unwrap();
+                if matches!(&*state, cljrs_value::FutureState::Running) {
+                    *state = match outcome {
+                        Ok(v) => cljrs_value::FutureState::Done(v),
+                        Err(e) => cljrs_value::FutureState::Failed(e.to_error_value()),
+                    };
+                }
+                drop(state);
+                f.get().cond.notify_all();
+            }
             deref_value(v)
         }
         FormKind::Var(inner) => {

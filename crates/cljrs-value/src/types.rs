@@ -1116,6 +1116,12 @@ pub struct CljxFuture {
     /// Used to warn about a `Failed` future that is discarded without anyone
     /// ever observing its error (the fire-and-forget footgun).
     observed: std::sync::atomic::AtomicBool,
+    /// Deferred body (a zero-arg fn) for **work-stealing deref**: on the
+    /// single-threaded runtime a synchronous `deref` cannot drive the
+    /// executor, so it claims the not-yet-started body and runs it inline
+    /// instead of deadlocking. The executor task and stealing deref race on
+    /// `claim_thunk`; exactly one wins.
+    thunk: Mutex<Option<Value>>,
 }
 
 impl CljxFuture {
@@ -1124,7 +1130,23 @@ impl CljxFuture {
             state: Mutex::new(FutureState::Running),
             cond: Condvar::new(),
             observed: std::sync::atomic::AtomicBool::new(false),
+            thunk: Mutex::new(None),
         }
+    }
+
+    /// A future whose body is stored for work-stealing (see `thunk`).
+    pub fn new_with_thunk(thunk: Value) -> Self {
+        Self {
+            state: Mutex::new(FutureState::Running),
+            cond: Condvar::new(),
+            observed: std::sync::atomic::AtomicBool::new(false),
+            thunk: Mutex::new(Some(thunk)),
+        }
+    }
+
+    /// Take the deferred body, if nobody claimed it yet.
+    pub fn claim_thunk(&self) -> Option<Value> {
+        self.thunk.lock().unwrap().take()
     }
 
     /// True if done, failed, or cancelled (not still running).
@@ -1191,6 +1213,10 @@ impl cljrs_gc::Trace for CljxFuture {
             if let FutureState::Done(v) | FutureState::Failed(v) = &*state {
                 v.trace(visitor);
             }
+        }
+        // The unclaimed body is a closure holding GcPtrs — keep it alive.
+        if let Some(t) = &*self.thunk.lock().unwrap() {
+            t.trace(visitor);
         }
     }
 }
