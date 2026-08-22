@@ -8,6 +8,12 @@
 //! - `<name>.in`   — stdin
 //! - `<name>.exit` — expected exit code (default 0)
 //! - `<name>.err`  — substring that must appear in stderr
+//! - `<name>.requires` — capability names, one per line; the case is skipped
+//!                   (with a note) when one is unavailable. Known: `test-pod`.
+//!
+//! Cases may also live one directory deep (`tests/bb-conformance/<case>/`);
+//! those run with the subdirectory as cwd, so a case can carry its own
+//! `bb.edn`, source tree, or local deps.
 //!
 //! One #[test] per behavior area would hide coverage; instead this walks the
 //! whole corpus and reports every failing case at once.
@@ -25,10 +31,40 @@ struct Failure {
     detail: String,
 }
 
+/// Path of the bundled test pod if it has been built into the shared target
+/// dir (workspace `cargo test`/`cargo build` puts it next to cljrsh).
+fn test_pod_path() -> Option<std::path::PathBuf> {
+    let pod = Path::new(env!("CARGO_BIN_EXE_cljrsh"))
+        .parent()?
+        .join(format!("cljrsh-test-pod{}", std::env::consts::EXE_SUFFIX));
+    pod.exists().then_some(pod)
+}
+
 fn run_case(script: &Path) -> Result<(), String> {
     let sidecar = |ext: &str| -> Option<String> {
         std::fs::read_to_string(script.with_extension(ext)).ok()
     };
+    let mut envs: Vec<(String, String)> = Vec::new();
+    if let Some(requires) = sidecar("requires") {
+        for cap in requires.split_whitespace() {
+            match cap {
+                "test-pod" => match test_pod_path() {
+                    Some(pod) => envs.push((
+                        "CLJRSH_TEST_POD".to_string(),
+                        pod.to_string_lossy().into_owned(),
+                    )),
+                    None => {
+                        eprintln!(
+                            "skipping {}: cljrsh-test-pod not built",
+                            script.display()
+                        );
+                        return Ok(());
+                    }
+                },
+                other => return Err(format!("unknown .requires capability: {other}")),
+            }
+        }
+    }
     let expected_out = sidecar("out").ok_or("missing .out sidecar")?;
     let args_template = sidecar("args").unwrap_or_else(|| "{file}".to_string());
     let stdin = sidecar("in");
@@ -44,6 +80,7 @@ fn run_case(script: &Path) -> Result<(), String> {
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_cljrsh"));
     cmd.args(&argv)
+        .envs(envs)
         .current_dir(script.parent().unwrap())
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -93,12 +130,23 @@ fn run_case(script: &Path) -> Result<(), String> {
 #[test]
 fn bb_conformance_corpus() {
     let dir = corpus_dir();
-    let mut scripts: Vec<_> = std::fs::read_dir(&dir)
-        .expect("bb-conformance dir")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "clj"))
-        .collect();
+    let mut scripts: Vec<_> = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("bb-conformance dir") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().is_some_and(|e| e == "clj") {
+            scripts.push(path);
+        } else if path.is_dir() {
+            // One level deep: a case directory with its own cwd (bb.edn etc).
+            for sub in std::fs::read_dir(&path).expect("case dir") {
+                let sub = sub.expect("dir entry").path();
+                if sub.extension().is_some_and(|e| e == "clj")
+                    && sub.with_extension("out").exists()
+                {
+                    scripts.push(sub);
+                }
+            }
+        }
+    }
     scripts.sort();
     assert!(!scripts.is_empty(), "empty corpus at {}", dir.display());
 

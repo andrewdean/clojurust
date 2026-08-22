@@ -7,7 +7,7 @@
 //! values, and unbounded ranges do not convert and raise errors.
 
 use cljrs_gc::GcPtr;
-use cljrs_value::value::{MapValue, SetValue};
+use cljrs_value::value::MapValue;
 use cljrs_value::{Keyword, PersistentVector, Value};
 use nu_protocol::{Record, Span, Value as NuValue};
 
@@ -141,10 +141,7 @@ pub fn clj_to_nu(v: &Value) -> Result<NuValue, String> {
             span,
         ),
         Value::Set(set) => {
-            let items: Vec<NuValue> = match set {
-                SetValue::Hash(s) => s.get().iter().map(clj_to_nu).collect::<Result<_, _>>()?,
-                SetValue::Sorted(s) => s.get().iter().map(clj_to_nu).collect::<Result<_, _>>()?,
-            };
+            let items: Vec<NuValue> = set.iter().map(clj_to_nu).collect::<Result<_, _>>()?;
             NuValue::list(items, span)
         }
         Value::Map(m) => {

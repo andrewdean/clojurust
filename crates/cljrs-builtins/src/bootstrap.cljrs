@@ -473,9 +473,17 @@
   [pred expr & clauses]
   (if (seq clauses)
     (if (next clauses)
-      (list 'if (list pred (first clauses) expr)
-            (second clauses)
-            (cons 'condp (cons pred (cons expr (next (next clauses))))))
+      (if (= :>> (second clauses))
+        ;; Ternary clause: test :>> result-fn — the fn is called with the
+        ;; (truthy) predicate result.
+        (let [t (gensym "condp")]
+          (list 'let [t (list pred (first clauses) expr)]
+                (list 'if t
+                      (list (nth clauses 2) t)
+                      (cons 'condp (cons pred (cons expr (drop 3 clauses)))))))
+        (list 'if (list pred (first clauses) expr)
+              (second clauses)
+              (cons 'condp (cons pred (cons expr (next (next clauses)))))))
       (first clauses))
     (throw (ex-info "condp: no matching clause" {}))))
 
@@ -915,7 +923,7 @@
        (let [fst (first s)
              fv  (f fst)
              run (cons fst (take-while #(= fv (f %)) (rest s)))]
-         (cons (vec run)
+         (cons run
                (partition-by f (drop (count run) s))))))))
 
 (defn map-indexed

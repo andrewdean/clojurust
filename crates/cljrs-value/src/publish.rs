@@ -80,6 +80,7 @@ fn scan_map(m: &MapValue) -> Scan {
         MapValue::Array(p) => tag(p),
         MapValue::Hash(p) => tag(p),
         MapValue::Sorted(p) => tag(p),
+        MapValue::SortedBy(p) => tag(p),
     };
     m.for_each(|k, v| {
         acc = acc.join(scan(k)).join(scan(v));
@@ -128,6 +129,7 @@ fn scan(v: &Value) -> Scan {
             let t = match s {
                 SetValue::Hash(p) => tag(p),
                 SetValue::Sorted(p) => tag(p),
+                SetValue::SortedBy(p) => tag(p),
             };
             s.iter().fold(t, |acc, e| acc.join(scan(e)))
         }

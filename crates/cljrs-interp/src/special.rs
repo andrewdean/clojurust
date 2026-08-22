@@ -1642,14 +1642,37 @@ fn eval_letfn(args: &[Form], env: &mut Env) -> EvalResult {
 
     env.push_frame();
 
+    // Pass 1: pre-bind every name so each fn's closure captures a slot for
+    // its siblings (mutual recursion).
+    let mut names: Vec<Arc<str>> = Vec::new();
+    for binding in &bindings {
+        if let FormKind::List(parts) = &binding.kind
+            && let Some(first) = parts.first()
+        {
+            match &first.kind {
+                FormKind::Symbol(s) => {
+                    let name: Arc<str> = Arc::from(s.as_str());
+                    env.bind(name.clone(), Value::Nil);
+                    names.push(name);
+                }
+                _ => {
+                    env.pop_frame();
+                    return Err(EvalError::Runtime(
+                        "letfn binding name must be a symbol".into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Pass 2: evaluate each fn (parts[0] is the name, so eval_fn also wires
+    // self-recursion) and bind it.
+    let mut fns: Vec<(Arc<str>, Value)> = Vec::new();
     for binding in &bindings {
         if let FormKind::List(parts) = &binding.kind {
             if parts.is_empty() {
                 continue;
             }
-            // parts[0] = name, parts[1] = params, parts[2..] = body
-            // Reuse eval_fn: it expects (optional-name params body...)
-            // We pass parts directly since parts[0] is the function name symbol.
             let fn_val = match eval_fn(parts, env) {
                 Ok(v) => v,
                 Err(e) => {
@@ -1657,16 +1680,28 @@ fn eval_letfn(args: &[Form], env: &mut Env) -> EvalResult {
                     return Err(e);
                 }
             };
-            let name = match &parts[0].kind {
-                FormKind::Symbol(s) => s.clone(),
-                _ => {
-                    env.pop_frame();
-                    return Err(EvalError::Runtime(
-                        "letfn binding name must be a symbol".into(),
-                    ));
+            if let FormKind::Symbol(s) = &parts[0].kind {
+                env.bind(Arc::from(s.as_str()), fn_val.clone());
+                fns.push((Arc::from(s.as_str()), fn_val));
+            }
+        }
+    }
+
+    // Pass 3: patch each closure's captured slots for the letfn names — they
+    // were captured as placeholders (or earlier definitions) in pass 2.
+    for (_, val) in &fns {
+        if let Value::Fn(ptr) = val {
+            let mut ptr = ptr.clone();
+            let f = ptr.get_mut();
+            for i in 0..f.closed_over_names.len() {
+                let slot = f.closed_over_names[i].clone();
+                if names.contains(&slot)
+                    && let Some((_, replacement)) =
+                        fns.iter().find(|(n, _)| *n == slot)
+                {
+                    f.closed_over_vals[i] = replacement.clone();
                 }
-            };
-            env.bind(Arc::from(name.as_str()), fn_val);
+            }
         }
     }
 

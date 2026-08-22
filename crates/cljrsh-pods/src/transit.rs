@@ -302,10 +302,7 @@ pub fn encode(v: &Value) -> Result<Json, String> {
             Json::Array(items.get().iter().map(encode).collect::<Result<_, _>>()?),
         ]),
         Value::Set(set) => {
-            let items: Vec<Json> = match set {
-                SetValue::Hash(s) => s.get().iter().map(encode).collect::<Result<_, _>>()?,
-                SetValue::Sorted(s) => s.get().iter().map(encode).collect::<Result<_, _>>()?,
-            };
+            let items: Vec<Json> = set.iter().map(encode).collect::<Result<_, _>>()?;
             Json::Array(vec![Json::String("~#set".to_string()), Json::Array(items)])
         }
         Value::Map(m) => {

@@ -503,6 +503,9 @@ fn serialize_map(m: &MapValue) -> Result<SerializedValue, CloneError> {
         MapValue::Array(_) => SerializedValue::ArrayMap(pairs),
         MapValue::Hash(_) => SerializedValue::HashMap(pairs),
         MapValue::Sorted(_) => SerializedValue::SortedMap(pairs),
+        // The comparator fn cannot cross threads; snapshot as an
+        // order-preserving plain map.
+        MapValue::SortedBy(_) => SerializedValue::ArrayMap(pairs),
     })
 }
 
@@ -528,6 +531,7 @@ fn serialize_set(s: &SetValue) -> Result<SerializedValue, CloneError> {
     Ok(match s {
         SetValue::Hash(_) => SerializedValue::HashSet(items?),
         SetValue::Sorted(_) => SerializedValue::SortedSet(items?),
+        SetValue::SortedBy(_) => SerializedValue::HashSet(items?),
     })
 }
 

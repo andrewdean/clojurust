@@ -1,0 +1,12 @@
+(println (case 5 (1 2) :low (3 4 5) :mid :other))
+(println (case :x :y 1 :default))
+(println (condp = 3 1 :one 2 :two 3 :three :none))
+(println (condp some [1 2 3 4] #{0 6} :>> inc #{3 4} :>> dec :none))
+(letfn [(even2? [n] (if (zero? n) true (odd2? (dec n))))
+        (odd2? [n] (if (zero? n) false (even2? (dec n))))]
+  (println (even2? 10)))
+(println (some-> {:a {:b 2}} :a :b inc))
+(println (some-> {:a 1} :missing inc))
+(println (cond-> 1 true inc false (* 100) true (+ 10)))
+(println (cond->> [1 2 3] true (map inc) true (reduce +)))
+(println (->> (range 5) (filter odd?) (map #(* % %)) (reduce +)))

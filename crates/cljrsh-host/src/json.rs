@@ -6,7 +6,7 @@
 
 use cljrs_gc::GcPtr;
 use cljrs_interop::{Registry, wrap_fn_variadic};
-use cljrs_value::value::{MapValue, SetValue};
+use cljrs_value::value::MapValue;
 use cljrs_value::{Keyword, PersistentVector, Value};
 
 pub fn register(registry: &mut Registry) {
@@ -136,20 +136,11 @@ pub fn value_to_json(v: &Value) -> Result<serde_json::Value, String> {
                 .map(value_to_json)
                 .collect::<Result<_, _>>()?,
         ),
-        Value::Set(set) => match set {
-            SetValue::Hash(s) => serde_json::Value::Array(
-                s.get()
-                    .iter()
-                    .map(value_to_json)
-                    .collect::<Result<_, _>>()?,
-            ),
-            SetValue::Sorted(s) => serde_json::Value::Array(
-                s.get()
-                    .iter()
-                    .map(value_to_json)
-                    .collect::<Result<_, _>>()?,
-            ),
-        },
+        Value::Set(set) => serde_json::Value::Array(
+            set.iter()
+                .map(value_to_json)
+                .collect::<Result<_, _>>()?,
+        ),
         Value::Map(m) => {
             let mut obj = serde_json::Map::new();
             for (k, val) in m.iter() {

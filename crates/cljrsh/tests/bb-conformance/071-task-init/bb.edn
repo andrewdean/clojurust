@@ -1,0 +1,2 @@
+{:tasks {:init (def base 10)
+         calc (println (+ base 32))}}

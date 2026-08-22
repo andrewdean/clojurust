@@ -1387,6 +1387,8 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("sorted-set", Arity::Variadic { min: 0 }, builtin_sorted_set),
         ("sorted-set?", Arity::Fixed(1), builtin_sorted_set_q),
         ("sorted-map", Arity::Variadic { min: 0 }, builtin_sorted_map),
+        ("sorted-map-by", Arity::Variadic { min: 1 }, builtin_sorted_map_by),
+        ("sorted-set-by", Arity::Variadic { min: 1 }, builtin_sorted_set_by),
         ("sorted-map?", Arity::Fixed(1), builtin_sorted_map_q),
         ("walk", Arity::Fixed(3), builtin_walk_stub),
         ("postwalk", Arity::Fixed(2), builtin_postwalk_stub),
@@ -3512,15 +3514,17 @@ fn builtin_conj(args: &[Value]) -> ValueResult<Value> {
                 Value::List(GcPtr::new(PersistentList::cons(v.clone(), tail_clone)))
             }
             Value::Vector(vec) => Value::Vector(GcPtr::new(vec.get().conj(v.clone()))),
-            Value::Set(s) => Value::Set(s.conj(v.clone())),
+            Value::Set(s) => Value::Set(set_conj_cmp(&s, v.clone())?),
             Value::Map(m) => {
                 // v can be a [key val] pair or another map.
                 match v.unwrap_meta() {
                     Value::Map(other) => {
                         let mut merged = m;
-                        other.for_each(|k, val| {
-                            merged = merged.assoc(k.clone(), val.clone());
-                        });
+                        let mut pairs: Vec<(Value, Value)> = Vec::new();
+                        other.for_each(|k, val| pairs.push((k.clone(), val.clone())));
+                        for (k, val) in pairs {
+                            merged = map_assoc_cmp(&merged, k, val)?;
+                        }
                         Value::Map(merged)
                     }
                     Value::Vector(_) => {
@@ -3631,7 +3635,7 @@ fn builtin_assoc(args: &[Value]) -> ValueResult<Value> {
         }
     };
     for pair in args[1..].chunks(2) {
-        result = result.assoc(pair[0].clone(), pair[1].clone());
+        result = map_assoc_cmp(&result, pair[0].clone(), pair[1].clone())?;
     }
     Ok(apply_meta(Value::Map(result)))
 }
@@ -7796,6 +7800,35 @@ fn invoke_compare(comp: &Value, a: &Value, b: &Value) -> ValueResult<std::cmp::O
     interpret_compare_result(&result)
 }
 
+/// assoc that keeps comparator order for `sorted-map-by` maps; plain
+/// `MapValue::assoc` for everything else.
+fn map_assoc_cmp(m: &MapValue, k: Value, v: Value) -> ValueResult<MapValue> {
+    match m {
+        MapValue::SortedBy(sbm) => {
+            let comp = sbm.get().comparator.clone();
+            let new = sbm
+                .get()
+                .assoc_with(k, v, &mut |a, b| invoke_compare(&comp, a, b))?;
+            Ok(MapValue::SortedBy(GcPtr::new(new)))
+        }
+        other => Ok(other.assoc(k, v)),
+    }
+}
+
+/// conj that keeps comparator order for `sorted-set-by` sets.
+fn set_conj_cmp(s: &SetValue, v: Value) -> ValueResult<SetValue> {
+    match s {
+        SetValue::SortedBy(sbs) => {
+            let comp = sbs.get().comparator.clone();
+            let new = sbs
+                .get()
+                .conj_with(v, &mut |a, b| invoke_compare(&comp, a, b))?;
+            Ok(SetValue::SortedBy(GcPtr::new(new)))
+        }
+        other => Ok(other.conj(v)),
+    }
+}
+
 fn builtin_sorted_set(args: &[Value]) -> ValueResult<Value> {
     let set = SortedSet::from_iter(args.iter().cloned());
     Ok(Value::Set(SetValue::Sorted(GcPtr::new(set))))
@@ -7804,7 +7837,7 @@ fn builtin_sorted_set(args: &[Value]) -> ValueResult<Value> {
 fn builtin_sorted_set_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
         &args[0],
-        Value::Set(SetValue::Sorted(_))
+        Value::Set(SetValue::Sorted(_) | SetValue::SortedBy(_))
     )))
 }
 
@@ -7822,8 +7855,33 @@ fn builtin_sorted_map(args: &[Value]) -> ValueResult<Value> {
 fn builtin_sorted_map_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
         &args[0],
-        Value::Map(MapValue::Sorted(_))
+        Value::Map(MapValue::Sorted(_) | MapValue::SortedBy(_))
     )))
+}
+
+fn builtin_sorted_map_by(args: &[Value]) -> ValueResult<Value> {
+    let comp = args[0].clone();
+    if !(args.len() - 1).is_multiple_of(2) {
+        return Err(ValueError::OddMap {
+            count: args.len() - 1,
+        });
+    }
+    let mut m = cljrs_value::collections::SortedByMap::new(comp.clone());
+    for pair in args[1..].chunks(2) {
+        m = m.assoc_with(pair[0].clone(), pair[1].clone(), &mut |a, b| {
+            invoke_compare(&comp, a, b)
+        })?;
+    }
+    Ok(Value::Map(MapValue::SortedBy(GcPtr::new(m))))
+}
+
+fn builtin_sorted_set_by(args: &[Value]) -> ValueResult<Value> {
+    let comp = args[0].clone();
+    let mut set = cljrs_value::collections::SortedBySet::new(comp.clone());
+    for v in &args[1..] {
+        set = set.conj_with(v.clone(), &mut |a, b| invoke_compare(&comp, a, b))?;
+    }
+    Ok(Value::Set(SetValue::SortedBy(GcPtr::new(set))))
 }
 
 fn builtin_sort_by(args: &[Value]) -> ValueResult<Value> {
