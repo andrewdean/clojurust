@@ -814,3 +814,63 @@ fn exec_flag_calls_fn_with_parsed_opts() {
     );
     assert_eq!(r.stdout, "hi x\nhi x\n", "stderr: {}", r.stderr);
 }
+
+// ── Built-in AWS client (cljrsh-aws, feature "aws") ──────────────────────────
+
+#[test]
+fn aws_s3_signing_and_list_against_mock() {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || -> String {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buf = vec![0u8; 16384];
+        let n = sock.read(&mut buf).unwrap();
+        let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+        let xml = r#"<?xml version="1.0"?>
+<ListBucketResult><Name>b</Name><KeyCount>2</KeyCount><IsTruncated>false</IsTruncated>
+<Contents><Key>a/one.txt</Key><Size>3</Size><ETag>"e1"</ETag><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>
+<Contents><Key>a/two.txt</Key><Size>7</Size><ETag>"e2"</ETag><LastModified>2026-01-02T00:00:00.000Z</LastModified></Contents>
+</ListBucketResult>"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            xml.len(),
+            xml
+        );
+        sock.write_all(resp.as_bytes()).unwrap();
+        req
+    });
+    let expr = format!(
+        "(def c (aws/client {{:api :s3 :region \"us-east-1\"
+                             :endpoint \"http://127.0.0.1:{port}\"
+                             :access-key-id \"AKIATEST\" :secret-access-key \"secret\"}}))
+         (let [r (aws/invoke c {{:op :ListObjectsV2 :request {{:Bucket \"b\" :Prefix \"a/\"}}}})]
+           [(:KeyCount r) (mapv :Key (:Contents r)) (:Size (first (:Contents r)))
+            (instant? (:LastModified (first (:Contents r))))])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    let req = server.join().unwrap();
+    assert_eq!(
+        r.stdout, "[2 [\"a/one.txt\" \"a/two.txt\"] 3 true]\n",
+        "stderr: {}",
+        r.stderr
+    );
+    // Path-style URL against custom endpoint + SigV4 headers.
+    assert!(req.starts_with("GET /b/?list-type=2&prefix=a%2F"), "req: {req}");
+    assert!(req.contains("authorization: AWS4-HMAC-SHA256"), "req: {req}");
+    assert!(req.contains("Credential=AKIATEST/"), "req: {req}");
+    assert!(req.contains("x-amz-date:"), "req: {req}");
+    assert!(req.contains("x-amz-content-sha256:"), "req: {req}");
+}
+
+#[test]
+fn aws_presign_and_anomaly() {
+    let expr = "(def c (aws/client {:api :s3 :region \"us-east-1\"
+                                    :access-key-id \"AKIATEST\" :secret-access-key \"secret\"}))
+         (let [url (aws/presign c {:op :GetObject :request {:Bucket \"b\" :Key \"k/x.txt\"} :expires 600})]
+           [(clojure.string/includes? url \"X-Amz-Signature=\")
+            (clojure.string/includes? url \"X-Amz-Expires=600\")
+            (clojure.string/starts-with? url \"https://b.s3.us-east-1.amazonaws.com/k/x.txt\")])";
+    let r = run(&["-e", expr], None, &[]);
+    assert_eq!(r.stdout, "[true true true]\n", "stderr: {}", r.stderr);
+}
