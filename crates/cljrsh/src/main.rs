@@ -178,6 +178,7 @@ fn run(opts: Opts) -> i32 {
             match name.as_str() {
                 "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
                 "describe" => describe(),
+                "print-deps" => print_deps(&opts.args),
                 "tasks" => match &project {
                     Some(project) => tasks::list(project),
                     None => {
@@ -225,6 +226,118 @@ fn run(opts: Opts) -> i32 {
         }
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),
+    }
+}
+
+/// `cljrsh print-deps [--format edn|classpath]` — the project's dependency
+/// view, bb-compatible. `classpath` prints :paths plus every resolved dep
+/// source directory joined with ':' (what clojure-lsp runs to index a
+/// babashka-style project); `edn` (default, like bb) prints a deps map.
+fn print_deps(args: &[String]) -> i32 {
+    let format = match args {
+        [] => "edn",
+        [flag, value] if flag == "--format" => value.as_str(),
+        _ => {
+            eprintln!("usage: cljrsh print-deps [--format edn|classpath]");
+            return 2;
+        }
+    };
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("cljrsh: {e}");
+            return 1;
+        }
+    };
+    let project = cljrsh_project::find_project_file(&cwd)
+        .and_then(|f| cljrsh_project::load(&f).ok());
+
+    match format {
+        "classpath" => {
+            let mut entries: Vec<std::path::PathBuf> = Vec::new();
+            if let Some(project) = &project {
+                for p in &project.paths {
+                    entries.push(project.root.join(p));
+                }
+                if entries.is_empty() {
+                    // bb's implicit default source path.
+                    let src = project.root.join("src");
+                    if src.is_dir() {
+                        entries.push(src);
+                    }
+                }
+                if !project.deps.is_empty() {
+                    match cljrsh_project::resolve_deps(project, &tasks::dep_cache_dir()) {
+                        Ok(dirs) => entries.extend(dirs),
+                        Err(e) => {
+                            eprintln!("cljrsh: warning: dependency resolution failed: {e}");
+                        }
+                    }
+                }
+            }
+            let rendered: Vec<String> = entries
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            println!("{}", rendered.join(":"));
+            0
+        }
+        "edn" => {
+            // {:paths [...] :deps {lib coord ...} :pods {lib {:version v}}}
+            let paths = project
+                .as_ref()
+                .map(|p| p.paths.clone())
+                .unwrap_or_default();
+            print!("{{:paths [");
+            print!(
+                "{}",
+                paths
+                    .iter()
+                    .map(|p| format!("{p:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            print!("] :deps {{");
+            if let Some(project) = &project {
+                let mut first = true;
+                for (lib, coord) in &project.deps {
+                    if !first {
+                        print!(" ");
+                    }
+                    first = false;
+                    match coord {
+                        cljrsh_project::DepCoord::Local { root } => {
+                            print!("{lib} {{:local/root {root:?}}}");
+                        }
+                        cljrsh_project::DepCoord::Git { url, sha } => {
+                            print!("{lib} {{:git/url {url:?} :git/sha {sha:?}}}");
+                        }
+                        cljrsh_project::DepCoord::Maven { version } => {
+                            print!("{lib} {{:mvn/version {version:?}}}");
+                        }
+                    }
+                }
+            }
+            print!("}}");
+            if let Some(project) = &project
+                && !project.pods.is_empty()
+            {
+                print!(" :pods {{");
+                let rendered: Vec<String> = project
+                    .pods
+                    .iter()
+                    .map(|(lib, version)| format!("{lib} {{:version {version:?}}}"))
+                    .collect();
+                print!("{}", rendered.join(" "));
+                print!("}}");
+            }
+            println!("}}");
+            0
+        }
+        other => {
+            eprintln!("cljrsh: unknown print-deps format {other:?} (edn|classpath)");
+            2
+        }
     }
 }
 

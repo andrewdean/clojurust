@@ -750,6 +750,36 @@ fn reader_error_report_has_location_and_caret() {
 }
 
 #[test]
+fn print_deps_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("bb.edn"),
+        r#"{:paths ["src" "clj"] :deps {local/lib {:local/root "lib"}}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("lib/src")).unwrap();
+    let mut cmd = cljrsh();
+    cmd.args(["print-deps", "--format", "classpath"])
+        .current_dir(dir.path());
+    let out = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let entries: Vec<&str> = stdout.trim().split(':').collect();
+    assert_eq!(entries.len(), 3, "{stdout}");
+    assert!(entries[0].ends_with("/src"), "{stdout}");
+    assert!(entries[1].ends_with("/clj"), "{stdout}");
+    assert!(entries[2].ends_with("/lib/src"), "{stdout}");
+
+    let mut cmd = cljrsh();
+    cmd.arg("print-deps").current_dir(dir.path());
+    let out = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.trim(),
+        r#"{:paths ["src" "clj"] :deps {local/lib {:local/root "lib"}}}"#
+    );
+}
+
+#[test]
 fn caught_error_does_not_pollute_later_trace() {
     let r = run(
         &[

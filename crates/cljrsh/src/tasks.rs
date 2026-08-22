@@ -154,7 +154,7 @@ fn eval_form_checked(
 }
 
 /// `~/.cache/cljrsh` (or `$XDG_CACHE_HOME/cljrsh`).
-fn dep_cache_dir() -> std::path::PathBuf {
+pub(crate) fn dep_cache_dir() -> std::path::PathBuf {
     std::env::var("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|_| {
