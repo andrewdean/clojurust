@@ -240,7 +240,7 @@ pub enum ExecError {
 pub fn report_error(e: ExecError) -> i32 {
     match e {
         ExecError::Read(err) => {
-            eprintln!("cljrsh: read error: {err}");
+            crate::error::report_read(&err);
             1
         }
         ExecError::Eval(EvalError::Exit(code)) => code,

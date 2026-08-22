@@ -728,6 +728,28 @@ fn error_report_has_type_data_location_and_trace() {
 }
 
 #[test]
+fn reader_error_report_has_location_and_caret() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.clj");
+    std::fs::write(&path, "(println :ok)\n(def x {:a 1)\n").unwrap();
+    let r = run(&[path.to_str().unwrap()], None, &[]);
+    assert_eq!(r.code, 1);
+    let err = &r.stderr;
+    assert!(err.contains("Type:     Reader error"), "{err}");
+    assert!(err.contains("Message:  unexpected closing delimiter"), "{err}");
+    assert!(err.contains("bad.clj:2:13"), "location: {err}");
+    assert!(err.contains("^--- unexpected closing delimiter"), "caret: {err}");
+
+    // Unclosed-at-EOF points at the opening delimiter.
+    let path2 = dir.path().join("unclosed.clj");
+    std::fs::write(&path2, "(defn f [x]\n  (+ x 1)\n").unwrap();
+    let r2 = run(&[path2.to_str().unwrap()], None, &[]);
+    assert_eq!(r2.code, 1);
+    assert!(r2.stderr.contains("unclosed list"), "{}", r2.stderr);
+    assert!(r2.stderr.contains("unclosed.clj:1:1"), "{}", r2.stderr);
+}
+
+#[test]
 fn caught_error_does_not_pollute_later_trace() {
     let r = run(
         &[
