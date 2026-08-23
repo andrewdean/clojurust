@@ -15,6 +15,19 @@ Build with the crate's `no-gc` feature (`cargo test -p cljrs-tx --features
 no-gc`). The feature is not enabled by default so workspace-wide GC builds do
 not accidentally unify every clojurust dependency into `no-gc` mode.
 
+The default `host-dependencies` feature preserves Clojurust's dependency and
+Git resolution behavior. Restricted embeddings can exclude those subsystems
+from the compiled graph:
+
+```console
+cargo test -p cljrs-tx --no-default-features --features no-gc
+```
+
+The restricted transaction profile still enforces the runtime transaction
+policy. Versioned lookup attempts return a deterministic forbidden-effect
+error, and the compiled graph contains no `cljrs-deps`, `cljrs-vcs`, `gix`,
+`pgp`, or `ssh-key` package.
+
 ## File layout
 
 - `src/lib.rs` — parsed program, limits, isolated execution boundary, pure-data validation, and tests.

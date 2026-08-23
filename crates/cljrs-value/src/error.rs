@@ -41,6 +41,12 @@ pub enum ValueError {
     #[error("gas exhausted")]
     GasExhausted,
 
+    /// Clean process-exit request (`System/exit`). Like `GasExhausted`, this
+    /// is a control signal, not a catchable condition: `try`/`catch` must let
+    /// it unwind so the hosting binary can turn it into the process exit code.
+    #[error("process exit requested: {0}")]
+    Exit(i32),
+
     #[error("out of range")]
     OutOfRange,
 
@@ -95,6 +101,7 @@ impl ExceptionInfo {
                 ValueError::OutOfRange => "OutOfRange",
                 ValueError::TransientAlreadyPersisted => "TransientAlreadyPersisted",
                 ValueError::Parse => "ParseError",
+                ValueError::Exit(_) => "Exit",
                 ValueError::Thrown(_) => "Thrown",
             }),
         )?;

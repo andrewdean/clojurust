@@ -2,6 +2,30 @@
 
 Environments for running programs in.
 
+## Cargo profiles
+
+The default `host-dependencies` feature preserves dependency configuration,
+Git-backed versioned namespaces, and commit-signature verification. Disable
+default features when an embedding must exclude `cljrs-deps` and `cljrs-vcs`
+from its compiled dependency graph:
+
+```console
+cargo build -p cljrs-env --no-default-features
+```
+
+This restricted profile keeps the versioned-resolution API available.
+However, each versioned lookup returns
+`EvalError::ForbiddenEffect("versioned namespace lookup")` without accessing
+the filesystem, network, Git repository, or key store. The profile does not
+disable ordinary unversioned source-path loading. An embedding must apply its
+own execution policy if unversioned `require` is also forbidden.
+
+## File layout
+
+- `src/versioned.rs` implements Git-backed resolution for the default profile.
+- `src/versioned_restricted.rs` implements deterministic rejection when
+  `host-dependencies` is disabled.
+
 ## gas module
 
 Cooperative execution-credit metering shared dynamically across tree-walker,
@@ -53,6 +77,11 @@ binaries) restricts versioned loading to embedded sources — a missing
 embedding fails with a clear "was not embedded at compile time" error
 instead of fetching from git.
 
+The `host-dependencies` feature selects this implementation. Without the
+feature, the module exposes the same resolver functions and rejects each
+operation with the stable policy error described in the Cargo profiles
+section.
+
 Native (Rust-backed) packages get a **verified HEAD binding**: the fallback
 checks the pin against `GlobalEnv::native_provenance` (recorded via
 `set_native_provenance` / `Registry::set_provenance`; prefix-match in either
@@ -73,6 +102,17 @@ The unversioned namespace loader (`loader::do_load`) consults it when a
 load registers a `:rust/load :dylib` dep's exports into the **unversioned**
 namespace (built at the dep's pinned `:git/sha`), so a plain
 `(require '[my.native.lib :as l])` of a pure-native package succeeds.
+
+Embedder source fallback: `GlobalEnv::set_source_fallback` installs a
+`SourceFallback` callback (`Fn(&str) -> Option<(source, display_path)>`,
+first writer wins). `loader::do_load` consults it when a `require`d
+namespace has no builtin source and no file on the source path, *before*
+the native-dylib loader; a `Some` result is evaluated exactly like a found
+source file. Embedding binaries (cljrsh) use it to serve namespaces from
+dependency caches and pod-backed registries. The source-path search itself
+probes `.cljrs`, `.bb`, `.clj`, `.cljc` in that order (babashka's probe
+order after `.cljrs`), so babashka/JVM-family libraries resolve directly
+from source paths.
 
 AOT-compiled namespaces: the binary produced by `cljrs compile` registers a
 `CompiledNsLoader` per required namespace via

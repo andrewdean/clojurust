@@ -556,6 +556,11 @@ fn serialize_error(e: &crate::error::ExceptionInfo) -> Result<SerializedError, C
         ValueError::OutOfRange => SerializedErrorKind::OutOfRange,
         ValueError::TransientAlreadyPersisted => SerializedErrorKind::TransientAlreadyPersisted,
         ValueError::Parse => SerializedErrorKind::Parse,
+        // A control signal, never stored in an ExceptionInfo in practice;
+        // serialize defensively as its display text.
+        ValueError::Exit(code) => {
+            SerializedErrorKind::Other(format!("process exit requested: {code}"))
+        }
         ValueError::Thrown(v) => SerializedErrorKind::Thrown(Box::new(serialize(v)?)),
     };
 

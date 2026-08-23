@@ -12,6 +12,12 @@ pub enum EvalError {
     #[error("gas exhausted")]
     GasExhausted,
 
+    /// Clean process-exit request (`System/exit`). A control signal, not a
+    /// catchable condition: it unwinds past `try`/`catch` and the hosting
+    /// binary turns it into the process exit code.
+    #[error("process exit requested: {0}")]
+    Exit(i32),
+
     /// An operation attempted to use a capability unavailable to an isolated
     /// transaction function.
     #[error("effect forbidden in transaction function: {0}")]
@@ -87,6 +93,7 @@ pub fn value_error_to_eval_error(err: ValueError) -> EvalError {
     match err {
         ValueError::Thrown(v) => EvalError::Thrown(v),
         ValueError::GasExhausted => EvalError::GasExhausted,
+        ValueError::Exit(code) => EvalError::Exit(code),
         other => {
             let msg = other.to_string();
             EvalError::Thrown(Value::Error(cljrs_gc::GcPtr::new(

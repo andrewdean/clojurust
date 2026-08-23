@@ -1,6 +1,6 @@
 //! Namespace file loader: resolves `require` to source files and evaluates them.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,9 +20,15 @@ use crate::error::{EvalError, EvalResult};
 ///   `load_versioned_ns` which fetches source at the given commit.
 pub fn load_ns(globals: Arc<GlobalEnv>, spec: &RequireSpec, current_ns: &str) -> EvalResult<()> {
     // Versioned require: delegate entirely to the versioned loader.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     if let Some(ref commit) = spec.version {
         return load_versioned_ns(globals, spec, commit, current_ns);
+    }
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "host-dependencies")))]
+    if spec.version.is_some() {
+        return Err(EvalError::ForbiddenEffect(
+            "versioned namespace lookup".to_string(),
+        ));
     }
     #[cfg(target_arch = "wasm32")]
     if spec.version.is_some() {
@@ -138,6 +144,8 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
         (builtin.to_owned(), format!("<builtin:{ns_name}>"))
     } else if let Some(found) = find_source_file(&rel_path, &src_paths) {
         found
+    } else if let Some(found) = try_source_fallback(globals, ns_name) {
+        found
     } else {
         // No Clojure source on the path.  Before giving up, try loading the
         // namespace from a native dependency declared in `cljrs.edn` with
@@ -154,7 +162,7 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
 
     // Record source location on the namespace for versioned resolution.
     // Only meaningful for real files (not builtins) and non-WASM targets.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     if !file_path.starts_with("<builtin:") {
         let repo_root =
             cljrs_vcs::find_repo_root(Path::new(&file_path)).map(|p| p.display().to_string());
@@ -198,6 +206,16 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
     Ok(())
 }
 
+/// Consult the embedder-installed source fallback (see
+/// `GlobalEnv::set_source_fallback`) for `ns_name`.  Runs after the builtin
+/// registry and the source-path search miss, and before the native-dylib
+/// loader.  Embedding binaries use it to serve namespaces from dependency
+/// caches or pod-backed registries.
+fn try_source_fallback(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> Option<(String, String)> {
+    let fallback = globals.source_fallback.read().unwrap().clone();
+    fallback.and_then(|f| f(ns_name.as_ref()))
+}
+
 /// Consult the native-dependency `require` loader (installed by `cljrs-dylib`)
 /// for `ns_name`.  Returns `Ok(true)` when a `:rust/load :dylib` dep covering
 /// the namespace was built and its exports registered into the unversioned
@@ -220,7 +238,7 @@ fn try_native_require(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResul
 /// alias/refer from `spec` in `current_ns`.  The actual loading lives in
 /// `crate::versioned::ensure_versioned_ns_loaded`, shared with the per-symbol
 /// resolver used by all execution tiers.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 pub fn load_versioned_ns(
     globals: Arc<GlobalEnv>,
     spec: &RequireSpec,
@@ -235,7 +253,7 @@ pub fn load_versioned_ns(
 
 /// Apply the alias and refer clauses from `spec` into `current_ns`, using
 /// `effective_ns` as the source namespace (which may be `"base@commit"`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
 fn apply_alias_refer(
     globals: &GlobalEnv,
     effective_ns: &Arc<str>,
@@ -257,7 +275,10 @@ pub(crate) fn find_source_file(
     src_paths: &[std::path::PathBuf],
 ) -> Option<(String, String)> {
     for dir in src_paths {
-        for ext in &[".cljrs", ".cljc"] {
+        // `.cljrs` first (this platform's own sources), then the babashka/JVM
+        // family in babashka's probe order: a `.bb` variant shadows a `.clj`
+        // one, and platform-specific files shadow portable `.cljc`.
+        for ext in &[".cljrs", ".bb", ".clj", ".cljc"] {
             let path = dir.join(format!("{rel}{ext}"));
             if path.exists() {
                 let src = std::fs::read_to_string(&path).ok()?;
@@ -277,6 +298,8 @@ pub(crate) fn annotate(e: EvalError, ns_name: &Arc<str>) -> EvalError {
         EvalError::Read(_) => e,
         // Propagate recur unchanged (internal signal).
         EvalError::Recur(_) => e,
+        // Propagate exit unchanged (process-exit control signal).
+        EvalError::Exit(_) => e,
         // Annotate everything else with the namespace being loaded.
         other => EvalError::Runtime(format!("in {ns_name}: {other}")),
     }

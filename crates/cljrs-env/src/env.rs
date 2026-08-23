@@ -105,6 +105,7 @@ pub struct GlobalEnv {
     /// or `"<ns>@<commit>"` for whole versioned namespaces.
     pub version_cache: Mutex<HashMap<Arc<str>, Value>>,
     /// Parsed `cljrs.edn` config, loaded once at startup.
+    #[cfg(feature = "host-dependencies")]
     pub deps_config: RwLock<Option<Arc<cljrs_deps::DepsConfig>>>,
     /// When true, every versioned-symbol or versioned-namespace resolution must
     /// carry a valid commit signature (verified natively against `trusted_keys`)
@@ -116,7 +117,7 @@ pub struct GlobalEnv {
     /// the `:trusted-signers` config.  Consulted by `check_commit_signature`
     /// when `verify_commit_signatures` is on.  (Not built on wasm, where
     /// `cljrs-vcs` is unavailable and signature checks are no-ops.)
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     pub trusted_keys: RwLock<Arc<cljrs_vcs::TrustedKeys>>,
     /// Session-scoped cache of commits that have already passed signature
     /// verification this run, keyed by `(repo_root, commit_hash)`.
@@ -159,6 +160,15 @@ pub struct GlobalEnv {
     /// `(require '[my.native.lib :as lib])` brings the native code in.
     #[allow(clippy::type_complexity)]
     pub native_require_loader: RwLock<Option<NativeRequireLoader>>,
+    /// Optional **source fallback** consulted by the unversioned namespace
+    /// loader when a `require`d namespace has no builtin source and no file on
+    /// the source path, *before* the native-dylib loader.  Given the namespace
+    /// name, returns `Some((source, display_path))` to have that source
+    /// evaluated as the namespace, or `None` to fall through.  Installed by
+    /// embedding binaries (e.g. cljrsh) to resolve namespaces from dependency
+    /// caches or pod-backed registries.
+    #[allow(clippy::type_complexity)]
+    pub source_fallback: RwLock<Option<SourceFallback>>,
     /// Loaders for **AOT-compiled namespaces**, installed by the binary
     /// produced by `cljrs compile`.  Keyed by namespace name.  When a plain
     /// `require` resolves a namespace that has a registered loader, `load_ns`
@@ -184,6 +194,11 @@ pub type PinnedNativeLoader =
 /// Loader callback for native dependencies reached through a plain `require`
 /// (see `GlobalEnv::native_require_loader`).
 pub type NativeRequireLoader = Arc<dyn Fn(&Arc<GlobalEnv>, &str) -> EvalResult<bool> + Send + Sync>;
+
+/// Source-fallback callback for namespaces not found on the source path (see
+/// `GlobalEnv::source_fallback`).  Maps a namespace name to
+/// `Some((source, display_path))` or `None`.
+pub type SourceFallback = Arc<dyn Fn(&str) -> Option<(String, String)> + Send + Sync>;
 
 impl std::fmt::Debug for GlobalEnv {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -211,9 +226,10 @@ impl GlobalEnv {
             on_fn_defined,
             async_rt: RwLock::new(None),
             version_cache: Mutex::new(HashMap::new()),
+            #[cfg(feature = "host-dependencies")]
             deps_config: RwLock::new(None),
             verify_commit_signatures: AtomicBool::new(false),
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
             trusted_keys: RwLock::new(Arc::new(cljrs_vcs::TrustedKeys::new())),
             sig_verify_cache: Mutex::new(HashSet::new()),
             versioned_sources: RwLock::new(HashMap::new()),
@@ -223,6 +239,7 @@ impl GlobalEnv {
             provenance_warned: Mutex::new(HashSet::new()),
             pinned_native_loader: RwLock::new(None),
             native_require_loader: RwLock::new(None),
+            source_fallback: RwLock::new(None),
             compiled_ns_loaders: RwLock::new(HashMap::new()),
         })
     }
@@ -587,6 +604,15 @@ impl GlobalEnv {
         }
     }
 
+    /// Install the source fallback consulted when a `require`d namespace is
+    /// not found as a builtin or on the source path (first writer wins).
+    pub fn set_source_fallback(&self, fallback: SourceFallback) {
+        let mut guard = self.source_fallback.write().unwrap();
+        if guard.is_none() {
+            *guard = Some(fallback);
+        }
+    }
+
     /// If `:verify-commit-signatures` is enabled, verify that `commit` inside
     /// `repo_root` carries a valid GPG or SSH signature.
     ///
@@ -595,7 +621,7 @@ impl GlobalEnv {
     /// only verified once per session.  On failure returns
     /// `EvalError::CommitSignatureVerificationFailed`.
     pub fn check_commit_signature(&self, repo_root: &str, commit: &str) -> EvalResult<()> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
         {
             if !self.verify_commit_signatures.load(Ordering::Relaxed) {
                 return Ok(());
@@ -623,7 +649,7 @@ impl GlobalEnv {
     /// it.  Inline keys are parsed directly; `File` entries are read from disk.
     /// Returns the number of keys loaded; warns (to stderr) on any key that
     /// fails to load rather than aborting.  (Not available on wasm.)
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "host-dependencies"))]
     pub fn load_trusted_signers(&self, config: &cljrs_deps::DepsConfig) -> usize {
         let mut keys = cljrs_vcs::TrustedKeys::new();
         let mut loaded = 0usize;

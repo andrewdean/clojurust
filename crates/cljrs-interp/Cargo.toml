@@ -7,12 +7,18 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+default = ["host-dependencies"]
+host-dependencies = [
+    "cljrs-builtins/host-dependencies",
+    "cljrs-env/host-dependencies",
+    "dep:cljrs-vcs",
+]
 no-gc = ["cljrs-gc/no-gc", "cljrs-env/no-gc", "cljrs-value/no-gc", "cljrs-builtins/no-gc"]
 
 [dependencies]
-cljrs-env = { workspace = true }
+cljrs-env = { path = "../cljrs-env", version = "0.1.0", default-features = false }
 cljrs-types = { workspace = true }
-cljrs-builtins = { workspace = true }
+cljrs-builtins = { path = "../cljrs-builtins", version = "0.1.0", default-features = false }
 cljrs-value = { workspace = true }
 cljrs-gc = { workspace = true }
 cljrs-reader = { workspace = true }
@@ -20,7 +26,7 @@ regex = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cljrs-vcs = { workspace = true }
+cljrs-vcs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

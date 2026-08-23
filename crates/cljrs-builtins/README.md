@@ -3,6 +3,38 @@
 Built-in functions for clojurust (the `clojure.core`-equivalent runtime
 implemented in Rust, registered into a name → fn dispatch table).
 
+## Cargo profiles
+
+The default `host-dependencies` feature propagates
+`cljrs-env/host-dependencies`. Disable default features when the embedding
+must compile builtins without Clojurust's dependency and Git resolution
+subsystems. Other builtin behavior does not change.
+
+## Reader conditionals (`form::select_reader_cond`)
+
+`#?(...)`/`#?@(...)` clauses are tried **in order** (Clojure semantics: an
+earlier `:default` shadows a later platform clause) against a process-wide
+feature set. The default set is `["rust"]`; an embedding binary can widen it
+once at startup with `form::set_reader_features(["bb", "cljrsh", "rust"])`
+(`:default` always matches and is never listed). A conditional whose only
+clauses are `:clj`/`:cljs` expands to nothing on this platform; that prints a
+one-time-per-source-location warning to stderr, since it is the most common
+surprise when porting JVM/JS `.cljc` code.
+
+## System builtins (`system` module)
+
+`System/getenv` (0/1-arity), `System/getProperty` (with computed defaults:
+`user.home`, `user.dir`, `user.name`, `os.name`, `os.arch`, separators,
+`java.io.tmpdir`), `System/setProperty` (mutable overlay), and `System/exit`.
+Registered under `System/*` static-method names (the `Math/*` convention) so
+babashka/JVM code works unchanged; all are denied by name in the restricted
+transaction profile. `System/exit` surfaces as the **uncatchable**
+`ValueError::Exit(i32)`/`EvalError::Exit(i32)` control signal — `try`/`catch`
+passes it through and the hosting binary maps it to the process exit code.
+`system::set_command_line_args(globals, args)` binds
+`clojure.core/*command-line-args*` (a dynamic var defined in bootstrap.cljrs;
+nil when empty).
+
 ## Map entries
 
 Map entries are a dedicated type, not plain 2-element vectors: seq'ing a map,

@@ -1488,6 +1488,24 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("pow", Arity::Fixed(2), builtin_pow),
         ("log", Arity::Fixed(1), builtin_log),
         ("exp", Arity::Fixed(1), builtin_exp),
+        // System/* — env vars, properties, exit (crate::system); denied by
+        // name in the restricted transaction profile.
+        (
+            "System/getenv",
+            Arity::Variadic { min: 0 },
+            crate::system::builtin_getenv,
+        ),
+        ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
+        (
+            "System/getProperty",
+            Arity::Variadic { min: 1 },
+            crate::system::builtin_get_property,
+        ),
+        (
+            "System/setProperty",
+            Arity::Fixed(2),
+            crate::system::builtin_set_property,
+        ),
         ("Math/abs", Arity::Fixed(1), builtin_abs),
         ("Math/floor", Arity::Fixed(1), builtin_floor),
         ("Math/ceil", Arity::Fixed(1), builtin_ceil),
