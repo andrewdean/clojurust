@@ -209,7 +209,12 @@ impl Parser {
             Token::LBrace => {
                 self.bump()?;
                 let (forms, close) = self.parse_seq_forms(Token::RBrace, span.clone(), "map")?;
-                if forms.len() % 2 != 0 {
+                // A splicing reader conditional changes the form count at
+                // expansion time — defer the evenness check to evaluation.
+                let has_splice = forms.iter().any(|f| {
+                    matches!(&f.kind, crate::form::FormKind::ReaderCond { splicing: true, .. })
+                });
+                if !has_splice && forms.len() % 2 != 0 {
                     return Err(
                         self.make_error("map literal must have an even number of forms", span)
                     );

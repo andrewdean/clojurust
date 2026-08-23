@@ -39,6 +39,7 @@ pub fn standard_env_minimal(
 
     // Register all native builtins in clojure.core.
     builtins::register_all(&globals, "clojure.core");
+    register_eval(&globals);
 
     // Set up user namespace referring clojure.core.
     globals.get_or_create_ns("user");
@@ -83,6 +84,44 @@ pub fn standard_env_minimal(
 ///
 /// For the `cljrs` binary, prefer `cljrs_stdlib::standard_env()` which loads
 /// `clojure.test` and other stdlib namespaces lazily via the registry.
+/// `(eval form)` — clojure.core/eval as an ordinary (shadowable) function,
+/// like the JVM's. Evaluates a form VALUE in the calling namespace with no
+/// local environment (JVM semantics). Runs through the thread-local eval
+/// context, so it works from any native call site.
+fn native_eval(args: &[cljrs_value::Value]) -> cljrs_value::ValueResult<cljrs_value::Value> {
+    use cljrs_value::ValueError;
+    let (globals, ns) = cljrs_env::callback::capture_eval_context()
+        .ok_or_else(|| ValueError::Other("eval called outside an eval context".into()))?;
+    let span = cljrs_types::span::Span::new(std::sync::Arc::new("<eval>".into()), 0, 0, 1, 1);
+    let form = macros::value_to_form(&args[0], span)
+        .map_err(|e| ValueError::Other(format!("eval: {e:?}")))?;
+    let mut env = Env::new(globals, &ns);
+    match eval::eval(&form, &mut env) {
+        Ok(v) => Ok(v),
+        Err(cljrs_env::error::EvalError::Thrown(v)) => Err(ValueError::Thrown(v)),
+        Err(e) => Err(ValueError::Other(e.to_string())),
+    }
+}
+
+/// Intern clojure.core/eval and refresh existing namespaces' refers (they
+/// snapshot core at creation).
+pub fn register_eval(globals: &Arc<GlobalEnv>) {
+    use cljrs_value::{Arity, NativeFn, Value};
+    let nf = NativeFn::new("eval", Arity::Fixed(1), native_eval);
+    globals.intern(
+        "clojure.core",
+        std::sync::Arc::from("eval"),
+        Value::NativeFunction(cljrs_gc::GcPtr::new(nf)),
+    );
+    let ns_names: Vec<std::sync::Arc<str>> =
+        globals.namespaces.read().unwrap().keys().cloned().collect();
+    for n in ns_names {
+        if n.as_ref() != "clojure.core" {
+            globals.refer_all(&n, "clojure.core");
+        }
+    }
+}
+
 pub fn standard_env(
     eval_fn: Option<fn(&Form, &mut Env) -> EvalResult>,
     call_cljrs_fn: Option<fn(&CljxFn, &[Value], &mut Env) -> EvalResult>,

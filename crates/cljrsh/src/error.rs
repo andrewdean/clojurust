@@ -66,13 +66,15 @@ pub fn report(e: &EvalError) {
     if !trace.is_empty() {
         eprintln!();
         eprintln!("----- Stack trace {RULE}");
-        // Innermost first, eliding the middle of very deep traces.
+        // Innermost first, eliding the middle of very deep traces
+        // (CLJRSH_FULL_TRACE=1 disables elision).
+        let full = std::env::var("CLJRSH_FULL_TRACE").is_ok();
         let total = trace.len();
         for (shown, frame) in trace.iter().rev().enumerate() {
-            if total > 12 && shown == 6 {
+            if !full && total > 12 && shown == 6 {
                 eprintln!("... {} frames elided ...", total - 12);
             }
-            if total > 12 && (6..total - 6).contains(&shown) {
+            if !full && total > 12 && (6..total - 6).contains(&shown) {
                 continue;
             }
             eprintln!("{}", format_frame(frame));

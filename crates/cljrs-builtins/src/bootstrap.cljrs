@@ -574,7 +574,8 @@
                            (if (seq? f)
                              (cons (first f) (cons gx (rest f)))
                              (list f gx)))
-                         forms)))))
+                         forms))
+          gx)))
 
 (defmacro dotimes
   "bindings => name n. Repeatedly executes body (presumably for side
@@ -1203,6 +1204,7 @@
 (def ^:dynamic *command-line-args* nil)
 (def ^:dynamic *warn-on-reflection* false)
 (def ^:dynamic *unchecked-math* false)
+(def ^:dynamic *unchecked-math* false)
 (def ^:dynamic *data-readers* nil)
 (def ^:dynamic *default-data-reader-fn* nil)
 (def ^:dynamic *1 nil)
@@ -1413,3 +1415,47 @@
      (:doc (doc-data (var ~sym)))
      (catch Exception e# nil)))
 
+
+;; print-method / print-dup exist as real multimethods so libraries can
+;; register printers on them at load time (malli, spec ports, ...). The
+;; native printer does not consult them yet — a documented divergence.
+(defmulti print-method (fn [x _writer] (type x)))
+(defmethod print-method :default [x _writer] (pr x))
+(defmulti print-dup (fn [x _writer] (type x)))
+(defmethod print-dup :default [x _writer] (pr x))
+
+;; Type predicates for JVM-side types this runtime does not model: honest
+;; constant answers (nothing here IS a java.net.URI / byte[] / Class).
+(defn uri? [x] false)
+(defn class? [x] false)
+(defn inst? [x] (instant? x))
+(defn indexed? [x] (or (vector? x) (string? x)))
+(defn tagged-literal? [x]
+  (and (map? x) (contains? x :tag) (contains? x :form) (= 2 (count x))))
+
+(defn hash-combine
+  "Combine two hashes (clojure.lang.Util/hashCombine work-alike)."
+  [x y]
+  (bit-xor (long x)
+           (+ (long (hash y)) 0x9e3779b9
+              (bit-shift-left (long x) 6)
+              (bit-shift-right (long x) 2))))
+
+(defmacro if-some
+  "bindings => binding-form test. If test is not nil, evaluates then with
+  binding-form bound to the value of test, otherwise else."
+  ([bindings then] (list 'if-some bindings then nil))
+  ([bindings then else]
+   (let [form (nth bindings 0)
+         tst  (nth bindings 1)
+         temp (gensym "if_some__")]
+     (list 'let (vector temp tst)
+           (list 'if (list 'nil? temp)
+                 else
+                 (list 'let (vector form temp) then))))))
+
+(defmacro when-some
+  "bindings => binding-form test. If test is not nil, evaluates body with
+  binding-form bound to the value of test."
+  [bindings & body]
+  (list 'if-some bindings (cons 'do body)))

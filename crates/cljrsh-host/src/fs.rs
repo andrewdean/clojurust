@@ -247,22 +247,57 @@ pub fn register(registry: &mut Registry) {
         ),
     );
 
-    // (walk root) — every path under root, depth-first.
+    // (walk root) / (walk root {:skip-dirs ["node_modules" ...]
+    //                            :files-only true})
+    // — every path under root, depth-first. :skip-dirs prunes matching
+    // directory NAMES during traversal (never descending), which is the
+    // difference between milliseconds and a minute on repos with
+    // node_modules/target trees.
     registry.define(
         "cljrsh.fs/walk",
-        wrap_fn1("cljrsh.fs/walk", |root: Value| -> Result<Value, String> {
-            let root = str_arg(&root, "root")?;
-            let mut out = Vec::new();
-            for entry in walkdir::WalkDir::new(&root)
-                .min_depth(1)
-                .into_iter()
-                .filter_map(Result::ok)
-            {
-                out.push(entry.path().display().to_string());
-            }
-            out.sort();
-            Ok(string_vec(out))
-        }),
+        wrap_fn_variadic(
+            "cljrsh.fs/walk",
+            1,
+            |args: &[Value]| -> Result<Value, String> {
+                let root = str_arg(&args[0], "root")?;
+                let mut skip: std::collections::HashSet<String> = Default::default();
+                let mut files_only = false;
+                if let Some(Value::Map(m)) = args.get(1) {
+                    if let Some(Value::Vector(v)) =
+                        m.get(&Value::keyword(cljrs_value::Keyword::simple("skip-dirs")))
+                    {
+                        for x in v.get().iter() {
+                            if let Value::Str(s) = x {
+                                skip.insert(s.get().to_string());
+                            }
+                        }
+                    }
+                    if let Some(Value::Bool(true)) =
+                        m.get(&Value::keyword(cljrs_value::Keyword::simple("files-only")))
+                    {
+                        files_only = true;
+                    }
+                }
+                let mut out = Vec::new();
+                let walker = walkdir::WalkDir::new(&root).min_depth(1).into_iter();
+                for entry in walker
+                    .filter_entry(|e| {
+                        !(e.file_type().is_dir()
+                            && e.file_name()
+                                .to_str()
+                                .is_some_and(|n| skip.contains(n)))
+                    })
+                    .filter_map(Result::ok)
+                {
+                    if files_only && !entry.file_type().is_file() {
+                        continue;
+                    }
+                    out.push(entry.path().display().to_string());
+                }
+                out.sort();
+                Ok(string_vec(out))
+            },
+        ),
     );
 }
 

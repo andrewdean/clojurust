@@ -1252,6 +1252,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("booleans", Arity::Fixed(1), builtin_identity_cast),
         ("bytes", Arity::Fixed(1), builtin_identity_cast),
+        ("bytes?", Arity::Fixed(1), builtin_bytes_q),
         ("chars", Arity::Fixed(1), builtin_identity_cast),
         ("shorts", Arity::Fixed(1), builtin_identity_cast),
         ("ints", Arity::Fixed(1), builtin_identity_cast),
@@ -1720,6 +1721,54 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             Arity::Variadic { min: 1 },
             builtin_exception_dot,
         ),
+        (
+            "HashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "java.util.HashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "ArrayDeque.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_deque_new,
+        ),
+        (
+            "java.util.ArrayDeque.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_deque_new,
+        ),
+        (
+            "DateTimeFormatterBuilder.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        (
+            "DateTimeFormatter/ofPattern",
+            Arity::Variadic { min: 1 },
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        (
+            "ZoneId/of",
+            Arity::Fixed(1),
+            crate::javamap::builtin_date_formatter_new,
+        ),
+        ("Date/from", Arity::Fixed(1), builtin_identity_cast),
+        ("Instant/from", Arity::Fixed(1), builtin_identity_cast),
+        (
+            "Instant/ofEpochMilli",
+            Arity::Fixed(1),
+            crate::javamap::builtin_instant_of_epoch_milli,
+        ),
+        ("UUID/fromString", Arity::Fixed(1), builtin_parse_uuid),
+        (
+            "MapEntry.",
+            Arity::Fixed(2),
+            crate::javamap::builtin_map_entry_new,
+        ),
         // time utils
         ("nanotime", Arity::Fixed(0), builtin_nanotime),
     ];
@@ -1728,12 +1777,24 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
     for (name, arity, func) in fns {
         let nf = NativeFn::new(name, arity, func);
         let var = globals.intern(ns, Arc::from(name), Value::NativeFunction(GcPtr::new(nf)));
+        // {:name sym :ns clojure.core [:doc ...]} — identity metadata JVM
+        // vars always carry (registries get keyed on (-> #'v meta :name)).
+        let mut meta = MapValue::empty()
+            .assoc(
+                Value::keyword(Keyword::parse("name")),
+                Value::symbol(cljrs_value::Symbol::simple(name)),
+            )
+            .assoc(
+                Value::keyword(Keyword::parse("ns")),
+                Value::symbol(cljrs_value::Symbol::simple(ns)),
+            );
         if let Some(doc) = docs.get(name) {
-            var.get().set_meta(Value::Map(MapValue::empty().assoc(
+            meta = meta.assoc(
                 Value::keyword(Keyword::parse("doc")),
                 Value::string((*doc).to_string()),
-            )));
+            );
         }
+        var.get().set_meta(Value::Map(meta));
     }
 
     // Math constants.
@@ -1743,6 +1804,39 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         Value::Double(std::f64::consts::PI),
     );
     globals.intern(ns, Arc::from("Math/E"), Value::Double(std::f64::consts::E));
+
+    // java.time ChronoField constants — only ever passed to the inert
+    // DateTimeFormatter builder chain; identity keywords suffice.
+    for field in [
+        "MICRO_OF_SECOND",
+        "NANO_OF_SECOND",
+        "MILLI_OF_SECOND",
+        "HOUR_OF_DAY",
+        "MINUTE_OF_HOUR",
+        "SECOND_OF_MINUTE",
+        "OFFSET_SECONDS",
+    ] {
+        globals.intern(
+            ns,
+            Arc::from(format!("ChronoField/{field}")),
+            Value::keyword(Keyword::parse(field)),
+        );
+    }
+
+    // JVM wrapper-class constant statics (portable .cljc code reads these).
+    for (name, value) in [
+        ("Long/MAX_VALUE", Value::Long(i64::MAX)),
+        ("Long/MIN_VALUE", Value::Long(i64::MIN)),
+        ("Integer/MAX_VALUE", Value::Long(i32::MAX as i64)),
+        ("Integer/MIN_VALUE", Value::Long(i32::MIN as i64)),
+        ("Double/MAX_VALUE", Value::Double(f64::MAX)),
+        ("Double/MIN_VALUE", Value::Double(f64::MIN_POSITIVE)),
+        ("Double/POSITIVE_INFINITY", Value::Double(f64::INFINITY)),
+        ("Double/NEGATIVE_INFINITY", Value::Double(f64::NEG_INFINITY)),
+        ("Double/NaN", Value::Double(f64::NAN)),
+    ] {
+        globals.intern(ns, Arc::from(name), value);
+    }
 }
 
 // Bootstrap Clojure source defining higher-order functions.
@@ -1929,7 +2023,7 @@ impl Iterator for ValueIter {
 
 // ── Helper: value to sequence vector (eager — use only when random access is needed) ──
 
-fn value_to_seq(v: &Value) -> ValueResult<Vec<Value>> {
+pub(crate) fn value_to_seq(v: &Value) -> ValueResult<Vec<Value>> {
     match v {
         Value::List(_)
         | Value::Map(_)
@@ -3285,10 +3379,13 @@ fn builtin_case_eq(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(same_numeric_type && args[0] == args[1]))
 }
 fn builtin_map_q(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Bool(matches!(
-        args[0].unwrap_meta(),
-        Value::Map(_) | Value::TypeInstance(_)
-    )))
+    // Records are maps; reify instances are NOT (they share the
+    // TypeInstance representation, distinguished by the synthetic tag).
+    Ok(Value::Bool(match args[0].unwrap_meta() {
+        Value::Map(_) => true,
+        Value::TypeInstance(ti) => !ti.get().type_tag.starts_with("reify__"),
+        _ => false,
+    }))
 }
 fn builtin_vector_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
@@ -3868,6 +3965,7 @@ fn builtin_count(args: &[Value]) -> ValueResult<Value> {
         Value::Vector(v) => v.get().count(),
         Value::Map(m) => m.count(),
         Value::Set(s) => s.count(),
+        Value::ObjectArray(a) => a.get().0.lock().unwrap().len(),
         Value::Str(s) => s.get().chars().count(),
         Value::TypeInstance(ti) => ti.get().fields.count(),
         Value::Queue(q) => q.get().count(),
@@ -5360,6 +5458,10 @@ fn builtin_short_array(args: &[Value]) -> ValueResult<Value> {
     make_typed_array(args, 0i16, numeric_as_i16, |v| {
         Value::ShortArray(GcPtr::new(Mutex::new(v)))
     })
+}
+
+fn builtin_bytes_q(args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::ByteArray(_))))
 }
 
 fn builtin_byte_array(args: &[Value]) -> ValueResult<Value> {
@@ -8498,11 +8600,43 @@ fn builtin_instance_q(args: &[Value]) -> ValueResult<Value> {
         "ExceptionInfo" | "clojure.lang.ExceptionInfo" | "Exception" | "java.lang.Exception" => {
             matches!(val, Value::Error(_))
         }
-        _ => match val {
-            Value::TypeInstance(ti) => ti.get().type_tag.as_ref() == expected_tag.as_str(),
-            Value::NativeObject(obj) => obj.get().type_tag() == expected_tag.as_str(),
-            _ => false,
-        },
+        _ => {
+            // Dotted names: my.ns.Type — match the final segment against
+            // type tags, and my.ns.Proto against a protocol var in my.ns
+            // (JVM protocols double as interface classes in instance?).
+            let last = expected_tag
+                .rsplit_once('.')
+                .map(|(_, l)| l)
+                .unwrap_or(expected_tag.as_str());
+            let tag_match = match val {
+                Value::TypeInstance(ti) => {
+                    let tag = &ti.get().type_tag;
+                    tag.as_ref() == expected_tag.as_str() || tag.as_ref() == last
+                }
+                Value::NativeObject(obj) => {
+                    let tag = obj.get().type_tag();
+                    tag == expected_tag.as_str() || tag == last
+                }
+                _ => false,
+            };
+            if tag_match {
+                true
+            } else if let Some((ns_part, name)) = expected_tag.rsplit_once('.') {
+                // (instance? malli.core.Schema x) where Schema is a protocol.
+                match cljrs_env::callback::capture_eval_context()
+                    .and_then(|(g, _)| g.lookup_in_ns(ns_part, name))
+                {
+                    Some(Value::Protocol(p)) => {
+                        use cljrs_env::apply::type_tag_of;
+                        let tag = type_tag_of(val);
+                        p.get().impls.lock().unwrap().contains_key(tag.as_ref())
+                    }
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        }
     };
     Ok(Value::Bool(result))
 }

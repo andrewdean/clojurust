@@ -19,7 +19,7 @@ mod tasks;
 use opts::{Opts, Program};
 
 /// 64 MiB, matching the `cljrs` binary's default interpreter stack.
-const STACK_SIZE: usize = 64 * 1024 * 1024;
+const STACK_SIZE: usize = 256 * 1024 * 1024;
 
 struct AsyncDriver {
     rt: tokio::runtime::Runtime,

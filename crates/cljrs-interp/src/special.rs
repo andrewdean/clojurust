@@ -53,6 +53,9 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "defmulti" => eval_defmulti(args, env),
         "defmethod" => eval_defmethod(args, env),
         "defrecord" => eval_defrecord(args, env),
+        // deftype: same type-tag machinery as defrecord (no map behavior
+        // distinction in this runtime; fields may carry ^long/^:private meta).
+        "deftype" => eval_defrecord(args, env),
         "reify" => eval_reify(args, env),
         "load-file" => eval_load_file(args, env),
         "binding" => eval_binding(args, env),
@@ -90,6 +93,10 @@ fn eval_def(args: &[Form], env: &mut Env) -> EvalResult {
         .globals
         .intern(&env.current_ns, Arc::from(name.as_str()), val.clone());
     let meta = merge_meta(meta_opt, docstring.as_deref().map(doc_meta));
+    let meta = merge_meta(
+        name_ns_meta(name.as_str(), &env.current_ns),
+        meta,
+    );
     if let Some(meta_val) = meta {
         var.get().set_meta(meta_val);
     }
@@ -108,6 +115,21 @@ fn doc_meta(doc: &str) -> Value {
 /// `Value::Fn`/`Value::Macro`'s parsed arities. `skip` elides leading fixed
 /// params that aren't part of the public signature (defmacro's implicit
 /// `&form`/`&env`).
+/// `{:name sym :ns ns-sym}` — identity metadata JVM vars always carry
+/// (libraries key registries on `(-> #'v meta :name)`; malli does).
+fn name_ns_meta(name: &str, ns: &str) -> Option<Value> {
+    Some(Value::Map(cljrs_value::MapValue::from_pairs(vec![
+        (
+            Value::keyword(Keyword::parse("name")),
+            Value::symbol(cljrs_value::Symbol::simple(name)),
+        ),
+        (
+            Value::keyword(Keyword::parse("ns")),
+            Value::symbol(cljrs_value::Symbol::simple(ns)),
+        ),
+    ])))
+}
+
 fn arglists_meta(fn_val: &Value, skip: usize) -> Option<Value> {
     let arities = match fn_val {
         Value::Fn(f) => &f.get().arities,
@@ -924,6 +946,21 @@ fn eval_set_bang(args: &[Form], env: &mut Env) -> EvalResult {
     } else {
         Value::Nil
     };
+    // (set! field v) inside a deftype method: mutate the instance through the
+    // hidden deftype-this* binding (unsynchronized-mutable semantics), and
+    // shadow the injected local so later reads in this scope see the write.
+    if !sym.contains('/')
+        && let Some(Value::TypeInstance(ti)) = env.lookup_local_frames("deftype-this*")
+    {
+        let key = Value::keyword(cljrs_value::Keyword::simple(sym.as_str()));
+        if ti.get().fields.contains_key(&key) {
+            let mut ptr = ti.clone();
+            let inst = ptr.get_mut();
+            inst.fields = inst.fields.assoc(key, val.clone());
+            env.bind(std::sync::Arc::from(sym.as_str()), val.clone());
+            return Ok(val);
+        }
+    }
     let parsed = cljrs_value::Symbol::parse(&sym);
     let ns = parsed.namespace.as_deref().unwrap_or(&env.current_ns);
     let var = env
@@ -1174,6 +1211,7 @@ pub fn eval_defn(args: &[Form], env: &mut Env) -> EvalResult {
         meta = merge_meta(meta, Some(doc_meta(doc)));
     }
     meta = merge_meta(meta, arglists_meta(&fn_val, 0));
+    meta = merge_meta(name_ns_meta(name.as_str(), &env.current_ns), meta);
     if let Some(meta_val) = meta {
         var.get().set_meta(meta_val);
     }
@@ -1281,6 +1319,7 @@ fn eval_defmacro(args: &[Form], env: &mut Env) -> EvalResult {
     }
     // Skip the implicit &form/&env params when showing the macro's signature.
     meta = merge_meta(meta, arglists_meta(&macro_val, 2));
+    meta = merge_meta(name_ns_meta(name.as_str(), &env.current_ns), meta);
     if let Some(m) = meta {
         var.get().set_meta(m);
     }
@@ -2218,6 +2257,10 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
         span: span.clone(),
     };
     let mut bindings: Vec<Form> = Vec::new();
+    // Hidden handle for `set!` on mutable deftype fields: eval_set_bang
+    // mutates the instance through this binding.
+    bindings.push(mk(FK::Symbol("deftype-this*".into())));
+    bindings.push(mk(FK::Symbol(this_name.clone())));
     for field in fields {
         if param_names.contains(&field.as_ref()) {
             continue; // params shadow fields
@@ -2229,7 +2272,8 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
             mk(FK::Keyword(field.as_ref().to_string())),
         ])));
     }
-    if bindings.is_empty() {
+    if bindings.len() <= 2 {
+        // Only the deftype-this* handle — no real fields to expose.
         return form.clone();
     }
     let mut let_form = vec![mk(FK::Symbol("let*".into())), mk(FK::Vector(bindings))];
@@ -2258,11 +2302,18 @@ fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
     let field_names: Vec<Arc<str>> = match &args[1].kind {
         FormKind::Vector(fields) => fields
             .iter()
-            .map(|f| match &f.kind {
-                FormKind::Symbol(s) => Ok(Arc::from(s.as_str())),
-                _ => Err(EvalError::Runtime(
-                    "defrecord field names must be symbols".into(),
-                )),
+            .map(|f| {
+                // Peel type/visibility hints: [^long hash ^:private f].
+                let mut f = f;
+                while let FormKind::Meta(_, inner) = &f.kind {
+                    f = inner;
+                }
+                match &f.kind {
+                    FormKind::Symbol(s) => Ok(Arc::from(s.as_str())),
+                    _ => Err(EvalError::Runtime(
+                        "defrecord field names must be symbols".into(),
+                    )),
+                }
             })
             .collect::<EvalResult<_>>()?,
         _ => {
@@ -2411,9 +2462,10 @@ fn register_impls_for_tag(type_tag: &Arc<str>, forms: &[Form], env: &mut Env) ->
     for form in forms {
         match &form.kind {
             FormKind::Symbol(s) => {
-                let val = env.globals.lookup_in_ns(&env.current_ns, s);
-                match val {
-                    Some(Value::Protocol(p)) => {
+                // Evaluate the symbol so alias-qualified protocols resolve
+                // ((reify m/Transformer ...)).
+                match crate::eval::eval(form, env) {
+                    Ok(Value::Protocol(p)) => {
                         current_proto = Some(p);
                     }
                     _ => {

@@ -238,8 +238,10 @@ pub fn form_to_value(form: &Form) -> Value {
             Value::symbol(Symbol::simple("unquote-splicing")),
             form_to_value(inner),
         ]))),
+        // Qualified, as the JVM reader expands @x: a namespace that excludes
+        // and redefines `deref` (malli does) must not capture reader sugar.
         FormKind::Deref(inner) => Value::List(GcPtr::new(PersistentList::from_iter([
-            Value::symbol(Symbol::simple("deref")),
+            Value::symbol(Symbol::parse("clojure.core/deref")),
             form_to_value(inner),
         ]))),
         FormKind::Var(inner) => Value::List(GcPtr::new(PersistentList::from_iter([
@@ -326,12 +328,13 @@ pub fn select_reader_cond(clauses: &[Form]) -> Option<&Form> {
     None
 }
 
-/// A conditional with only `:clj`/`:cljs` branches silently expands to
-/// nothing on this platform — the most common porting surprise, so say so
-/// once per source location.
+/// A conditional with a `:clj` branch that still expanded to nothing is a
+/// porting surprise worth flagging (can only happen if `:clj` ever leaves
+/// the feature set). A `:cljs`-only conditional expanding to nothing is the
+/// CORRECT outcome on this platform — never warn for those.
 fn warn_foreign_platform_cond(clauses: &[Form]) {
     let has_foreign = clauses.chunks(2).any(|pair| {
-        matches!(&pair[0].kind, FormKind::Keyword(k) if k == "clj" || k == "cljs")
+        matches!(&pair[0].kind, FormKind::Keyword(k) if k == "clj")
     });
     if !has_foreign {
         return;

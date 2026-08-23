@@ -76,6 +76,18 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(vals))))
         }
         FormKind::Map(forms) => {
+            // Expand any reader-conditional entries first — #?@ splices
+            // change the form count (the reader defers the evenness check).
+            let expanded;
+            let forms: &Vec<Form> = if forms
+                .iter()
+                .any(|f| matches!(&f.kind, FormKind::ReaderCond { .. }))
+            {
+                expanded = cljrs_builtins::form::expand_reader_conds(forms);
+                &expanded
+            } else {
+                forms
+            };
             if forms.len() % 2 != 0 {
                 return Err(EvalError::Runtime(
                     "map literal must have an even number of forms".into(),
@@ -286,6 +298,18 @@ fn eval_symbol(s: &str, env: &mut Env) -> EvalResult {
             .ok_or_else(|| EvalError::UnboundSymbol(s.to_string()));
     }
 
+    // Dot-constructor sugar: (TypeName. args) calls ->TypeName (the
+    // constructor deftype/defrecord interned). Tried before class-name
+    // self-eval so user types win over the JVM-class fallback.
+    if let Some(type_name) = s.strip_suffix('.')
+        && !type_name.is_empty()
+        && let Some(ctor) = env
+            .globals
+            .lookup_in_ns(&env.current_ns, &format!("->{type_name}"))
+    {
+        return Ok(ctor);
+    }
+
     // JVM class names resolve to themselves as symbols (for instance?, catch, etc.)
     if is_jvm_class_name(s) {
         return Ok(Value::symbol(Symbol::simple(s)));
@@ -306,12 +330,25 @@ pub fn is_jvm_class_name(s: &str) -> bool {
     {
         return true;
     }
+    // General dotted class-name convention: last segment capitalized, at
+    // least one dot (malli.core.Schema, my.ns.RecordType). Only reached
+    // after var lookup fails, so this cannot shadow real bindings.
+    if let Some((_, last)) = s.rsplit_once('.')
+        && !last.is_empty()
+        && last.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    {
+        return true;
+    }
     // Bare capitalized names with no dots (Exception, Throwable, String, ...)
     !s.contains('.')
         && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
         && matches!(
             s,
             "Exception"
+                | "Pattern"
+                | "HashMap"
+                | "Map"
                 | "Throwable"
                 | "Error"
                 | "ExceptionInfo"
