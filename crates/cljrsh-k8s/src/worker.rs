@@ -229,12 +229,30 @@ impl WorkerState {
     }
 
     /// Re-run API discovery (CRDs may have been installed since connect).
+    /// Retries briefly: aggregated API groups (metrics, webhooks) answer 503
+    /// while a fresh cluster warms up, which fails the whole discovery run.
     async fn refresh_discovery(&mut self) -> Result<(), String> {
-        self.discovery = Discovery::new(self.client.clone())
-            .run()
-            .await
-            .map_err(|e| format!("api discovery: {e}"))?;
-        Ok(())
+        let mut last_err = String::new();
+        for attempt in 0..5 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            // Aggregated discovery (2 requests, served from the apiserver's
+            // own cache) doesn't touch each group's backing service, so a
+            // warming-up aggregated apiservice can't 503 the whole run.
+            let fresh = match Discovery::new(self.client.clone()).run_aggregated().await {
+                Ok(d) => Ok(d),
+                Err(_) => Discovery::new(self.client.clone()).run().await,
+            };
+            match fresh {
+                Ok(d) => {
+                    self.discovery = d;
+                    return Ok(());
+                }
+                Err(e) => last_err = format!("api discovery: {e}"),
+            }
+        }
+        Err(last_err)
     }
 
     /// Resolve, refreshing the discovery cache once on a miss so kinds from
