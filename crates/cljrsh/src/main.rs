@@ -15,6 +15,7 @@ mod exec;
 mod opts;
 mod repl;
 mod tasks;
+mod uberscript;
 
 use opts::{Opts, Program};
 
@@ -136,6 +137,19 @@ fn run(opts: Opts) -> i32 {
                 modes(true),
             )
         }
+        Program::Main(main_sym) => {
+            // `-m my.ns [args…]` — require the namespace and apply its
+            // `-main` (or `my.ns/fn`) to the remaining args as strings.
+            let ns = main_sym.split('/').next().unwrap_or(&main_sym);
+            let call = if main_sym.contains('/') {
+                main_sym.clone()
+            } else {
+                format!("{main_sym}/-main")
+            };
+            let src =
+                format!("(require '{ns}) (apply {call} (or *command-line-args* []))");
+            exec::run_program(&globals, &src, "<main>", modes(false))
+        }
         Program::File(path) => {
             let src = match std::fs::read_to_string(&path) {
                 Ok(s) => s,
@@ -177,6 +191,11 @@ fn run(opts: Opts) -> i32 {
             }
             match name.as_str() {
                 "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
+                "socket-repl" => {
+                    repl::socket(globals, opts.args.first().map(String::as_str))
+                }
+                "uberscript" => uberscript::run(&globals, &opts.args),
+                "prepare" => prepare(&project),
                 "describe" => describe(),
                 "print-deps" => print_deps(&opts.args),
                 "tasks" => match &project {
@@ -226,6 +245,36 @@ fn run(opts: Opts) -> i32 {
         }
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),
+    }
+}
+
+/// `cljrsh prepare` — resolve and download the project's :deps ahead of
+/// time (babashka's `bb prepare`). Pods download on first `load-pod`.
+fn prepare(project: &Option<cljrsh_project::Project>) -> i32 {
+    let Some(project) = project else {
+        eprintln!("cljrsh: no bb.edn project here");
+        return 2;
+    };
+    if project.deps.is_empty() {
+        println!("Nothing to prepare (no :deps).");
+        return 0;
+    }
+    match cljrsh_project::resolve_deps(project, &tasks::dep_cache_dir()) {
+        Ok(dirs) => {
+            println!("Prepared {} dependenc{}:", dirs.len(),
+                     if dirs.len() == 1 { "y" } else { "ies" });
+            for d in dirs {
+                println!("  {}", d.display());
+            }
+            if !project.pods.is_empty() {
+                println!("(pods download on first load-pod)");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("cljrsh: dependency resolution failed: {e}");
+            1
+        }
     }
 }
 

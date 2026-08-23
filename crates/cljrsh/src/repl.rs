@@ -138,3 +138,92 @@ mod tests {
         assert!(!delimiters_open("\\( 1"));
     }
 }
+
+// ── Socket REPL ───────────────────────────────────────────────────────────────
+
+/// `cljrsh socket-repl [addr]` — a plain text REPL over TCP (babashka's
+/// --socket-repl; default port 1666). One connection at a time (the
+/// interpreter is single-threaded); each connection gets a fresh `user`
+/// environment sharing the process globals.
+pub fn socket(globals: Arc<GlobalEnv>, addr: Option<&str>) -> i32 {
+    let addr = match addr {
+        None => "127.0.0.1:1666".to_string(),
+        Some(a) if a.contains(':') => a.to_string(),
+        Some(port) => format!("127.0.0.1:{port}"),
+    };
+    let listener = match std::net::TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("cljrsh: cannot bind socket REPL on {addr}: {e}");
+            return 1;
+        }
+    };
+    println!("Socket REPL started at {addr}");
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if let Err(e) = serve_connection(&globals, stream) {
+            eprintln!("cljrsh: socket REPL connection error: {e}");
+        }
+    }
+    0
+}
+
+fn serve_connection(
+    globals: &Arc<GlobalEnv>,
+    stream: std::net::TcpStream,
+) -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    let mut writer = stream.try_clone()?;
+    let mut reader = BufReader::new(stream);
+    let mut env = Env::new(globals.clone(), "user");
+    let mut buffer = String::new();
+    write!(writer, "user=> ")?;
+    writer.flush()?;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(()); // client hung up
+        }
+        buffer.push_str(&line);
+        if buffer.trim().is_empty() {
+            buffer.clear();
+            write!(writer, "user=> ")?;
+            writer.flush()?;
+            continue;
+        }
+        let mut parser =
+            cljrs_reader::Parser::new(buffer.clone(), "<socket-repl>".into());
+        match parser.parse_all() {
+            Ok(forms) => {
+                buffer.clear();
+                for form in &forms {
+                    let _alloc_frame = cljrs_gc::push_alloc_frame();
+                    // Evaluation prints (println etc.) go to the process's
+                    // stdout — only results and errors travel the socket,
+                    // like babashka's socket REPL.
+                    match crate::exec::eval_form(form, &mut env) {
+                        Ok(v) => writeln!(writer, "{v}")?,
+                        Err(cljrs_env::error::EvalError::Exit(_)) => return Ok(()),
+                        Err(e) => writeln!(writer, "ERROR: {e}")?,
+                    }
+                }
+                write!(writer, "user=> ")?;
+                writer.flush()?;
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                // An unclosed form means the expression continues on the
+                // next line; anything else is a real syntax error.
+                if !(msg.contains("unclosed") || msg.contains("unterminated")) {
+                    buffer.clear();
+                    writeln!(writer, "ERROR: {msg}")?;
+                    write!(writer, "user=> ")?;
+                    writer.flush()?;
+                }
+            }
+        }
+    }
+}

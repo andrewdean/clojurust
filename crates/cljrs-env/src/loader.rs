@@ -270,7 +270,7 @@ fn apply_alias_refer(
     }
 }
 
-pub(crate) fn find_source_file(
+pub fn find_source_file(
     rel: &str,
     src_paths: &[std::path::PathBuf],
 ) -> Option<(String, String)> {

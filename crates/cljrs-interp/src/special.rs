@@ -1593,6 +1593,21 @@ fn merge_meta(base: Option<Value>, overlay: Option<Value>) -> Option<Value> {
 fn eval_ns(args: &[Form], env: &mut Env) -> EvalResult {
     let (name, name_meta) = extract_ns_name_form(args.first(), env)?;
     env.globals.get_or_create_ns(&name);
+    // A namespace defined inline (at script level, not via the loader) is
+    // satisfied: a later `require` of it must not go back to the source path
+    // (uberscript bundles rely on this, like Clojure's *loaded-libs*). While
+    // the loader owns a claim for this namespace, marking is ITS job after
+    // the whole file evaluates — marking here would defeat circular-require
+    // detection and hide partially loaded namespaces.
+    if !env
+        .globals
+        .loading
+        .lock()
+        .unwrap()
+        .contains_key(name.as_str())
+    {
+        env.globals.mark_loaded(&Arc::from(name.as_str()));
+    }
     env.current_ns = Arc::from(name.as_str());
     // Auto-refer clojure.core (Clojure default behaviour).
     if name != "clojure.core" {
