@@ -147,6 +147,8 @@ pub fn standard_env(
         }
         globals.mark_loaded("clojure.test");
     }
+    // clojure.pprint loads lazily on first require.
+    globals.register_builtin_source("clojure.pprint", builtins::CLOJURE_PPRINT_SOURCE);
 
     // IR lowering is NOT enabled here — callers that need it should call
     // `cljrs_eval::mark_compiler_ready()` (see cljrs-stdlib / cljrs binary).

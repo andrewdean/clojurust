@@ -605,6 +605,7 @@ const BUILTIN_DOCS: &[(&str, &str)] = &[
     ("flush", "Flushes *out*."),
     ("read-string", "Reads one object from the given string."),
     ("slurp", "Reads the contents of a file into a string."),
+    ("read-line", "Reads the next line from stdin; nil at end of input."),
     (
         "spit",
         "Writes content to a file, creating or overwriting it.",
@@ -1321,6 +1322,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("spit", Arity::Variadic { min: 2 }, builtin_spit),
         ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
+        ("read-line", Arity::Fixed(0), builtin_read_line),
         ("close", Arity::Fixed(1), builtin_close),
         // Misc
         ("gensym", Arity::Variadic { min: 0 }, builtin_gensym),
@@ -1827,6 +1829,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
 // Bootstrap Clojure source defining higher-order functions.
 pub const BOOTSTRAP_SOURCE: &str = include_str!("bootstrap.cljrs");
 pub const CLOJURE_TEST_SOURCE: &str = include_str!("clojure_test.cljrs");
+pub const CLOJURE_PPRINT_SOURCE: &str = include_str!("clojure_pprint.cljrs");
 
 // ── Helper: lazy value iterator ──────────────────────────────────────────────
 
@@ -6503,6 +6506,18 @@ fn builtin_spit(args: &[Value]) -> ValueResult<Value> {
 }
 
 fn builtin_slurp(args: &[Value]) -> ValueResult<Value> {
+    // (slurp *in*) — the stdin sentinel reads standard input to a string.
+    if let Value::Keyword(k) = &args[0] {
+        let k = k.get();
+        if k.namespace.as_deref() == Some("cljrs.io") && &*k.name == "stdin" {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| ValueError::Other(e.to_string()))?;
+            return Ok(Value::string(buf));
+        }
+    }
     // Byte arrays decode directly (UTF-8) — the pod convention for stream
     // payloads (S3 :Body and friends).
     if let Value::ByteArray(bytes) = &args[0] {
@@ -7410,6 +7425,24 @@ fn builtin_printf(args: &[Value]) -> ValueResult<Value> {
 fn builtin_newline(_args: &[Value]) -> ValueResult<Value> {
     emit_output_ln("");
     Ok(Value::Nil)
+}
+
+fn builtin_read_line(_args: &[Value]) -> ValueResult<Value> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) => Ok(Value::Nil),
+        Ok(_) => {
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            Ok(Value::string(line))
+        }
+        Err(e) => Err(ValueError::Other(e.to_string())),
+    }
 }
 
 fn builtin_flush(_args: &[Value]) -> ValueResult<Value> {

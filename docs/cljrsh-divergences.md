@@ -69,6 +69,23 @@ exit codes through `try/finally`) are not listed.
 - `socket-repl` serves **one connection at a time**; evaluation prints
   go to the process stdout, only results and errors travel the socket.
 
+## clojure.pprint and stdin
+
+- **`clojure.pprint` is a pragmatic subset**: `pprint` is width-aware
+  (fits-on-one-line, else break with indentation) rather than the XP
+  pretty-printing algorithm; `cl-format` supports only the common
+  directives (`~a ~s ~d ~x ~o ~b ~f ~% ~& ~~`) and throws on the rest;
+  `write` always prints or returns via `pprint`/`pr` (no `:stream`
+  Writer plumbing). `print-table` matches Clojure's output.
+- **`line-seq` takes `*in*` (the stdin sentinel) or a file path string**
+  — there is no Reader object to wrap. Path-string input is read
+  eagerly.
+- **`subseq`/`rsubseq` are linear filters** over the sorted collection's
+  seq using `compare` (not a tree descent honoring a custom
+  comparator): same results for default-ordered collections, O(n)
+  instead of O(log n + k), and custom `sorted-map-by` comparators are
+  not consulted for the bounds.
+
 ## Semantics
 
 - `map?` returns false for `reify` instances (they are native objects,
