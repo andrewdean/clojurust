@@ -105,6 +105,7 @@ fn scan(v: &Value) -> Scan {
         | Value::Double(_)
         | Value::Char(_)
         | Value::Uuid(_)
+        | Value::Instant(_)
         | Value::ByteBlob(_)
         | Value::SharedAtom(_)
         | Value::Resource(_) => Clean,

@@ -140,6 +140,12 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
     // each element with eval_async so awaits yield cooperatively instead of
     // blocking the LocalSet thread via the sync condvar path.
     match &form.kind {
+        // `@x` sugar: a future/promise derefs cooperatively (yield to the
+        // executor) instead of blocking the LocalSet thread.
+        FormKind::Deref(inner) => {
+            let v = Box::pin(eval_async(inner, env)).await?;
+            return deref_async(v, env).await;
+        }
         FormKind::Vector(elems) => {
             let elems = elems.clone();
             let mut vals: Vec<Value> = Vec::with_capacity(elems.len());
@@ -190,6 +196,12 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
     if let FormKind::Symbol(s) = &forms[0].kind {
         match s.as_str() {
             "await" => return eval_await_async(&forms[1..], env).await,
+            // 1-arity deref of a future/promise yields cooperatively; other
+            // deref targets (and the 3-arity timeout form) take the sync path.
+            "deref" if forms.len() == 2 => {
+                let v = Box::pin(eval_async(&forms[1], env)).await?;
+                return deref_async(v, env).await;
+            }
             "do" => return eval_body_async(&forms[1..], env).await,
             "if" => return eval_if_async(&forms[1..], env).await,
             "let*" | "let" => return eval_let_async(&forms[1..], env).await,
@@ -211,6 +223,22 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
 
     // Non-symbol head (e.g. `((f) args)`): no yielding in Phase B.
     eval(&expanded, env)
+}
+
+/// Cooperative deref: futures/promises await on the executor; anything else
+/// goes through the ordinary `deref` builtin (atoms, delays, vars, ...).
+async fn deref_async(v: Value, env: &mut Env) -> EvalResult {
+    match &v {
+        Value::Future(_) | Value::Promise(_) => await_value(v).await,
+        _ => {
+            let deref_fn = env
+                .globals
+                .lookup_var("clojure.core", "deref")
+                .and_then(|var| cljrs_env::dynamics::deref_var(&var))
+                .ok_or_else(|| EvalError::UnboundSymbol("deref".into()))?;
+            cljrs_env::apply::apply_value(&deref_fn, vec![v], env)
+        }
+    }
 }
 
 /// `(await x)` — evaluate `x`, then yield until the resulting future/promise
@@ -319,6 +347,7 @@ async fn eval_try_async(args: &[Form], env: &mut Env) -> EvalResult {
         let mut handled = false;
         for c in &catches {
             if cljrs_interp::special::catch_type_matches(c.type_sym, &thrown_val) {
+                cljrs_interp::trace::clear_error_trace();
                 env.push_frame();
                 env.bind(std::sync::Arc::from(c.binding), thrown_val.clone());
                 result = eval_body_async(c.body, env).await;
@@ -454,6 +483,38 @@ async fn eval_loop_async(args: &[Form], env: &mut Env) -> EvalResult {
 /// special spreading/atom handling those builtins require. Such calls do not
 /// yield on awaits inside their arguments in Phase B.
 async fn eval_call_async(head: &Form, args: &[Form], whole: &Form, env: &mut Env) -> EvalResult {
+    // Mirror the sync eval_call's error-trace frame (crate cljrs-interp).
+    let frame_name = match &head.kind {
+        FormKind::Symbol(s) => s.clone(),
+        _ => "<anonymous>".to_string(),
+    };
+    let _frame = cljrs_interp::trace::FrameGuard::push(
+        frame_name,
+        env.current_ns.clone(),
+        head.span.clone(),
+    );
+    let result = eval_call_async_inner(head, args, whole, env).await;
+    if matches!(&result, Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_))) {
+        cljrs_interp::trace::record_error_trace();
+    }
+    result
+}
+
+async fn eval_call_async_inner(
+    head: &Form,
+    args: &[Form],
+    whole: &Form,
+    env: &mut Env,
+) -> EvalResult {
+    // `(.method target ...)` interop — mirror the sync eval_call routing
+    // (otherwise a top-level method call resolves `.method` as a symbol).
+    if let FormKind::Symbol(s) = &head.kind
+        && let Some(method) = s.strip_prefix('.')
+        && !method.is_empty()
+        && method != "."
+    {
+        return eval(whole, env);
+    }
     let callee = eval(head, env)?;
     match &callee {
         Value::NativeFunction(nf) if is_form_intercepted(&nf.get().name) => {

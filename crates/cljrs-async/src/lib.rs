@@ -71,7 +71,48 @@ pub fn init(globals: &Arc<cljrs_env::env::GlobalEnv>) {
     isolate_builtins::register(globals, ns);
     load_source(globals, ns, CORE_ASYNC_SOURCE);
     globals.mark_loaded(ns);
+
+    // `future` / `pmap` live in clojure.core; they need the async runtime,
+    // so they are defined here rather than in the bootstrap.
+    builtins::register_core(globals);
+    load_source(globals, "clojure.core", FUTURE_SOURCE);
+
+    // `refer_all` snapshots vars, so namespaces created before this init
+    // (user, the stdlib internals) don't see the clojure.core additions
+    // above. Refresh their refers; interns shadow refers, so namespaces
+    // that define their own names are unaffected.
+    let ns_names: Vec<std::sync::Arc<str>> = globals
+        .namespaces
+        .read()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    for n in ns_names {
+        if n.as_ref() != "clojure.core" {
+            globals.refer_all(&n, "clojure.core");
+        }
+    }
 }
+
+/// Clojure layer for `future`/`pmap` (evaluated into clojure.core by `init`).
+const FUTURE_SOURCE: &str = r#"
+(defmacro future
+  "Evaluate body on the async executor, returning a future. On this
+  single-threaded runtime a synchronous deref of an unstarted future runs
+  the body inline (work-stealing), so deref never deadlocks; bodies
+  interleave at yield points (channel ops, await, top-level forms)."
+  [& body]
+  `(future-call (fn [] ~@body)))
+
+(defn pmap
+  "Like map, but each (f x) runs as a future. Semi-lazy: futures are all
+  created eagerly, results derefed on demand."
+  ([f coll]
+   (map deref (mapv (fn [x] (future-call (fn [] (f x)))) coll)))
+  ([f c1 c2]
+   (pmap (fn [[a b]] (f a b)) (map vector c1 c2))))
+"#;
 
 /// Evaluate a Clojure source string form-by-form into an already-created
 /// namespace. Parse/eval failures are reported but do not abort `init`.

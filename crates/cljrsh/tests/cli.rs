@@ -443,3 +443,318 @@ fn nu_ls_returns_keyword_maps() {
     );
     assert_eq!(r.stdout, "true\n", "stderr: {}", r.stderr);
 }
+
+// ── bb.edn tasks (cljrsh-project + tasks.rs) ─────────────────────────────────
+
+fn run_in(dir: &std::path::Path, args: &[&str]) -> Outcome {
+    let mut cmd = cljrsh();
+    cmd.current_dir(dir)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = cmd.spawn().unwrap().wait_with_output().unwrap();
+    Outcome {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        code: out.status.code().unwrap_or(-1),
+    }
+}
+
+fn task_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("bb.edn"),
+        r#"{:paths ["src"]
+            :tasks {:init (def base 40)
+                    clean (println "cleaning")
+                    compile-it {:doc "Compile" :task (do (println "compiling") (+ base 2))}
+                    hidden {:task 1 :private true}
+                    build {:doc "Build" :depends [clean compile-it]
+                           :task (println "result" compile-it)}}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/my")).unwrap();
+    std::fs::write(
+        dir.path().join("src/my/lib.clj"),
+        "(ns my.lib) (def marker :from-project-paths)",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn tasks_listing_hides_private_and_shows_docs() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["tasks"]);
+    assert!(r.stdout.contains("compile-it Compile"), "stdout: {}", r.stdout);
+    assert!(r.stdout.contains("build"));
+    assert!(!r.stdout.contains("hidden"));
+}
+
+#[test]
+fn task_depends_order_and_result_binding() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["build"]);
+    assert_eq!(r.stdout, "cleaning\ncompiling\nresult 42\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn run_subcommand_invokes_task() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["run", "compile-it"]);
+    assert_eq!(r.stdout, "compiling\n");
+}
+
+#[test]
+fn project_paths_apply_to_eval() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["-e", "(require 'my.lib) my.lib/marker"]);
+    assert_eq!(r.stdout, ":from-project-paths\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn unknown_task_reports_cleanly() {
+    let dir = task_project();
+    let r = run_in(dir.path(), &["no-such-thing"]);
+    assert_eq!(r.code, 2);
+    assert!(r.stderr.contains("neither a file nor a task"));
+}
+
+// ── Futures / pmap / promise (milestone A7) ──────────────────────────────────
+
+#[test]
+fn future_deref_top_level() {
+    let r = run(&["-e", "@(future (+ 40 2))"], None, &[]);
+    assert_eq!(r.stdout, "42\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn mapv_deref_futures_no_deadlock() {
+    let r = run(
+        &["-e", "(mapv deref (mapv (fn [i] (future (* i 10))) [1 2 3]))"],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[10 20 30]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn future_error_propagates_with_ex_data() {
+    let r = run(
+        &[
+            "-e",
+            "(try @(future (throw (ex-info \"boom\" {:k 1})))
+                  (catch Exception e [(ex-message e) (:k (ex-data e))]))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[\"boom\" 1]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn future_predicates_and_single_run() {
+    let r = run(
+        &[
+            "-e",
+            "(let [f (future (println \"ran\") :done)]
+               [(future? f) @f @f (future-done? f)])",
+        ],
+        None,
+        &[],
+    );
+    // Body printed exactly once even with two derefs.
+    assert_eq!(r.stdout, "ran\n[true :done :done true]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn pmap_and_promise() {
+    let r = run(
+        &[
+            "-e",
+            "[(vec (pmap inc [1 2 3])) (let [p (promise)] (deliver p :d) @p)]",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[[2 3 4] :d]\n", "stderr: {}", r.stderr);
+}
+
+// ── Pods (cljrsh-pods, bundled test pod) ─────────────────────────────────────
+
+#[test]
+fn pods_end_to_end_through_binary() {
+    // The test pod binary lives in the same target dir as cljrsh.
+    let pod = std::path::Path::new(env!("CARGO_BIN_EXE_cljrsh"))
+        .with_file_name("cljrsh-test-pod");
+    if !pod.exists() {
+        eprintln!("skipping: cljrsh-test-pod not built");
+        return;
+    }
+    let expr = format!(
+        "(require '[babashka.pods :as pods])
+         (pods/load-pod \"{}\")
+         [(pod.test-pod/add-sync 40 2)
+          (pod.test-pod/from-code)
+          (try (pod.test-pod/error-fn)
+               (catch Exception e (:pod-var (ex-data e))))]",
+        pod.display()
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(
+        r.stdout, "[42 :evaluated-client-side :error-fn]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+// ── nREPL server (milestone B-M5) ────────────────────────────────────────────
+
+#[test]
+fn nrepl_server_clone_and_eval() {
+    use cljrs_bencode::{Bencode, decode, encode_to_vec};
+    use std::io::{Read as _, Write as _};
+
+    // Port 0 → OS-assigned; read the actual port from stdout.
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = cljrsh()
+        .args(["nrepl-server", "0"])
+        .current_dir(dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    {
+        use std::io::BufRead as _;
+        let mut reader = std::io::BufReader::new(child.stdout.as_mut().unwrap());
+        reader.read_line(&mut line).unwrap();
+    }
+    let port: u16 = line
+        .split("port ")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|p| p.parse().ok())
+        .expect("port in banner");
+
+    let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut read_msg = |sock: &mut std::net::TcpStream, buf: &mut Vec<u8>| -> Bencode {
+        loop {
+            if let Ok(Some((msg, used))) = decode(buf) {
+                buf.drain(..used);
+                return msg;
+            }
+            let mut chunk = [0u8; 4096];
+            let n = sock.read(&mut chunk).expect("nrepl read");
+            assert!(n > 0, "nrepl closed");
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    };
+    let dict = |entries: Vec<(&str, &str)>| {
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in entries {
+            m.insert(k.as_bytes().to_vec(), Bencode::str(v));
+        }
+        Bencode::Dict(m)
+    };
+    let get = |m: &Bencode, k: &str| -> Option<String> {
+        m.as_dict()?
+            .get(k.as_bytes())
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
+
+    sock.write_all(&encode_to_vec(&dict(vec![("op", "clone"), ("id", "1")])))
+        .unwrap();
+    let session = loop {
+        let m = read_msg(&mut sock, &mut buf);
+        if let Some(s) = get(&m, "new-session") {
+            break s;
+        }
+    };
+
+    sock.write_all(&encode_to_vec(&dict(vec![
+        ("op", "eval"),
+        ("code", "(reduce + (range 101))"),
+        ("id", "2"),
+        ("session", &session),
+    ])))
+    .unwrap();
+    let mut value = None;
+    loop {
+        let m = read_msg(&mut sock, &mut buf);
+        if let Some(v) = get(&m, "value") {
+            value = Some(v);
+        }
+        if let Some(Bencode::List(status)) = m.as_dict().and_then(|d| d.get(b"status".as_ref()))
+            && status.iter().any(|s| s.as_str() == Some("done"))
+        {
+            break;
+        }
+    }
+    assert_eq!(value.as_deref(), Some("5050"));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+// ── Error reports (milestone A8) ─────────────────────────────────────────────
+
+#[test]
+fn error_report_has_type_data_location_and_trace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("boom.clj");
+    std::fs::write(
+        &path,
+        "(defn inner [x]\n  (throw (ex-info \"kaboom\" {:k x})))\n(defn outer []\n  (inner 7))\n(outer)\n",
+    )
+    .unwrap();
+    let r = run(&[path.to_str().unwrap()], None, &[]);
+    assert_eq!(r.code, 1);
+    let err = &r.stderr;
+    assert!(err.contains("Type:     clojure.lang.ExceptionInfo"), "{err}");
+    assert!(err.contains("Message:  kaboom"), "{err}");
+    assert!(err.contains("Data:     {:k 7}"), "{err}");
+    assert!(err.contains("boom.clj:4:4"), "location: {err}");
+    assert!(err.contains("^--- kaboom"), "caret: {err}");
+    // Innermost first.
+    let inner_pos = err.find("user/inner").expect("inner frame");
+    let outer_pos = err.find("user/outer").expect("outer frame");
+    assert!(inner_pos < outer_pos, "{err}");
+}
+
+#[test]
+fn caught_error_does_not_pollute_later_trace() {
+    let r = run(
+        &[
+            "-e",
+            "(defn safe [] (try (throw (ex-info \"handled\" {})) (catch Exception e :ok)))
+             (safe)
+             (defn fails [] (nth [1 2] 9))
+             (fails)",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.code, 1);
+    assert!(r.stderr.contains("user/fails"), "{}", r.stderr);
+    assert!(!r.stderr.contains("user/safe"), "{}", r.stderr);
+    // The context snippet may show source containing "handled"; the reported
+    // error itself must not be the caught one.
+    assert!(!r.stderr.contains("Message:  handled"), "{}", r.stderr);
+}
+
+#[test]
+fn unbound_symbol_report() {
+    let r = run(&["-e", "(defn f [] (no-such-fn 1)) (f)"], None, &[]);
+    assert!(
+        r.stderr.contains("Unable to resolve symbol: no-such-fn"),
+        "{}",
+        r.stderr
+    );
+    assert!(r.stderr.contains("user/f"), "{}", r.stderr);
+}

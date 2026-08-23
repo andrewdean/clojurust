@@ -367,3 +367,20 @@ runtime, so these callers see no spurious panic. Re-call `init` from inside a
 **Timer portability:** On `wasm32` the `time` feature of tokio is present but
 `platform_sleep` (used internally by `timeout`) delegates to `gloo-timers` so that
 the browser's `setTimeout` is used instead of a non-functional OS-level clock.
+
+## `future` / `pmap` (clojure.core additions)
+
+`init` interns `future-call` into clojure.core and evaluates the
+`future`/`pmap` layer (then refreshes existing namespaces' refers, which are
+snapshots). The returned `Value::Future` carries a **claimable body**
+(`CljxFuture::new_with_thunk`): an executor task claims and runs it in an
+async context when the LocalSet is driven, while a synchronous `deref`
+(builtin or `@` sugar) that arrives first **steals** it and runs it inline —
+so `(mapv deref futs)` can never deadlock the single-threaded executor.
+`eval_async` additionally intercepts 1-arity `deref`/`@` so top-level and
+`^:async`-body derefs of futures/promises await cooperatively (deref inside
+an async fn now works instead of erroring). Bodies interleave only at yield
+points (channel ops, `await`, top-level form boundaries); CPU-bound or
+blocking-native bodies serialize. `future-done?`/`future-cancelled?`/
+`future-cancel`/`future?` are registered in cljrs-builtins; `pmap` is
+futures + deref (same interleaving caveat).

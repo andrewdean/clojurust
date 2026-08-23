@@ -151,3 +151,69 @@ pub(crate) fn builtin_set_property(args: &[Value]) -> ValueResult<Value> {
         _ => unreachable!("arity checked by registration"),
     }
 }
+
+// ── JVM wrapper-class statics ────────────────────────────────────────────────
+// The parse/predicate statics portable .cljc libraries call in their :clj
+// branches (babashka runs with the :clj feature, and so does cljrsh).
+
+fn str_arg0<'a>(args: &'a [Value], who: &str) -> Result<&'a str, ValueError> {
+    match &args[0] {
+        Value::Str(s) => Ok(s.get().as_str()),
+        other => Err(ValueError::Other(format!(
+            "{who} expects a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+pub(crate) fn builtin_long_parse(args: &[Value]) -> ValueResult<Value> {
+    let s = str_arg0(args, "Long/parseLong")?;
+    s.parse::<i64>()
+        .map(Value::Long)
+        .map_err(|e| ValueError::Other(format!("For input string: {s:?}: {e}")))
+}
+
+pub(crate) fn builtin_double_parse(args: &[Value]) -> ValueResult<Value> {
+    let s = str_arg0(args, "Double/parseDouble")?;
+    s.parse::<f64>()
+        .map(Value::Double)
+        .map_err(|e| ValueError::Other(format!("For input string: {s:?}: {e}")))
+}
+
+pub(crate) fn builtin_boolean_parse(args: &[Value]) -> ValueResult<Value> {
+    let s = str_arg0(args, "Boolean/parseBoolean")?;
+    Ok(Value::Bool(s.eq_ignore_ascii_case("true")))
+}
+
+pub(crate) fn builtin_string_value_of(args: &[Value]) -> ValueResult<Value> {
+    Ok(match &args[0] {
+        Value::Nil => Value::string("null".to_string()),
+        Value::Str(s) => Value::string(s.get().clone()),
+        other => Value::string(format!("{other}")),
+    })
+}
+
+fn char_pred(args: &[Value], who: &str, f: impl Fn(char) -> bool) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Char(c) => Ok(Value::Bool(f(*c))),
+        Value::Str(s) if s.get().chars().count() == 1 => {
+            Ok(Value::Bool(f(s.get().chars().next().unwrap())))
+        }
+        other => Err(ValueError::Other(format!(
+            "{who} expects a character, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+pub(crate) fn builtin_char_is_digit(args: &[Value]) -> ValueResult<Value> {
+    char_pred(args, "Character/isDigit", |c| c.is_ascii_digit())
+}
+
+pub(crate) fn builtin_char_is_letter(args: &[Value]) -> ValueResult<Value> {
+    char_pred(args, "Character/isLetter", char::is_alphabetic)
+}
+
+pub(crate) fn builtin_char_is_whitespace(args: &[Value]) -> ValueResult<Value> {
+    char_pred(args, "Character/isWhitespace", char::is_whitespace)
+}

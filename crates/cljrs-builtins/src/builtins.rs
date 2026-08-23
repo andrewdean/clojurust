@@ -1325,6 +1325,14 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("pr-str", Arity::Variadic { min: 0 }, builtin_pr_str),
         ("str", Arity::Variadic { min: 0 }, builtin_str),
         ("read-string", Arity::Fixed(1), builtin_read_string),
+        // clojure.edn support: parse one form as data, unknown tags become
+        // {:cljrs.edn/tag ... :cljrs.edn/form ...} sentinels; :cljrs.edn/eof
+        // keyword for empty input.
+        (
+            "edn-read-string*",
+            Arity::Fixed(1),
+            builtin_edn_read_string_star,
+        ),
         ("spit", Arity::Variadic { min: 2 }, builtin_spit),
         ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
         ("close", Arity::Fixed(1), builtin_close),
@@ -1496,6 +1504,51 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::system::builtin_getenv,
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
+        ("Long/parseLong", Arity::Fixed(1), crate::system::builtin_long_parse),
+        ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
+        (
+            "Double/parseDouble",
+            Arity::Fixed(1),
+            crate::system::builtin_double_parse,
+        ),
+        (
+            "Float/parseFloat",
+            Arity::Fixed(1),
+            crate::system::builtin_double_parse,
+        ),
+        (
+            "Boolean/parseBoolean",
+            Arity::Fixed(1),
+            crate::system::builtin_boolean_parse,
+        ),
+        (
+            "String/valueOf",
+            Arity::Fixed(1),
+            crate::system::builtin_string_value_of,
+        ),
+        (
+            "Character/isDigit",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_digit,
+        ),
+        (
+            "Character/isLetter",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_letter,
+        ),
+        (
+            "Character/isWhitespace",
+            Arity::Fixed(1),
+            crate::system::builtin_char_is_whitespace,
+        ),
+        ("instant-now", Arity::Fixed(0), crate::time::builtin_instant_now),
+        ("instant", Arity::Fixed(1), crate::time::builtin_instant),
+        ("instant-ms", Arity::Fixed(1), crate::time::builtin_instant_ms),
+        ("instant?", Arity::Fixed(1), crate::time::builtin_instant_q),
+        ("future-done?", Arity::Fixed(1), builtin_future_done_q),
+        ("future-cancelled?", Arity::Fixed(1), builtin_future_cancelled_q),
+        ("future-cancel", Arity::Fixed(1), builtin_future_cancel),
+        ("future?", Arity::Fixed(1), builtin_future_q),
         (
             "System/getProperty",
             Arity::Variadic { min: 1 },
@@ -6032,6 +6085,28 @@ fn builtin_deref(args: &[Value]) -> ValueResult<Value> {
                     "deref on a future is not allowed inside an ^:async function; use (await ...) instead".into(),
                 ));
             }
+            // Work-stealing: on the single-threaded runtime a blocking wait
+            // can never be satisfied by a same-thread task, so if the body
+            // has not started yet, claim it and run it inline right now.
+            if let Some(thunk) = f.get().claim_thunk() {
+                let outcome = cljrs_env::callback::invoke(&thunk, Vec::new());
+                let mut state = f.get().state.lock().unwrap();
+                if matches!(&*state, FutureState::Running) {
+                    *state = match outcome {
+                        Ok(v) => FutureState::Done(v),
+                        Err(ValueError::Thrown(v)) => FutureState::Failed(v),
+                        Err(ValueError::GasExhausted) => FutureState::GasExhausted,
+                        Err(other) => {
+                            let msg = other.to_string();
+                            FutureState::Failed(Value::Error(GcPtr::new(
+                                cljrs_value::ExceptionInfo::new(other, msg, None, None),
+                            )))
+                        }
+                    };
+                }
+                drop(state);
+                f.get().cond.notify_all();
+            }
             if with_timeout {
                 let timeout_ms = match &args[1] {
                     Value::Long(n) => *n as u64,
@@ -6211,6 +6286,24 @@ fn builtin_str(args: &[Value]) -> ValueResult<Value> {
         })
         .collect();
     Ok(Value::string(s))
+}
+
+fn builtin_edn_read_string_star(args: &[Value]) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Str(s) => {
+            let src = s.get().clone();
+            let mut parser = cljrs_reader::Parser::new(src, "<edn>".into());
+            match parser.parse_one() {
+                Ok(Some(form)) => Ok(crate::form::form_to_edn_value(&form)),
+                Ok(None) => Ok(Value::keyword(cljrs_value::Keyword::parse("cljrs.edn/eof"))),
+                Err(e) => Err(ValueError::Other(e.to_string())),
+            }
+        }
+        v => Err(ValueError::WrongType {
+            expected: "string",
+            got: v.type_name().to_string(),
+        }),
+    }
 }
 
 fn builtin_read_string(args: &[Value]) -> ValueResult<Value> {
@@ -7548,6 +7641,7 @@ fn value_compare_result(a: &Value, b: &Value) -> ValueResult<std::cmp::Ordering>
         ) => num_compare(a, b),
         (Value::Str(x), Value::Str(y)) => Ok(x.get().cmp(y.get())),
         (Value::Char(x), Value::Char(y)) => Ok(x.cmp(y)),
+        (Value::Instant(x), Value::Instant(y)) => Ok(x.cmp(y)),
         (Value::Keyword(x), Value::Keyword(y)) => {
             // Compare namespace first, then name (matching Clojure)
             let ns_cmp = match (&x.get().namespace, &y.get().namespace) {
@@ -8125,8 +8219,10 @@ fn builtin_deliver(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-// These functions are kept for future use but are not currently registered.
-#[allow(dead_code)]
+fn builtin_future_q(args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::Bool(matches!(&args[0], Value::Future(_))))
+}
+
 fn builtin_future_done_q(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => Ok(Value::Bool(f.get().is_done())),
@@ -8137,7 +8233,6 @@ fn builtin_future_done_q(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-#[allow(dead_code)]
 fn builtin_future_cancelled_q(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => Ok(Value::Bool(f.get().is_cancelled())),
@@ -8148,7 +8243,6 @@ fn builtin_future_cancelled_q(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-#[allow(dead_code)]
 fn builtin_future_cancel(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Future(f) => {

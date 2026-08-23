@@ -117,6 +117,23 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
                     "deref (@) on a future is not allowed inside an ^:async function; use (await ...) instead".into(),
                 ));
             }
+            // Work-stealing (see the deref builtin): a sync wait can never be
+            // satisfied by a same-thread executor task, so run an unstarted
+            // future body inline before falling into the blocking wait.
+            if let Value::Future(f) = &v
+                && let Some(thunk) = f.get().claim_thunk()
+            {
+                let outcome = cljrs_env::apply::apply_value(&thunk, Vec::new(), env);
+                let mut state = f.get().state.lock().unwrap();
+                if matches!(&*state, cljrs_value::FutureState::Running) {
+                    *state = match outcome {
+                        Ok(v) => cljrs_value::FutureState::Done(v),
+                        Err(e) => cljrs_value::FutureState::Failed(e.to_error_value()),
+                    };
+                }
+                drop(state);
+                f.get().cond.notify_all();
+            }
             deref_value(v)
         }
         FormKind::Var(inner) => {
@@ -423,13 +440,43 @@ fn eval_tagged_literal(tag: &str, inner: &Form, env: &mut Env) -> EvalResult {
             }
         }
         "inst" => {
-            // TODO: implement #inst for date/time literals
             let val = eval(inner, env)?;
-            Ok(val)
+            match &val {
+                Value::Str(s) => cljrs_types::instant::parse_rfc3339_millis(s.get())
+                    .map(Value::Instant)
+                    .map_err(EvalError::Runtime),
+                _ => Err(EvalError::Runtime(format!(
+                    "#inst expects a string, got {}",
+                    val.type_name()
+                ))),
+            }
         }
-        _ => Err(EvalError::Runtime(format!(
-            "unknown tagged literal: #{tag}"
-        ))),
+        _ => {
+            // User-extensible data readers: `*data-readers*` maps tag symbols
+            // to 1-arg reader fns; `*default-data-reader-fn*` (tag value)
+            // catches everything else. Both are dynamic vars in clojure.core.
+            let val = eval(inner, env)?;
+            if let Some(var) = env.globals.lookup_var("clojure.core", "*data-readers*")
+                && let Some(Value::Map(readers)) = cljrs_env::dynamics::deref_var(&var)
+            {
+                let key = Value::symbol(cljrs_value::Symbol::parse(tag));
+                if let Some(reader) = readers.get(&key) {
+                    return cljrs_env::apply::apply_value(&reader, vec![val], env);
+                }
+            }
+            if let Some(var) = env
+                .globals
+                .lookup_var("clojure.core", "*default-data-reader-fn*")
+                && let Some(f) = cljrs_env::dynamics::deref_var(&var)
+                && f != Value::Nil
+            {
+                let tag_sym = Value::symbol(cljrs_value::Symbol::parse(tag));
+                return cljrs_env::apply::apply_value(&f, vec![tag_sym, val], env);
+            }
+            Err(EvalError::Runtime(format!(
+                "No reader function for tag {tag}. Add it to *data-readers* or set *default-data-reader-fn*."
+            )))
+        }
     }
 }
 

@@ -67,6 +67,10 @@ pub enum Value {
     Char(char),
     Str(GcPtr<String>),
     Uuid(u128),
+    /// `#inst` — an absolute point in time as epoch milliseconds (UTC),
+    /// mirroring `java.util.Date` semantics. Dep-free scalar like `Uuid`;
+    /// RFC 3339 read/print via `cljrs_types::instant`.
+    Instant(i64),
     Pattern(GcPtr<Regex>),
     Matcher(GcPtr<Matcher>),
 
@@ -477,6 +481,7 @@ impl PartialEq for Value {
             }
             // UUID equality: same u128 value.
             (Value::Uuid(a), Value::Uuid(b)) => a == b,
+            (Value::Instant(a), Value::Instant(b)) => a == b,
             // Regex pattern equality: compare source string (matches Clojure JVM behavior
             // where two patterns are equal iff their source strings are equal).
             (Value::Pattern(a), Value::Pattern(b)) => a.get().as_str() == b.get().as_str(),
@@ -609,6 +614,7 @@ impl ClojureHash for Value {
             Value::Keyword(k) => hash_string(&k.get().to_string()),
             Value::Symbol(s) => hash_string(&s.get().to_string()),
             Value::Uuid(u) => hash_u128(*u),
+            Value::Instant(ms) => hash_i64(*ms),
             Value::NativeObject(obj) => {
                 let ptr = obj.get() as *const _ as usize;
                 hash_i64(ptr as i64)
@@ -896,6 +902,14 @@ pub fn pr_str(v: &Value, f: &mut fmt::Formatter<'_>, readably: bool) -> fmt::Res
                 write!(f, "{}", uuid)
             }
         }
+        Value::Instant(ms) => {
+            let ts = cljrs_types::instant::format_rfc3339_millis(*ms);
+            if readably {
+                write!(f, "#inst \"{ts}\"")
+            } else {
+                write!(f, "{ts}")
+            }
+        }
         Value::Char(c) => {
             if readably {
                 match c {
@@ -1162,6 +1176,7 @@ impl Value {
             Value::Symbol(_) => "symbol",
             Value::Keyword(_) => "keyword",
             Value::Uuid(_) => "uuid",
+            Value::Instant(_) => "instant",
             Value::List(_) => "list",
             Value::Vector(_) => "vector",
             Value::Map(_) => "map",
@@ -1272,7 +1287,8 @@ impl cljrs_gc::Trace for Value {
             | Value::Long(_)
             | Value::Double(_)
             | Value::Char(_)
-            | Value::Uuid(_) => {}
+            | Value::Uuid(_)
+            | Value::Instant(_) => {}
             Value::BigInt(p) => visitor.visit(p),
             Value::BigDecimal(p) => visitor.visit(p),
             Value::Ratio(p) => visitor.visit(p),
@@ -1626,6 +1642,9 @@ impl Ord for Value {
             // ── Strings ──
             (Value::Str(a), Value::Str(b)) => a.get().cmp(b.get()),
 
+            // ── Instants: chronological ──
+            (Value::Instant(a), Value::Instant(b)) => a.cmp(b),
+
             // ── Symbols ──
             (Value::Symbol(a), Value::Symbol(b)) => cmp_ns_name(
                 &a.get().namespace,
@@ -1749,6 +1768,7 @@ fn type_discriminant(v: &Value) -> u8 {
         Value::DoubleArray(_) => 36,
         Value::ObjectArray(_) => 37,
         Value::Uuid(_) => 38,
+        Value::Instant(_) => 44,
         Value::NativeObject(_) => 43,
         Value::Resource(_) => 39,
         Value::TransientMap(_) => 40,

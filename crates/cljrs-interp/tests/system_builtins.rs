@@ -87,3 +87,54 @@ fn command_line_args_bound_by_host() {
     let expected = eval_in(&mut env, "[\"a\" \"b\"]").unwrap();
     assert_eq!(v, expected);
 }
+
+#[test]
+fn jvm_wrapper_statics() {
+    let (_, mut env) = make_env();
+    let v = eval_in(
+        &mut env,
+        "[(Long/parseLong \"42\") (Double/parseDouble \"2.5\") (Boolean/parseBoolean \"TRUE\")
+          (Character/isDigit \\7) (Character/isLetter \\a) (String/valueOf 5)]",
+    )
+    .unwrap();
+    let expected = eval_in(&mut env, "[42 2.5 true true true \"5\"]").unwrap();
+    assert_eq!(v, expected);
+}
+
+#[test]
+fn throwable_interop_on_errors() {
+    let (_, mut env) = make_env();
+    let v = eval_in(
+        &mut env,
+        "(try (throw (ex-info \"oops\" {})) (catch Exception e (.getMessage e)))",
+    )
+    .unwrap();
+    assert_eq!(v, cljrs_value::Value::string("oops".to_string()));
+}
+
+#[test]
+fn fn_return_type_hints_are_ignored() {
+    let (_, mut env) = make_env();
+    let v = eval_in(
+        &mut env,
+        "(defn f ^String [^String s] (str s \"!\"))
+         (defn g (^long [] 0) (^long [x] x))
+         [(f \"a\") (g) (g 9)]",
+    )
+    .unwrap();
+    let expected = eval_in(&mut env, "[\"a!\" 0 9]").unwrap();
+    assert_eq!(v, expected);
+}
+
+#[test]
+fn re_matches_is_whole_string() {
+    let (_, mut env) = make_env();
+    let v = eval_in(
+        &mut env,
+        "[(re-matches #\"a+\" \"aaa\") (re-matches #\"a+\" \"aab\")
+          (re-matches #\"(a+)(b+)\" \"aabb\")]",
+    )
+    .unwrap();
+    let expected = eval_in(&mut env, "[\"aaa\" nil [\"aabb\" \"aa\" \"bb\"]]").unwrap();
+    assert_eq!(v, expected);
+}

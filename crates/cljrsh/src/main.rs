@@ -10,9 +10,11 @@
 //! real Rust stack) alongside a current-thread Tokio runtime + LocalSet that
 //! drives async tasks per top-level form (the `crates/cljrs` idiom).
 
+mod error;
 mod exec;
 mod opts;
 mod repl;
+mod tasks;
 
 use opts::{Opts, Program};
 
@@ -80,6 +82,8 @@ fn main() {
             let local = tokio::task::LocalSet::new();
             ASYNC_DRIVER.with(|d| *d.borrow_mut() = Some(AsyncDriver { rt, local }));
             let code = run(opts);
+            // Clean pod shutdown before process::exit (which skips Drop).
+            cljrsh_pods::shutdown_all();
             ASYNC_DRIVER.with(|d| *d.borrow_mut() = None);
             code
         })
@@ -101,6 +105,9 @@ fn run(opts: Opts) -> i32 {
         .map(std::path::PathBuf::from)
         .collect();
     let globals = exec::setup_globals(extra_paths, &opts.args);
+    // Nearest bb.edn/cljrsh.edn: contributes :paths for every program kind
+    // and the task graph for FileOrTask.
+    let project = tasks::load_project(&globals);
 
     let modes = |print_result: bool| exec::RunModes {
         input: opts.input,
@@ -140,7 +147,95 @@ fn run(opts: Opts) -> i32 {
             }
             exec::run_program(&globals, &src, "<stdin>", modes(false))
         }
+        Program::FileOrTask(name) => {
+            // babashka order: an existing file was already matched in opts;
+            // here: task > subcommand (tasks shadow subcommands of the same
+            // name, like babashka warns about).
+            if let Some(project) = project
+                .as_ref()
+                .filter(|p| p.tasks.iter().any(|t| t.name == name))
+            {
+                return tasks::run(&globals, project, &name);
+            }
+            match name.as_str() {
+                "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
+                "tasks" => match &project {
+                    Some(project) => tasks::list(project),
+                    None => {
+                        eprintln!("cljrsh: no bb.edn project here");
+                        2
+                    }
+                },
+                "run" => match (&project, opts.args.first()) {
+                    (Some(project), Some(task)) => {
+                        let task = task.clone();
+                        // Remaining args become *command-line-args*.
+                        cljrs_builtins::system::set_command_line_args(&globals, &opts.args[1..]);
+                        tasks::run(&globals, project, &task)
+                    }
+                    (None, _) => {
+                        eprintln!("cljrsh: no bb.edn project here");
+                        2
+                    }
+                    (_, None) => {
+                        eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
+                        2
+                    }
+                },
+                _ => {
+                    if project.is_some() {
+                        eprintln!(
+                            "cljrsh: {name} is neither a file nor a task (see `cljrsh tasks`)"
+                        );
+                    } else {
+                        eprintln!("cljrsh: file not found: {name}");
+                    }
+                    2
+                }
+            }
+        }
         Program::Repl => repl::run(globals),
         Program::Help | Program::Version => unreachable!("handled before spawn"),
+    }
+}
+
+/// `cljrsh nrepl-server [addr]` — addr as `PORT` or `HOST:PORT`; default
+/// 127.0.0.1:1667 (babashka's port). Writes `.nrepl-port`; serves forever,
+/// driving each form on the shared LocalSet so async code works in sessions.
+fn nrepl(globals: &std::sync::Arc<cljrs_env::env::GlobalEnv>, addr: Option<&str>) -> i32 {
+    let addr = match addr {
+        None => "127.0.0.1:1667".to_string(),
+        Some(a) if a.contains(':') => a.to_string(),
+        Some(port) => format!("127.0.0.1:{port}"),
+    };
+    let addr: std::net::SocketAddr = match addr.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("cljrsh: bad nREPL address {addr:?}: {e}");
+            return 2;
+        }
+    };
+    let config = cljrs_nrepl::Config {
+        addr,
+        port_file: Some(std::path::PathBuf::from(".nrepl-port")),
+    };
+    let server = match cljrs_nrepl::start(config, globals.clone()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("cljrsh: {e}");
+            return 1;
+        }
+    };
+    println!(
+        "nREPL server started on port {0} on host {1} - nrepl://{1}:{0}",
+        server.port(),
+        addr.ip()
+    );
+    match server.serve_with(exec::eval_form) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("cljrsh: nREPL server error: {e}");
+            1
+        }
     }
 }

@@ -26,4 +26,5 @@ tokio = { workspace = true, features = ["rt", "sync", "rt-multi-thread"] }
 
 [dev-dependencies]
 cljrs-env = { workspace = true }
+cljrs-reader = { workspace = true }
 

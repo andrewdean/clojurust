@@ -33,6 +33,7 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
     });
     cljrs_process::init(&globals);
     cljrsh_host::init(&globals);
+    cljrsh_pods::init(&globals);
     #[cfg(feature = "nu")]
     cljrsh_nu::init(&globals);
 
@@ -194,6 +195,7 @@ pub fn strip_shebang(src: &str) -> &str {
 /// Parse and evaluate every form of `src` in `env`, driving each top-level
 /// form on the shared LocalSet so async tasks make progress.
 pub fn eval_str(env: &mut Env, src: &str, filename: &str) -> Result<Value, ExecError> {
+    crate::error::register_source(filename, src);
     let mut parser = cljrs_reader::Parser::new(src.to_string(), filename.to_string());
     let forms = parser.parse_all().map_err(ExecError::Read)?;
     // Resolve top-level reader conditionals (nested ones are handled during
@@ -208,7 +210,7 @@ pub fn eval_str(env: &mut Env, src: &str, filename: &str) -> Result<Value, ExecE
 }
 
 /// Evaluate one form, driven on the shared LocalSet when available.
-fn eval_form(form: &cljrs_reader::Form, env: &mut Env) -> Result<Value, EvalError> {
+pub fn eval_form(form: &cljrs_reader::Form, env: &mut Env) -> Result<Value, EvalError> {
     crate::with_driver(|drv| match drv {
         Some((rt, local)) => local.block_on(rt, cljrs_async::eval_async::eval_async(form, env)),
         None => cljrs_interp::eval::eval(form, env),
@@ -227,7 +229,7 @@ pub enum ExecError {
 ///   exits with that code, printing only the message (babashka's clean-CLI
 ///   convention).
 /// - Everything else prints an error report and exits 1.
-fn report_error(e: ExecError) -> i32 {
+pub fn report_error(e: ExecError) -> i32 {
     match e {
         ExecError::Read(err) => {
             eprintln!("cljrsh: read error: {err}");
@@ -243,11 +245,11 @@ fn report_error(e: ExecError) -> i32 {
                 }
                 return code;
             }
-            eprintln!("cljrsh: unhandled exception: {val}");
+            crate::error::report(&EvalError::Thrown(val));
             1
         }
         ExecError::Eval(other) => {
-            eprintln!("cljrsh: {other}");
+            crate::error::report(&other);
             1
         }
     }

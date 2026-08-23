@@ -110,6 +110,8 @@ pub enum SerializedValue {
     Char(char),
     Str(String),
     Uuid(u128),
+    /// `#inst` — epoch milliseconds (UTC).
+    Instant(i64),
     /// Regex stored as source string; recompiled on deserialize.
     Pattern(String),
 
@@ -209,7 +211,8 @@ impl SerializedValue {
             | SerializedValue::Long(_)
             | SerializedValue::Double(_)
             | SerializedValue::Char(_)
-            | SerializedValue::Uuid(_) => 0,
+            | SerializedValue::Uuid(_)
+            | SerializedValue::Instant(_) => 0,
 
             SerializedValue::BigInt(b) => (b.bits() as usize / 8) + 1,
             SerializedValue::Ratio(r) => {
@@ -351,6 +354,7 @@ pub fn serialize(v: &Value) -> Result<SerializedValue, CloneError> {
         Value::Double(d) => Ok(SerializedValue::Double(*d)),
         Value::Char(c) => Ok(SerializedValue::Char(*c)),
         Value::Uuid(u) => Ok(SerializedValue::Uuid(*u)),
+        Value::Instant(ms) => Ok(SerializedValue::Instant(*ms)),
 
         Value::BigInt(p) => Ok(SerializedValue::BigInt(p.get().clone())),
         Value::BigDecimal(p) => Ok(SerializedValue::BigDecimal(p.get().clone())),
@@ -598,6 +602,7 @@ pub fn deserialize(sv: SerializedValue) -> Value {
         SerializedValue::Double(d) => Value::Double(d),
         SerializedValue::Char(c) => Value::Char(c),
         SerializedValue::Uuid(u) => Value::Uuid(u),
+        SerializedValue::Instant(ms) => Value::Instant(ms),
 
         SerializedValue::BigInt(n) => Value::BigInt(GcPtr::new(n)),
         SerializedValue::BigDecimal(d) => Value::BigDecimal(GcPtr::new(d)),

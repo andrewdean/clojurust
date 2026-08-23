@@ -67,7 +67,12 @@ impl Matcher {
         match state.phase {
             MatchPhase::New => match self.pattern.get().captures(self.haystack.get()) {
                 Some(cap) => {
-                    if !self.match_all || cap.len() == self.haystack.get().len() {
+                    // re-matches semantics: the whole haystack must match.
+                    // (`cap.len()` is the capture-group count, not a length.)
+                    let m = cap.get_match();
+                    if !self.match_all
+                        || (m.start() == 0 && m.end() == self.haystack.get().len())
+                    {
                         let match_ = cap.get_match();
                         *state = MatcherState {
                             phase: MatchPhase::Matching(match_.end()),
