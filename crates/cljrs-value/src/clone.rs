@@ -613,7 +613,7 @@ pub fn deserialize(sv: SerializedValue) -> Value {
         SerializedValue::Ratio(r) => Value::Ratio(GcPtr::new(r)),
         SerializedValue::Str(s) => Value::Str(GcPtr::new(s)),
         SerializedValue::Pattern(src) => Value::Pattern(GcPtr::new(
-            regex::Regex::new(&src).expect("pattern was valid at serialize time"),
+            fancy_regex::Regex::new(&src).expect("pattern was valid at serialize time"),
         )),
 
         SerializedValue::Symbol {

@@ -6,7 +6,7 @@ use cljrs_value::value::SetValue;
 use cljrs_value::{
     Keyword, MapValue, PersistentHashSet, PersistentList, PersistentVector, Symbol, Value,
 };
-use regex::Regex;
+use fancy_regex::Regex;
 
 // ── anon fn expansion ─────────────────────────────────────────────────────────
 

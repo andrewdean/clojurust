@@ -86,6 +86,10 @@ pub fn register(globals: &Arc<GlobalEnv>) {
 
     // clojure.test ─ pure Clojure, no native helpers.
     globals.register_builtin_source("clojure.test", CLOJURE_TEST_SRC);
+    globals.register_builtin_source(
+        "clojure.pprint",
+        cljrs_builtins::builtins::CLOJURE_PPRINT_SOURCE,
+    );
 
     // clojure.rust.io and clojure.edn use std::fs, unavailable on wasm32.
     #[cfg(not(target_arch = "wasm32"))]

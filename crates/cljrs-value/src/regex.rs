@@ -1,6 +1,6 @@
 use crate::{PersistentVector, Value};
 use cljrs_gc::{GcPtr, GcVisitor, MarkVisitor, Trace};
-use regex::{Captures, Regex};
+use fancy_regex::{Captures, Regex};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
@@ -65,17 +65,19 @@ impl Matcher {
     pub fn next(&self) -> MatchPhase {
         let mut state = self.state.lock().unwrap();
         match state.phase {
-            MatchPhase::New => match self.pattern.get().captures(self.haystack.get()) {
+            // fancy-regex surfaces backtracking-limit errors at match time;
+            // treat them as no-match (only pathological patterns hit it).
+            MatchPhase::New => match self.pattern.get().captures(self.haystack.get()).ok().flatten() {
                 Some(cap) => {
                     // re-matches semantics: the whole haystack must match.
                     // (`cap.len()` is the capture-group count, not a length.)
-                    let m = cap.get_match();
+                    let m = cap.get(0).expect("group 0 always participates");
                     if !self.match_all
                         || (m.start() == 0 && m.end() == self.haystack.get().len())
                     {
-                        let match_ = cap.get_match();
+                        let end = cap.get(0).expect("group 0").end();
                         *state = MatcherState {
-                            phase: MatchPhase::Matching(match_.end()),
+                            phase: MatchPhase::Matching(end),
                             last_match: Some(MatchResult::new(cap)),
                         }
                     }
@@ -88,10 +90,16 @@ impl Matcher {
                 }
             },
             MatchPhase::Matching(n) => {
-                match self.pattern.get().captures_at(self.haystack.get(), n) {
+                match self
+                    .pattern
+                    .get()
+                    .captures_from_pos(self.haystack.get(), n)
+                    .ok()
+                    .flatten()
+                {
                     Some(cap) => {
                         *state = MatcherState {
-                            phase: MatchPhase::Matching(cap.get_match().end()),
+                            phase: MatchPhase::Matching(cap.get(0).expect("group 0").end()),
                             last_match: Some(MatchResult::new(cap)),
                         }
                     }
@@ -121,7 +129,7 @@ impl Matcher {
 impl MatchResult {
     pub fn new(cap: Captures) -> Self {
         Self {
-            full: cap.get_match().as_str().to_string(),
+            full: cap.get(0).expect("group 0").as_str().to_string(),
             groups: cap
                 .iter()
                 .map(|g| g.map(|e| e.as_str().to_string()))

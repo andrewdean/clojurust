@@ -71,6 +71,7 @@ pub fn check_native(name: &str) -> EvalResult<()> {
         "flush",
         "spit",
         "slurp",
+        "read-line",
         "close",
         "nanotime",
         "sleep",

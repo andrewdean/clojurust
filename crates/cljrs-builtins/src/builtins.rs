@@ -605,6 +605,7 @@ const BUILTIN_DOCS: &[(&str, &str)] = &[
     ("flush", "Flushes *out*."),
     ("read-string", "Reads one object from the given string."),
     ("slurp", "Reads the contents of a file into a string."),
+    ("read-line", "Reads the next line from stdin; nil at end of input."),
     (
         "spit",
         "Writes content to a file, creating or overwriting it.",
@@ -1321,6 +1322,9 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("spit", Arity::Variadic { min: 2 }, builtin_spit),
         ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
+        ("read-line", Arity::Fixed(0), builtin_read_line),
+        ("extend", Arity::Variadic { min: 3 }, builtin_extend),
+        ("extenders", Arity::Fixed(1), builtin_extenders),
         ("close", Arity::Fixed(1), builtin_close),
         // Misc
         ("gensym", Arity::Variadic { min: 0 }, builtin_gensym),
@@ -1712,6 +1716,16 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::javamap::builtin_hashmap_new,
         ),
         (
+            "StringBuilder.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_string_builder_new,
+        ),
+        (
+            "java.lang.StringBuilder.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_string_builder_new,
+        ),
+        (
             "java.util.HashMap.",
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_hashmap_new,
@@ -1811,6 +1825,12 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
     // JVM wrapper-class constant statics (portable .cljc code reads these).
     for (name, value) in [
         ("Long/MAX_VALUE", Value::Long(i64::MAX)),
+        // Locale constants: opaque keywords — locale-parameterized string
+        // methods ignore them (Rust's Unicode case mapping is unconditional).
+        ("java.util.Locale/US", Value::keyword(Keyword::parse("cljrs.locale/US"))),
+        ("Locale/US", Value::keyword(Keyword::parse("cljrs.locale/US"))),
+        ("java.util.Locale/ROOT", Value::keyword(Keyword::parse("cljrs.locale/ROOT"))),
+        ("Locale/ROOT", Value::keyword(Keyword::parse("cljrs.locale/ROOT"))),
         ("Long/MIN_VALUE", Value::Long(i64::MIN)),
         ("Integer/MAX_VALUE", Value::Long(i32::MAX as i64)),
         ("Integer/MIN_VALUE", Value::Long(i32::MIN as i64)),
@@ -1827,6 +1847,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
 // Bootstrap Clojure source defining higher-order functions.
 pub const BOOTSTRAP_SOURCE: &str = include_str!("bootstrap.cljrs");
 pub const CLOJURE_TEST_SOURCE: &str = include_str!("clojure_test.cljrs");
+pub const CLOJURE_PPRINT_SOURCE: &str = include_str!("clojure_pprint.cljrs");
 
 // ── Helper: lazy value iterator ──────────────────────────────────────────────
 
@@ -6503,6 +6524,18 @@ fn builtin_spit(args: &[Value]) -> ValueResult<Value> {
 }
 
 fn builtin_slurp(args: &[Value]) -> ValueResult<Value> {
+    // (slurp *in*) — the stdin sentinel reads standard input to a string.
+    if let Value::Keyword(k) = &args[0] {
+        let k = k.get();
+        if k.namespace.as_deref() == Some("cljrs.io") && &*k.name == "stdin" {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| ValueError::Other(e.to_string()))?;
+            return Ok(Value::string(buf));
+        }
+    }
     // Byte arrays decode directly (UTF-8) — the pod convention for stream
     // payloads (S3 :Body and friends).
     if let Value::ByteArray(bytes) = &args[0] {
@@ -7410,6 +7443,95 @@ fn builtin_printf(args: &[Value]) -> ValueResult<Value> {
 fn builtin_newline(_args: &[Value]) -> ValueResult<Value> {
     emit_output_ln("");
     Ok(Value::Nil)
+}
+
+/// `(extend atype proto method-map & proto method-map…)` — the functional
+/// protocol-extension form. ATYPE is a class symbol (`String`,
+/// `java.util.regex.Pattern` — dispatch keys on the last dot-segment);
+/// method maps are keyword → fn.
+fn builtin_extend(args: &[Value]) -> ValueResult<Value> {
+    let type_tags: Vec<std::sync::Arc<str>> = match &args[0] {
+        Value::Symbol(sym) => {
+            cljrs_env::apply::dispatch_tags_for_class(sym.get().name.as_ref())
+        }
+        Value::Nil => vec![std::sync::Arc::from("nil")],
+        v => {
+            return Err(ValueError::WrongType {
+                expected: "type symbol",
+                got: v.type_name().to_string(),
+            });
+        }
+    };
+    for pair in args[1..].chunks(2) {
+        let [proto_val, map_val] = pair else {
+            return Err(ValueError::Other(
+                "extend requires protocol + method-map pairs".into(),
+            ));
+        };
+        let Value::Protocol(proto) = proto_val else {
+            return Err(ValueError::WrongType {
+                expected: "protocol",
+                got: proto_val.type_name().to_string(),
+            });
+        };
+        let Value::Map(m) = map_val else {
+            return Err(ValueError::WrongType {
+                expected: "method map",
+                got: map_val.type_name().to_string(),
+            });
+        };
+        let mut impls = proto.get().impls.lock().unwrap();
+        for tag in &type_tags {
+            let entry = impls.entry(tag.clone()).or_default();
+            m.for_each(|k, v| {
+                let name: Option<std::sync::Arc<str>> = match k {
+                    Value::Keyword(kw) => Some(kw.get().name.clone()),
+                    Value::Symbol(sym) => Some(sym.get().name.clone()),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    entry.insert(name, v.clone());
+                }
+            });
+        }
+        drop(impls);
+        cljrs_value::bump_protocol_generation();
+    }
+    Ok(Value::Nil)
+}
+
+/// `(extenders proto)` — the type tags extended to PROTO, as symbols.
+fn builtin_extenders(args: &[Value]) -> ValueResult<Value> {
+    let Value::Protocol(proto) = &args[0] else {
+        return Err(ValueError::WrongType {
+            expected: "protocol",
+            got: args[0].type_name().to_string(),
+        });
+    };
+    let impls = proto.get().impls.lock().unwrap();
+    let tags: Vec<Value> = impls
+        .keys()
+        .map(|t| Value::symbol(cljrs_value::Symbol::parse(t)))
+        .collect();
+    Ok(Value::List(GcPtr::new(PersistentList::from_iter(tags))))
+}
+
+fn builtin_read_line(_args: &[Value]) -> ValueResult<Value> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) => Ok(Value::Nil),
+        Ok(_) => {
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            Ok(Value::string(line))
+        }
+        Err(e) => Err(ValueError::Other(e.to_string())),
+    }
 }
 
 fn builtin_flush(_args: &[Value]) -> ValueResult<Value> {

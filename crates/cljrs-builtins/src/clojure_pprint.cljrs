@@ -1,0 +1,147 @@
+(ns clojure.pprint)
+
+;; A pragmatic clojure.pprint for scripting: pprint / pp / print-table /
+;; write / a common-directive cl-format subset. The pretty printer is
+;; width-aware (fits-on-one-line, else break with indentation) rather
+;; than the XP algorithm; see docs/cljrsh-divergences.md.
+
+(def ^:dynamic *print-right-margin* 72)
+
+(declare pprint-str)
+
+(defn- indent-str [n]
+  (apply str (repeat n " ")))
+
+(defn- pprint-coll
+  "Break a collection: opener, items one per line at INDENT+opener width,
+  closer on the last line."
+  [open close items indent]
+  (let [item-indent (+ indent (count open))
+        lines (map (fn [item] (pprint-str item item-indent)) items)]
+    (str open
+         (clojure.string/join (str "\n" (indent-str item-indent)) lines)
+         close)))
+
+(defn- pprint-map [m indent]
+  (let [item-indent (inc indent)
+        entry-strs (map (fn [entry]
+                          (let [k (key entry)
+                                ks (pr-str k)
+                                vs (pprint-str (val entry)
+                                               (+ item-indent (count ks) 1))]
+                            (str ks " " vs)))
+                        (seq m))]
+    (str "{"
+         (clojure.string/join (str ",\n" (indent-str item-indent)) entry-strs)
+         "}")))
+
+(defn- pprint-str
+  "X pretty-printed starting at column INDENT."
+  [x indent]
+  (let [flat (pr-str x)]
+    (if (or (<= (+ indent (count flat)) (or *print-right-margin* 72))
+            (not (coll? x))
+            (empty? x))
+      flat
+      (cond
+        (map? x) (pprint-map x indent)
+        (vector? x) (pprint-coll "[" "]" x indent)
+        (set? x) (pprint-coll "#{" "}" (seq x) indent)
+        :else (pprint-coll "(" ")" (seq x) indent)))))
+
+(defn pprint
+  "Pretty print OBJECT, followed by a newline."
+  [object]
+  (println (pprint-str object 0)))
+
+(defmacro pp
+  "Pretty print the last REPL result (*1)."
+  []
+  `(pprint *1))
+
+(defn write
+  "Write OBJECT like pr; with `:pretty true` (the default) pretty-printed.
+  Supported options: :pretty, :right-margin. Returns nil (always prints —
+  the JVM's :stream option is not modeled)."
+  [object & {:keys [pretty right-margin]
+             :or {pretty true}}]
+  (binding [*print-right-margin* (or right-margin *print-right-margin*)]
+    (if pretty
+      (print (pprint-str object 0))
+      (pr object))))
+
+;; ── print-table ─────────────────────────────────────────────────────────────
+
+(defn print-table
+  "Print a collection of maps as a table. With KS, only those columns, in
+  that order; otherwise the keys of the first row."
+  ([rows] (print-table (keys (first rows)) rows))
+  ([ks rows]
+   (when (seq rows)
+     (let [cell (fn [row k] (str (get row k)))
+           widths (map (fn [k]
+                         (apply max (count (str k))
+                                (map (fn [row] (count (cell row k))) rows)))
+                       ks)
+           pad (fn [s w] (str s (indent-str (- w (count s)))))
+           fmt-row (fn [leader divider trailer cells]
+                     (str leader
+                          (clojure.string/join divider (map pad cells widths))
+                          trailer))
+           header (map str ks)]
+       (println)
+       (println (fmt-row "| " " | " " |" header))
+       (println (fmt-row "|-" "-+-" "-|" (map (fn [w] (apply str (repeat w "-")))
+                                              widths)))
+       (doseq [row rows]
+         (println (fmt-row "| " " | " " |" (map (fn [k] (cell row k)) ks))))))))
+
+;; ── cl-format (common-directive subset) ─────────────────────────────────────
+;; Supported: ~a ~s ~d ~x ~o ~b ~f ~% ~& ~~ and the plain-text between
+;; them. Unknown directives throw. WRITER: nil → return the string,
+;; true → print it.
+
+(defn- to-radix [n radix]
+  (let [digits "0123456789abcdef"
+        neg? (neg? n)]
+    (loop [n (abs (long n)) acc ""]
+      (if (zero? n)
+        (str (when neg? "-") (if (= acc "") "0" acc))
+        (recur (quot n radix)
+               (str (nth digits (rem n radix)) acc))))))
+
+(defn- format-directive [ch arg]
+  (case ch
+    \a (str arg)
+    \s (pr-str arg)
+    \d (str (long arg))
+    \x (to-radix arg 16)
+    \o (to-radix arg 8)
+    \b (to-radix arg 2)
+    \f (str (double arg))
+    (throw (ex-info (str "cl-format: unsupported directive ~" ch)
+                    {:directive ch}))))
+
+(defn cl-format
+  "A subset of Common Lisp format: ~a ~s ~d ~x ~o ~b ~f ~% ~& ~~.
+  WRITER nil returns the formatted string; true prints it."
+  [writer fmt & args]
+  (let [out
+        (loop [chars (seq fmt) args (seq args) acc ""]
+          (if-let [[c & more] chars]
+            (if (= c \~)
+              (let [[d & rest*] more]
+                (case d
+                  \% (recur rest* args (str acc "\n"))
+                  \& (recur rest* args
+                            (if (or (= acc "") (clojure.string/ends-with? acc "\n"))
+                              acc
+                              (str acc "\n")))
+                  \~ (recur rest* args (str acc "~"))
+                  (recur rest* (next args)
+                         (str acc (format-directive d (first args))))))
+              (recur more args (str acc c)))
+            acc))]
+    (if writer
+      (do (print out) nil)
+      out)))

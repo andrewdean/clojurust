@@ -23,7 +23,7 @@ use crate::types::{
 use cljrs_gc::{GcPtr, MarkVisitor, Trace};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
-use regex::Regex;
+use fancy_regex::Regex;
 
 /// A GC-traced mutable array of Values (backs `object-array`).
 #[derive(Debug)]

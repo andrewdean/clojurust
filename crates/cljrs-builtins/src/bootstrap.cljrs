@@ -1196,8 +1196,55 @@
 (def ^:dynamic *ns* nil)
 ;; IO sentinels: `binding [*out* *err*]` routes prints to stderr for its
 ;; extent (the runtime recognizes these two keywords by var identity).
+;; *in* is the stdin sentinel: (slurp *in*), (line-seq *in*), (read-line).
 (def ^:dynamic *out* :cljrs.io/stdout)
 (def ^:dynamic *err* :cljrs.io/stderr)
+(def ^:dynamic *in* :cljrs.io/stdin)
+
+(defn line-seq
+  "A lazy seq of lines from RDR: *in* (the stdin sentinel, read line by
+  line) or a file path string (read eagerly)."
+  [rdr]
+  (cond
+    (= rdr :cljrs.io/stdin)
+    ((fn step []
+       (lazy-seq
+         (when-let [line (read-line)]
+           (cons line (step))))))
+
+    (string? rdr)
+    (seq (clojure.string/split-lines (slurp rdr)))
+
+    :else
+    (throw (ex-info "line-seq supports *in* or a file path string"
+                    {:rdr rdr}))))
+
+(defn- bound-key [sc entry]
+  (if (map? sc) (key entry) entry))
+
+(defn subseq
+  "Entries of the sorted collection SC whose keys satisfy the test(s)
+  against `compare`, in the collection's order. A linear filter over the
+  sorted seq (not a tree descent) — semantics match, complexity doesn't."
+  ([sc test k]
+   (seq (filter (fn [e] (test (compare (bound-key sc e) k) 0)) (seq sc))))
+  ([sc start-test start-key end-test end-key]
+   (seq (filter (fn [e]
+                  (let [c (bound-key sc e)]
+                    (and (start-test (compare c start-key) 0)
+                         (end-test (compare c end-key) 0))))
+                (seq sc)))))
+
+(defn rsubseq
+  "Like subseq, in the collection's reverse order."
+  ([sc test k]
+   (seq (filter (fn [e] (test (compare (bound-key sc e) k) 0)) (rseq sc))))
+  ([sc start-test start-key end-test end-key]
+   (seq (filter (fn [e]
+                  (let [c (bound-key sc e)]
+                    (and (start-test (compare c start-key) 0)
+                         (end-test (compare c end-key) 0))))
+                (rseq sc)))))
 (def ^:dynamic *assert* true)
 (def ^:dynamic *print-dup* false)
 (def ^:dynamic *print-readably* true)
@@ -1235,6 +1282,11 @@
            (with-open ~rest-bindings ~@body)
            (finally
              (close ~name)))))))
+
+(defmacro ..
+  "Chained interop: (.. x foo (bar y)) => (. (. x foo) (bar y))."
+  ([x form] `(. ~x ~form))
+  ([x form & more] `(.. (. ~x ~form) ~@more)))
 
 (defn with-redefs-fn
   "Temporarily redefines Vars during a call to func.  Each val of
