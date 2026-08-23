@@ -23,7 +23,7 @@ fn yaml_to_value(y: &Yaml, keywordize: bool) -> Result<Value, String> {
             let mut m = MapValue::empty();
             for (k, v) in entries {
                 let key = match k {
-                    Yaml::String(s) if keywordize => Value::keyword(Keyword::simple(s.as_str())),
+                    Yaml::String(s) if keywordize => Value::keyword(Keyword::parse(s.as_str())),
                     other => yaml_to_value(other, keywordize)?,
                 };
                 m = m.assoc(key, yaml_to_value(v, keywordize)?);

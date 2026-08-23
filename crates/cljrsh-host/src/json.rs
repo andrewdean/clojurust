@@ -88,7 +88,7 @@ pub fn json_to_value(json: &serde_json::Value, keywordize: bool) -> Value {
             let mut m = MapValue::empty();
             for (k, v) in entries {
                 let key = if keywordize {
-                    Value::keyword(Keyword::simple(k.as_str()))
+                    Value::keyword(Keyword::parse(k.as_str()))
                 } else {
                     Value::string(k.clone())
                 };
