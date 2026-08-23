@@ -340,6 +340,12 @@ async fn eval_try_async(args: &[Form], env: &mut Env) -> EvalResult {
             result = Err(EvalError::GasExhausted);
             None
         }
+        // System/exit is a control signal, never a catchable condition
+        // (mirrors the sync evaluator's try).
+        Err(EvalError::Exit(code)) => {
+            result = Err(EvalError::Exit(code));
+            None
+        }
         Err(other) => Some(other),
     };
 

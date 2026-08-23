@@ -58,6 +58,20 @@ pub fn register(registry: &mut Registry) {
         let md = std::fs::metadata(p).map_err(|e| io_err("size", p, e))?;
         Ok(Value::Long(md.len() as i64))
     });
+    def1(registry, "unix-mode", |p| {
+        // Permission bits only (mode & 0o7777) — the `stat -c %a` idiom.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let md = std::fs::metadata(p).map_err(|e| io_err("unix-mode", p, e))?;
+            Ok(Value::Long((md.permissions().mode() & 0o7777) as i64))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = p;
+            Err("unix-mode is only available on unix hosts".to_string())
+        }
+    });
     def1(registry, "modified-time-millis", |p| {
         let md = std::fs::metadata(p).map_err(|e| io_err("modified-time", p, e))?;
         let t = md

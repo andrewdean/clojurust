@@ -348,7 +348,6 @@ pub fn is_jvm_class_name(s: &str) -> bool {
             "Exception"
                 | "Pattern"
                 | "HashMap"
-                | "Map"
                 | "Throwable"
                 | "Error"
                 | "ExceptionInfo"

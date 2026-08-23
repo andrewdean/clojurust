@@ -518,7 +518,7 @@ fn dispatch_vector_method(
             }
             Ok(Value::Long(-1))
         }
-        "size" | "count" => Ok(Value::Long(v.get().count() as i64)),
+        "size" => Ok(Value::Long(v.get().count() as i64)),
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on Vector"
         ))),
