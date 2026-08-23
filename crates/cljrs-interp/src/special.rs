@@ -41,7 +41,7 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "defonce" => eval_defonce(args, env),
         "and" => eval_and(args, env),
         "or" => eval_or(args, env),
-        "." => Err(EvalError::Runtime("interop not yet implemented".into())),
+        "." => eval_dot(args, env),
         "ns" => eval_ns(args, env),
         "require" => eval_require(args, env),
         "letfn" => eval_letfn(args, env),
@@ -159,17 +159,36 @@ fn arglists_meta(fn_val: &Value, skip: usize) -> Option<Value> {
 }
 
 /// Extract the def name and optional metadata from the name form.
+/// Metadata shorthands stack (`^:private ^:dynamic *x*`); layers merge
+/// with the OUTER layer winning on duplicate keys (reader semantics).
 fn extract_def_name(form: &Form, env: &mut Env) -> EvalResult<(String, Option<Value>)> {
-    match &form.kind {
-        FormKind::Symbol(s) => Ok((s.clone(), None)),
-        FormKind::Meta(meta_form, inner) => {
-            let meta_val = compile_meta_form(meta_form, env)?;
-            match &inner.kind {
-                FormKind::Symbol(s) => Ok((s.clone(), Some(meta_val))),
-                _ => Err(EvalError::Runtime("def name must be a symbol".into())),
+    let mut metas: Vec<Value> = Vec::new(); // outermost first
+    let mut current = form;
+    loop {
+        match &current.kind {
+            FormKind::Symbol(s) => {
+                let meta = if metas.is_empty() {
+                    None
+                } else {
+                    // Merge innermost-first so outer entries overwrite.
+                    let mut merged = MapValue::empty();
+                    for m in metas.iter().rev() {
+                        if let Value::Map(m) = m {
+                            m.for_each(|k, v| {
+                                merged = merged.assoc(k.clone(), v.clone());
+                            });
+                        }
+                    }
+                    Some(Value::Map(merged))
+                };
+                return Ok((s.clone(), meta));
             }
+            FormKind::Meta(meta_form, inner) => {
+                metas.push(compile_meta_form(meta_form, env)?);
+                current = inner;
+            }
+            _ => return Err(EvalError::Runtime("def name must be a symbol".into())),
         }
-        _ => Err(EvalError::Runtime("def name must be a symbol".into())),
     }
 }
 
@@ -1920,6 +1939,42 @@ fn eval_defprotocol(args: &[Form], env: &mut Env) -> EvalResult {
 
 // ── extend-type ───────────────────────────────────────────────────────────────
 
+/// `(. target method args…)` / `(. target (method args…))` /
+/// `(. target -field)` — the JVM interop primitive, routed through the
+/// same dispatch_method as the `.method` sugar (the `..` macro expands
+/// to this form).
+fn eval_dot(args: &[Form], env: &mut Env) -> EvalResult {
+    if args.len() < 2 {
+        return Err(EvalError::Runtime(
+            "the . form requires a target and a member".into(),
+        ));
+    }
+    let target = eval(&args[0], env)?;
+    let _target_root = cljrs_env::gc_roots::root_value(&target);
+    let (method, arg_forms): (String, &[Form]) = match &args[1].kind {
+        FormKind::Symbol(m) => (m.clone(), &args[2..]),
+        FormKind::List(parts) => {
+            let Some(FormKind::Symbol(m)) = parts.first().map(|f| &f.kind) else {
+                return Err(EvalError::Runtime(
+                    "the . form's member list must start with a symbol".into(),
+                ));
+            };
+            (m.clone(), &parts[1..])
+        }
+        _ => {
+            return Err(EvalError::Runtime(
+                "the . form's member must be a symbol or (method args…)".into(),
+            ));
+        }
+    };
+    let mut call_args = Vec::with_capacity(arg_forms.len());
+    for f in arg_forms {
+        call_args.push(eval(f, env)?);
+    }
+    let _args_root = cljrs_env::gc_roots::root_values(&call_args);
+    crate::apply::dispatch_method(method.trim_start_matches('-'), &target, &call_args)
+}
+
 fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
     // (extend-type TypeSym Proto1 (m [this] body) ... Proto2 ...)
     if args.is_empty() {
@@ -1935,17 +1990,17 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
             ));
         }
     };
-    let type_tag = crate::apply::resolve_type_tag(&type_sym);
+    let type_tags = cljrs_env::apply::dispatch_tags_for_class(&type_sym);
 
     let mut current_proto: Option<GcPtr<Protocol>> = None;
 
     for form in &args[1..] {
         match &form.kind {
             FormKind::Symbol(s) => {
-                // Look up protocol in env.
-                let val = env.globals.lookup_in_ns(&env.current_ns, s);
-                match val {
-                    Some(Value::Protocol(p)) => {
+                // Resolve the protocol like any symbol (aliases and refers
+                // included — `p/InlineValue` from a :require :as).
+                match eval(form, env) {
+                    Ok(Value::Protocol(p)) => {
                         current_proto = Some(p);
                     }
                     _ => {
@@ -1964,16 +2019,18 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
                 if parts.is_empty() {
                     continue;
                 }
-                let method_name = match &parts[0].kind {
+                let method_name: Arc<str> = match &parts[0].kind {
                     FormKind::Symbol(s) => Arc::from(s.as_str()),
                     _ => continue,
                 };
                 let fn_val = build_impl_fn(parts, env)?;
                 let mut impls = proto.get().impls.lock().unwrap();
-                impls
-                    .entry(type_tag.clone())
-                    .or_default()
-                    .insert(method_name, fn_val);
+                for tag in &type_tags {
+                    impls
+                        .entry(tag.clone())
+                        .or_default()
+                        .insert(method_name.clone(), fn_val.clone());
+                }
                 drop(impls);
                 cljrs_value::bump_protocol_generation();
             }
@@ -2001,7 +2058,7 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
             ));
         }
     };
-    let proto_val = env.globals.lookup_in_ns(&env.current_ns, &proto_sym);
+    let proto_val = eval(&args[0], env).ok();
     let proto_ptr = match proto_val {
         Some(Value::Protocol(p)) => p,
         _ => {
@@ -2012,30 +2069,36 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
         }
     };
 
-    let mut current_type: Option<Arc<str>> = None;
+    let mut current_type: Option<Vec<Arc<str>>> = None;
 
     for form in &args[1..] {
         match &form.kind {
             FormKind::Symbol(s) => {
-                current_type = Some(crate::apply::resolve_type_tag(s));
+                current_type = Some(cljrs_env::apply::dispatch_tags_for_class(s));
+            }
+            // `nil` as a type target (Clojure allows extending to nil).
+            FormKind::Nil => {
+                current_type = Some(vec![Arc::from("nil")]);
             }
             FormKind::List(parts) => {
-                let type_tag = current_type.as_ref().ok_or_else(|| {
+                let type_tags = current_type.as_ref().ok_or_else(|| {
                     EvalError::Runtime("extend-protocol: method before type name".into())
                 })?;
                 if parts.is_empty() {
                     continue;
                 }
-                let method_name = match &parts[0].kind {
+                let method_name: Arc<str> = match &parts[0].kind {
                     FormKind::Symbol(s) => Arc::from(s.as_str()),
                     _ => continue,
                 };
                 let fn_val = build_impl_fn(parts, env)?;
                 let mut impls = proto_ptr.get().impls.lock().unwrap();
-                impls
-                    .entry(type_tag.clone())
-                    .or_default()
-                    .insert(method_name, fn_val);
+                for tag in type_tags {
+                    impls
+                        .entry(tag.clone())
+                        .or_default()
+                        .insert(method_name.clone(), fn_val.clone());
+                }
                 drop(impls);
                 cljrs_value::bump_protocol_generation();
             }
