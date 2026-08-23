@@ -24,6 +24,7 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
         let init = |g: &Arc<GlobalEnv>| {
             cljrs_async::init(g);
             cljrs_io::init(g);
+            cljrs_net::init(g);
             cljrs_charset::init(g);
         };
         match drv {

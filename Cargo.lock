@@ -1781,6 +1781,7 @@ dependencies = [
  "cljrs-gc",
  "cljrs-interp",
  "cljrs-io",
+ "cljrs-net",
  "cljrs-nrepl",
  "cljrs-process",
  "cljrs-reader",

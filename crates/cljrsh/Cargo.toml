@@ -21,6 +21,7 @@ cljrs-types    = { workspace = true }
 cljrs-gc       = { workspace = true }
 cljrs-async    = { workspace = true }
 cljrs-io       = { workspace = true }
+cljrs-net      = { workspace = true }
 cljrs-charset  = { workspace = true }
 cljrs-process  = { workspace = true }
 cljrsh-host    = { workspace = true }
