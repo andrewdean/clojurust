@@ -40,10 +40,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 // ── Output capture (for with-out-str) ─────────────────────────────────────────
-
-thread_local! {
-    static OUTPUT_CAPTURE: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
-}
+// Storage lives in cljrs_env::io_target so `binding [*out* *err*]` stream
+// markers and with-out-str captures share one stack; these wrappers keep
+// the historical public API.
 
 // BigDecimal precision
 
@@ -101,26 +100,12 @@ fn apply_precision_or_default(result: BigDecimal) -> ValueResult<BigDecimal> {
 
 /// Push a new capture buffer onto the stack.
 pub fn push_output_capture() {
-    OUTPUT_CAPTURE.with(|stack| stack.borrow_mut().push(String::new()));
+    cljrs_env::io_target::push_capture();
 }
 
 /// Pop the top capture buffer and return its contents.
 pub fn pop_output_capture() -> Option<String> {
-    OUTPUT_CAPTURE.with(|stack| stack.borrow_mut().pop())
-}
-
-/// Write to the current capture buffer if active, otherwise to stdout.
-/// Returns true if captured, false if written to stdout.
-fn capture_or_print(s: &str) -> bool {
-    OUTPUT_CAPTURE.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        if let Some(buf) = stack.last_mut() {
-            buf.push_str(s);
-            true
-        } else {
-            false
-        }
-    })
+    cljrs_env::io_target::pop_capture()
 }
 
 // ── Docstrings ───────────────────────────────────────────────────────────────
@@ -6363,18 +6348,15 @@ fn print_vals(args: &[Value], sep: &str, readably: bool) -> String {
         .join(sep)
 }
 
-/// Write to the output capture buffer if active, otherwise to stdout (no newline).
+/// Write to the current output target: topmost capture buffer, else the
+/// stream `*out*` is bound to (stdout by default; no newline).
 pub fn emit_output(s: &str) {
-    if !capture_or_print(s) {
-        print!("{}", s);
-    }
+    cljrs_env::io_target::emit(s);
 }
 
-/// Write to the output capture buffer if active, otherwise to stdout (with newline).
+/// Same as `emit_output`, with a trailing newline.
 pub fn emit_output_ln(s: &str) {
-    if !capture_or_print(&format!("{s}\n")) {
-        println!("{}", s);
-    }
+    cljrs_env::io_target::emit_ln(s);
 }
 
 fn builtin_print(args: &[Value]) -> ValueResult<Value> {
@@ -7431,8 +7413,7 @@ fn builtin_newline(_args: &[Value]) -> ValueResult<Value> {
 }
 
 fn builtin_flush(_args: &[Value]) -> ValueResult<Value> {
-    use std::io::Write;
-    let _ = std::io::stdout().flush();
+    cljrs_env::io_target::flush_current();
     Ok(Value::Nil)
 }
 

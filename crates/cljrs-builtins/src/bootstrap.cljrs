@@ -1194,8 +1194,10 @@
 ;; ── Dynamic variables ──────────────────────────────────────────────────────
 
 (def ^:dynamic *ns* nil)
-(def ^:dynamic *out* nil)
-(def ^:dynamic *err* nil)
+;; IO sentinels: `binding [*out* *err*]` routes prints to stderr for its
+;; extent (the runtime recognizes these two keywords by var identity).
+(def ^:dynamic *out* :cljrs.io/stdout)
+(def ^:dynamic *err* :cljrs.io/stderr)
 (def ^:dynamic *assert* true)
 (def ^:dynamic *print-dup* false)
 (def ^:dynamic *print-readably* true)

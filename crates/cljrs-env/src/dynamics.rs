@@ -7,6 +7,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use cljrs_gc::GcPtr;
 use cljrs_gc::Trace as _;
 use cljrs_value::{Value, Var};
@@ -26,21 +28,67 @@ thread_local! {
 
 // ── RAII guard ────────────────────────────────────────────────────────────────
 
-/// Pops the innermost binding frame when dropped.
-pub struct BindingGuard;
+/// Pops the innermost binding frame when dropped (plus the output-stream
+/// marker its frame pushed, when `*out*` was rebound to an IO sentinel).
+pub struct BindingGuard {
+    pushed_stream: bool,
+}
 
 impl Drop for BindingGuard {
     fn drop(&mut self) {
+        if self.pushed_stream {
+            crate::io_target::pop_stream();
+        }
         pop_frame();
     }
+}
+
+// ── *out* stream routing ─────────────────────────────────────────────────────
+
+/// The var key of `clojure.core/*out*`, registered when the var is interned
+/// (0 = not yet defined). Lets `push_frame` route prints to stderr for the
+/// extent of `(binding [*out* *err*] …)`.
+static OUT_VAR_KEY: AtomicUsize = AtomicUsize::new(0);
+
+pub fn register_out_var(key: VarKey) {
+    OUT_VAR_KEY.store(key, Ordering::Relaxed);
+}
+
+/// `:cljrs.io/stderr` → Some(true), `:cljrs.io/stdout` → Some(false);
+/// anything else leaves the print target unchanged.
+fn sentinel_stream(val: &Value) -> Option<bool> {
+    if let Value::Keyword(k) = val {
+        let k = k.get();
+        if k.namespace.as_deref() == Some("cljrs.io") {
+            match &*k.name {
+                "stderr" => return Some(true),
+                "stdout" => return Some(false),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 // ── Stack manipulation ────────────────────────────────────────────────────────
 
 /// Push a new dynamic binding frame; return a guard that pops it on drop.
+/// A frame rebinding `*out*` to an IO sentinel also pushes the matching
+/// output-stream marker for its extent.
 pub fn push_frame(bindings: HashMap<VarKey, Value>) -> BindingGuard {
+    let out_key = OUT_VAR_KEY.load(Ordering::Relaxed);
+    let stream = if out_key == 0 {
+        None
+    } else {
+        bindings.get(&out_key).and_then(sentinel_stream)
+    };
     BINDING_STACK.with(|s| s.borrow_mut().push(bindings));
-    BindingGuard
+    if let Some(stderr) = stream {
+        crate::io_target::push_stream(stderr);
+    }
+    BindingGuard {
+        pushed_stream: stream.is_some(),
+    }
 }
 
 fn pop_frame() {

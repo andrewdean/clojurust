@@ -353,6 +353,10 @@ impl GlobalEnv {
         }
         let var = GcPtr::new(Var::new(ns_name, name.as_ref()));
         var.get().bind(val);
+        // `binding [*out* …]` routes prints by var identity — register it.
+        if ns_name == "clojure.core" && name.as_ref() == "*out*" {
+            crate::dynamics::register_out_var(crate::dynamics::var_key_of(&var));
+        }
         interns.insert(name, var.clone());
         var
     }
