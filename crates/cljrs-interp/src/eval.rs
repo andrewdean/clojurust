@@ -17,7 +17,7 @@ use cljrs_value::{
     FutureState, Keyword, MapValue, PersistentHashSet, PersistentList, PersistentVector, Symbol,
     Value,
 };
-use regex::Regex;
+use fancy_regex::Regex;
 
 /// Evaluate a `Form` in the given `Env`.
 pub fn eval(form: &Form, env: &mut Env) -> EvalResult {

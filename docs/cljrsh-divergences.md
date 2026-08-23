@@ -86,6 +86,26 @@ exit codes through `try/finally`) are not listed.
   instead of O(log n + k), and custom `sorted-map-by` comparators are
   not consulted for the bounds.
 
+## Regex
+
+- Patterns run on **fancy-regex**: full lookaround (`(?=…)`, `(?<=…)`)
+  and backreferences work, matching JVM/JS expectations. The
+  backtracking limit surfaces at match time; a pattern that exceeds it
+  behaves as **no match** rather than throwing (only pathological
+  patterns hit it).
+
+## Interop shims
+
+- `(. target member)` / `..` dispatch through the same method table as
+  the `.method` sugar; `.toString` works on every value.
+- `StringBuilder.` / `HashMap.` / `ArrayDeque.` are native emulations
+  for portable `.cljc` `:clj` branches; `Locale/US`-style constants are
+  opaque keywords and locale-parameterized string methods ignore them
+  (Rust's Unicode case mapping is unconditional).
+- `extend` registers method maps by dispatch tag; JVM/cljs class
+  designators normalize (`clojure.lang.IPersistentVector` → `Vector`,
+  `Number` fans out to every numeric tag).
+
 ## Semantics
 
 - `map?` returns false for `reify` instances (they are native objects,

@@ -1321,6 +1321,7 @@ dependencies = [
  "cljrs-reader",
  "cljrs-types",
  "cljrs-value",
+ "fancy-regex 0.16.2",
  "num-bigint",
  "num-rational",
  "num-traits",
@@ -1461,6 +1462,7 @@ version = "0.1.0"
 dependencies = [
  "bigdecimal",
  "cljrs-logging",
+ "fancy-regex 0.16.2",
  "num-bigint",
  "num-rational",
  "regex",
@@ -1491,6 +1493,7 @@ dependencies = [
  "cljrs-types",
  "cljrs-value",
  "cljrs-vcs",
+ "fancy-regex 0.16.2",
  "regex",
  "tempfile",
  "uuid",
@@ -1719,6 +1722,7 @@ dependencies = [
  "cljrs-gc",
  "cljrs-reader",
  "cljrs-types",
+ "fancy-regex 0.16.2",
  "num-bigint",
  "num-rational",
  "num-traits",
@@ -3284,6 +3288,17 @@ dependencies = [
  "cfg-if",
  "home",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "998b056554fbe42e03ae0e152895cd1a7e1002aec800fdc6635d20270260c46f"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -6421,7 +6436,7 @@ dependencies = [
  "dns-lookup",
  "dtparse",
  "encoding_rs",
- "fancy-regex",
+ "fancy-regex 0.19.0",
  "fff-search",
  "filesize",
  "filetime",
@@ -6550,7 +6565,7 @@ version = "0.115.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da1ca340a92c4e655db2839b21fb8fe8b9f8bcb40c1c0b39a2369f59ac628a97"
 dependencies = [
- "fancy-regex",
+ "fancy-regex 0.19.0",
  "log",
  "nu-experimental",
  "nu-glob",
@@ -6668,7 +6683,7 @@ dependencies = [
  "derive_more",
  "dirs 6.0.0",
  "dirs-sys 0.5.0",
- "fancy-regex",
+ "fancy-regex 0.19.0",
  "heck",
  "humantime",
  "indexmap",
@@ -6727,7 +6742,7 @@ version = "0.115.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9caada73d44f9780d38522406bea0d0b190d1d68b09d407fd5e8553ea6ef5ca2"
 dependencies = [
- "fancy-regex",
+ "fancy-regex 0.19.0",
  "nu-ansi-term",
  "nu-color-config",
  "nu-engine",
@@ -6756,7 +6771,7 @@ dependencies = [
  "crossterm",
  "crossterm_winapi",
  "derive_more",
- "fancy-regex",
+ "fancy-regex 0.19.0",
  "lean_string",
  "log",
  "lscolors",

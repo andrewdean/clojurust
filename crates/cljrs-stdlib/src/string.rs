@@ -227,14 +227,16 @@ fn split(args: &[Value]) -> ValueResult<Value> {
     let parts: Vec<Value> = match &args[1] {
         Value::Pattern(re) => {
             let re = re.get();
+            // fancy-regex split items are Results (backtracking-limit
+            // errors at match time); a failed segment splits no further.
             match limit {
                 Some(n) => re
                     .splitn(s.as_ref(), n)
-                    .map(|p| make_str(p.to_string()))
+                    .map(|p| make_str(p.unwrap_or_default().to_string()))
                     .collect(),
                 None => re
                     .split(s.as_ref())
-                    .map(|p| make_str(p.to_string()))
+                    .map(|p| make_str(p.unwrap_or_default().to_string()))
                     .collect(),
             }
         }
