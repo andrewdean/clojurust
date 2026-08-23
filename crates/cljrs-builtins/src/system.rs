@@ -202,7 +202,7 @@ pub(crate) fn builtin_long_parse(args: &[Value]) -> ValueResult<Value> {
             )));
         }
     };
-    i64::from_str_radix(&s, radix)
+    i64::from_str_radix(s, radix)
         .map(Value::Long)
         .map_err(|e| ValueError::Other(format!("For input string: {s:?}: {e}")))
 }

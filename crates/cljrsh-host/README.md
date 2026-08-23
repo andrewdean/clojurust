@@ -7,7 +7,7 @@
 ## File layout
 
 - `src/lib.rs` — `init(globals)`: registers native namespaces via `Registry` and the compat veneers via `register_builtin_source` (the `cljrs-stdlib` embedding pattern).
-- `src/fs.rs` — `cljrsh.fs`: exists?/directory?/regular-file?/sym-link?/readable?/size/modified-time-millis/list-dir/create-dirs/delete/delete-tree/copy/copy-tree/move/absolutize/canonicalize/file-name/parent/extension/which/temp-dir/create-temp-dir/cwd/home/glob/walk (walkdir + globset; paths are strings).
+- `src/fs.rs` — `cljrsh.fs`: predicates (exists?/directory?/regular-file?/sym-link?/readable?/writable?/executable?/hidden?), metadata (size/unix-mode/set-unix-mode/modified-time-millis/creation-time-millis), traversal (list-dir/glob/walk — walkdir + globset), links (read-link/create-sym-link/create-link), create/delete (create-dir/create-dirs/create-file/create-temp-file/create-temp-dir/delete/delete-tree/delete-on-exit), paths (absolutize/canonicalize/normalize/relativize/file-name/parent/extension/temp-dir/cwd/home), copy/move (copy/copy-tree/move), lookup (which/which-all), bytes (read-bytes/write-bytes), archives (gzip/gunzip/zip/unzip — flate2 + zip, extraction sanitized against zip-slip). Paths are strings.
 - `src/io.rs` — `cljrsh.io`: stdin-read-line/stdin-read-all/read-edn-string/read-edn-all natives + pub Rust `read_line`/`read_all`/`read_edn_*` used by the binary's streaming flags.
 - `src/http.rs` — `cljrsh.http/request` (plan parsed to plain data, executed on a `cljrsh-http` thread; see module docs for the runtime-drop constraint).
 - `src/yaml.rs` — `cljrsh.yaml`: parse-string (keywordize default true)/generate-string.

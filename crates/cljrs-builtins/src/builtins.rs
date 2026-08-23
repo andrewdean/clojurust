@@ -3974,6 +3974,7 @@ fn builtin_count(args: &[Value]) -> ValueResult<Value> {
         Value::Map(m) => m.count(),
         Value::Set(s) => s.count(),
         Value::ObjectArray(a) => a.get().0.lock().unwrap().len(),
+        Value::ByteArray(a) => a.get().lock().unwrap().len(),
         Value::Str(s) => s.get().chars().count(),
         Value::TypeInstance(ti) => ti.get().fields.count(),
         Value::Queue(q) => q.get().count(),

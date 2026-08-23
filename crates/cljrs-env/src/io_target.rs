@@ -58,7 +58,7 @@ pub fn pop_stream() {
     });
 }
 
-fn resolve<'a>(stack: &'a mut [OutputTarget]) -> Result<&'a mut String, bool> {
+fn resolve(stack: &mut [OutputTarget]) -> Result<&mut String, bool> {
     let mut stderr = None;
     for entry in stack.iter_mut().rev() {
         match entry {

@@ -489,6 +489,155 @@ pub fn register(registry: &mut Registry) {
             },
         ),
     );
+
+    def1(registry, "which-all", |p| {
+        Ok(string_vec(
+            which::which_all(p)
+                .map(|found| found.map(|f| f.display().to_string()).collect())
+                .unwrap_or_default(),
+        ))
+    });
+    def1(registry, "read-bytes", |p| {
+        let bytes = std::fs::read(p).map_err(|e| io_err("read-bytes", p, e))?;
+        let signed: Vec<i8> = bytes.into_iter().map(|b| b as i8).collect();
+        Ok(Value::ByteArray(GcPtr::new(std::sync::Mutex::new(signed))))
+    });
+    registry.define(
+        "cljrsh.fs/write-bytes",
+        wrap_fn2(
+            "cljrsh.fs/write-bytes",
+            |path: Value, bytes: Value| -> Result<Value, String> {
+                let path = str_arg(&path, "path")?;
+                let Value::ByteArray(a) = bytes else {
+                    return Err(format!(
+                        "write-bytes: expected a byte-array, got {}",
+                        bytes.type_name()
+                    ));
+                };
+                let unsigned: Vec<u8> =
+                    a.get().lock().unwrap().iter().map(|b| *b as u8).collect();
+                std::fs::write(&path, unsigned).map_err(|e| io_err("write-bytes", &path, e))?;
+                Ok(Value::string(path))
+            },
+        ),
+    );
+
+    // (gzip src) / (gzip src out-file) — default out is src + ".gz".
+    registry.define(
+        "cljrsh.fs/gzip",
+        wrap_fn_variadic(
+            "cljrsh.fs/gzip",
+            1,
+            |args: &[Value]| -> Result<Value, String> {
+                let src = str_arg(&args[0], "source")?;
+                let out = match args.get(1) {
+                    Some(v) => str_arg(v, "out-file")?,
+                    None => format!("{src}.gz"),
+                };
+                let mut input =
+                    std::fs::File::open(&src).map_err(|e| io_err("gzip", &src, e))?;
+                let output =
+                    std::fs::File::create(&out).map_err(|e| io_err("gzip", &out, e))?;
+                let mut enc =
+                    flate2::write::GzEncoder::new(output, flate2::Compression::default());
+                std::io::copy(&mut input, &mut enc).map_err(|e| io_err("gzip", &src, e))?;
+                enc.finish().map_err(|e| io_err("gzip", &out, e))?;
+                Ok(Value::string(out))
+            },
+        ),
+    );
+    // (gunzip src) / (gunzip src out-file) — default out strips the ".gz".
+    registry.define(
+        "cljrsh.fs/gunzip",
+        wrap_fn_variadic(
+            "cljrsh.fs/gunzip",
+            1,
+            |args: &[Value]| -> Result<Value, String> {
+                let src = str_arg(&args[0], "source")?;
+                let out = match args.get(1) {
+                    Some(v) => str_arg(v, "out-file")?,
+                    None => src.strip_suffix(".gz").map(str::to_string).ok_or_else(
+                        || format!("gunzip {src}: no .gz suffix; pass an out-file"),
+                    )?,
+                };
+                let input = std::fs::File::open(&src).map_err(|e| io_err("gunzip", &src, e))?;
+                let mut dec = flate2::read::GzDecoder::new(input);
+                let mut output =
+                    std::fs::File::create(&out).map_err(|e| io_err("gunzip", &out, e))?;
+                std::io::copy(&mut dec, &mut output).map_err(|e| io_err("gunzip", &src, e))?;
+                Ok(Value::string(out))
+            },
+        ),
+    );
+    // (zip zip-file paths root) — each path (file or tree) is stored with
+    // entry names relative to root; a path outside root is an error.
+    registry.define(
+        "cljrsh.fs/zip",
+        wrap_fn_variadic(
+            "cljrsh.fs/zip",
+            3,
+            |args: &[Value]| -> Result<Value, String> {
+                let zip_file = str_arg(&args[0], "zip-file")?;
+                let Value::Vector(paths) = &args[1] else {
+                    return Err("zip: paths must be a vector".into());
+                };
+                let root = PathBuf::from(str_arg(&args[2], "root")?);
+                let entry_name = |p: &Path| -> Result<String, String> {
+                    p.strip_prefix(&root)
+                        .map(|rel| rel.display().to_string())
+                        .map_err(|_| {
+                            format!("zip: {} is not under root {}", p.display(), root.display())
+                        })
+                };
+                let output = std::fs::File::create(&zip_file)
+                    .map_err(|e| io_err("zip", &zip_file, e))?;
+                let mut zw = zip::ZipWriter::new(output);
+                let opts = zip::write::SimpleFileOptions::default();
+                let zerr = |e: zip::result::ZipError| format!("zip {zip_file}: {e}");
+                for v in paths.get().iter() {
+                    let top = str_arg(v, "path")?;
+                    for entry in walkdir::WalkDir::new(&top)
+                        .sort_by_file_name()
+                        .into_iter()
+                        .filter_map(Result::ok)
+                    {
+                        let name = entry_name(entry.path())?;
+                        if entry.file_type().is_dir() {
+                            zw.add_directory(name, opts).map_err(zerr)?;
+                        } else {
+                            zw.start_file(name, opts).map_err(zerr)?;
+                            let mut input = std::fs::File::open(entry.path())
+                                .map_err(|e| io_err("zip", &top, e))?;
+                            std::io::copy(&mut input, &mut zw)
+                                .map_err(|e| io_err("zip", &top, e))?;
+                        }
+                    }
+                }
+                zw.finish().map_err(zerr)?;
+                Ok(Value::string(zip_file))
+            },
+        ),
+    );
+    // (unzip zip-file dest) — extraction is sanitized by the zip crate, so
+    // entries cannot escape dest (zip-slip).
+    registry.define(
+        "cljrsh.fs/unzip",
+        wrap_fn2(
+            "cljrsh.fs/unzip",
+            |zip_file: Value, dest: Value| -> Result<Value, String> {
+                let zip_file = str_arg(&zip_file, "zip-file")?;
+                let dest = str_arg(&dest, "dest")?;
+                let input =
+                    std::fs::File::open(&zip_file).map_err(|e| io_err("unzip", &zip_file, e))?;
+                let mut archive = zip::ZipArchive::new(input)
+                    .map_err(|e| format!("unzip {zip_file}: {e}"))?;
+                archive
+                    .extract(&dest)
+                    .map_err(|e| format!("unzip {zip_file}: {e}"))?;
+                Ok(Value::string(dest))
+            },
+        ),
+    );
 }
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

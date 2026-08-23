@@ -130,3 +130,20 @@ exit codes through `try/finally`) are not listed.
   `apropos` exclude it, but privacy is **not enforced at resolution**:
   a fully-qualified reference to another namespace's private var still
   resolves (Clojure throws unless you go through `#'`/`var`).
+
+## babashka.fs
+
+- Time functions (`last-modified-time`, `creation-time`) return **epoch
+  milliseconds**, not `java.nio.file.attribute.FileTime`; the
+  FileTime/instant conversion helpers and the attribute-object API
+  (`get-attribute`, `read-attributes`, `set-attribute`, `owner`,
+  `set-creation-time`, `set-last-modified-time`) do not exist.
+- `walk-file-tree` visitors receive a plain attrs **map**
+  (`:directory?` `:regular-file?` `:size`), not `BasicFileAttributes`;
+  `:skip-siblings` is not supported (treated as `:continue`).
+- `match` glob patterns go through globset, which requires `**` to be a
+  full path component; the bb idiom `glob:**.ext` is rewritten to
+  `**/*.ext` before matching.
+- `zip` stores entry names relative to `:root` (default: cwd) and errors
+  on paths outside it; babashka stores paths as given. `unzip`
+  extraction is sanitized (zip-slip entries are rejected, not written).

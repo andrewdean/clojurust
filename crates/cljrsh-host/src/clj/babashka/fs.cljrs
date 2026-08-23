@@ -143,3 +143,106 @@
 (defn xdg-cache-home [] (or (System/getenv "XDG_CACHE_HOME") (str (home) "/.cache")))
 (defn xdg-data-home [] (or (System/getenv "XDG_DATA_HOME") (str (home) "/.local/share")))
 (defn xdg-state-home [] (or (System/getenv "XDG_STATE_HOME") (str (home) "/.local/state")))
+(defn creation-time
+  "Epoch milliseconds (divergence: babashka returns a FileTime)."
+  [p] (creation-time-millis p))
+(defn split-paths
+  "Split a PATH-style string on the path separator."
+  [s] (vec (clojure.string/split (str s) #":")))
+(defn which-all [prog] (cljrsh.fs/which-all prog))
+(defn read-all-bytes [p] (cljrsh.fs/read-bytes (as-path p)))
+(defn write-bytes [p bytes] (cljrsh.fs/write-bytes (as-path p) bytes))
+(defn update-file
+  "Apply F to the file's contents (a string) and write the result back.
+  Returns the new contents."
+  [p f & args]
+  (let [p (as-path p)
+        out (str (apply f (slurp p) args))]
+    (spit p out)
+    out))
+(defn gzip
+  "Gzip SOURCE. Returns the written path (SOURCE + \".gz\", or :out-file)."
+  ([src] (cljrsh.fs/gzip (as-path src)))
+  ([src {:keys [out-file]}]
+   (if out-file
+     (cljrsh.fs/gzip (as-path src) (as-path out-file))
+     (cljrsh.fs/gzip (as-path src)))))
+(defn gunzip
+  "Gunzip SOURCE. Returns the written path (SOURCE minus \".gz\", or :out-file)."
+  ([src] (cljrsh.fs/gunzip (as-path src)))
+  ([src {:keys [out-file]}]
+   (if out-file
+     (cljrsh.fs/gunzip (as-path src) (as-path out-file))
+     (cljrsh.fs/gunzip (as-path src)))))
+(defn zip
+  "Zip PATHS (files or whole trees) into ZIP-FILE. Entry names are relative
+  to :root (default: the current directory)."
+  ([zip-file paths] (zip zip-file paths {}))
+  ([zip-file paths {:keys [root]}]
+   (cljrsh.fs/zip (as-path zip-file)
+                  (mapv as-path (if (coll? paths) paths [paths]))
+                  (as-path (or root (cwd))))))
+(defn unzip
+  "Extract ZIP-FILE into :dir (default: the current directory)."
+  ([zip-file] (unzip zip-file {}))
+  ([zip-file {:keys [dir]}]
+   (cljrsh.fs/unzip (as-path zip-file) (as-path (or dir (cwd))))))
+(defn- entry-attrs [p]
+  {:directory? (directory? p)
+   :regular-file? (regular-file? p)
+   :size (when (regular-file? p) (size p))})
+(defn- walk-tree*
+  [dir pre-visit-dir post-visit-dir visit-file]
+  (let [continue (fn [r] (or r :continue))
+        r (continue (when pre-visit-dir (pre-visit-dir dir (entry-attrs dir))))]
+    (cond
+      (= :terminate r) :terminate
+      (= :skip-subtree r) :continue
+      :else
+      (let [r (reduce (fn [_ p]
+                        (let [r (if (directory? p)
+                                  (walk-tree* p pre-visit-dir post-visit-dir visit-file)
+                                  (continue (when visit-file (visit-file p (entry-attrs p)))))]
+                          (if (= :terminate r) (reduced :terminate) :continue)))
+                      :continue
+                      (list-dir dir))]
+        (if (= :terminate r)
+          :terminate
+          (continue (when post-visit-dir (post-visit-dir dir (entry-attrs dir)))))))))
+(defn walk-file-tree
+  "Depth-first visit of ROOT with a visitor map of :pre-visit-dir,
+  :post-visit-dir, and :visit-file, each (fn [path attrs]) returning
+  :continue, :skip-subtree, or :terminate. A :skip-subtree from
+  :pre-visit-dir skips the directory's entries and its :post-visit-dir.
+  Divergence: attrs is a plain map, not BasicFileAttributes."
+  [root {:keys [pre-visit-dir post-visit-dir visit-file]}]
+  (walk-tree* (as-path root) pre-visit-dir post-visit-dir visit-file)
+  (as-path root))
+(defn match
+  "Entries under ROOT whose root-relative path matches PATTERN, a string
+  starting with \"glob:\" or \"regex:\". Non-recursive by default; pass
+  {:recursive true} to match the whole subtree."
+  ([root pattern] (match root pattern {}))
+  ([root pattern {:keys [recursive]}]
+   (let [root (as-path root)]
+     (cond
+       (clojure.string/starts-with? pattern "glob:")
+       (let [g (subs pattern 5)
+             ;; the bb idiom \"**.ext\" means any depth: spell it **/*.ext
+             g (if (and (clojure.string/starts-with? g "**")
+                        (not (clojure.string/starts-with? g "**/")))
+                 (str "**/*" (subs g 2))
+                 g)
+             g (if (and recursive
+                        (not (clojure.string/includes? g "**"))
+                        (not (clojure.string/includes? g "/")))
+                 (str "**/" g)
+                 g)]
+         (vec (sort (glob root g))))
+       (clojure.string/starts-with? pattern "regex:")
+       (let [re (re-pattern (subs pattern 6))
+             all (if recursive (cljrsh.fs/walk root) (list-dir root))]
+         (vec (sort (filter (fn [p] (re-matches re (relativize root p))) all))))
+       :else
+       (throw (ex-info "match pattern must start with glob: or regex:"
+                       {:pattern pattern}))))))

@@ -1835,6 +1835,7 @@ dependencies = [
  "cljrs-stdlib",
  "cljrs-value",
  "csv",
+ "flate2",
  "globset",
  "hex",
  "reqwest 0.13.4",
@@ -1845,6 +1846,7 @@ dependencies = [
  "walkdir",
  "which 7.0.3",
  "yaml-rust2",
+ "zip 8.6.0",
 ]
 
 [[package]]

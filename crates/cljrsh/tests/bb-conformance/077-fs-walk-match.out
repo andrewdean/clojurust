@@ -1,0 +1,10 @@
+["a.clj"]
+["a.clj" "b.clj"]
+["c.txt"]
+pre []
+file a.clj
+pre [x]
+file b.clj
+pre [x/y]
+post [x]
+post []
