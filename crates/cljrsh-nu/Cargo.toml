@@ -1,0 +1,25 @@
+[package]
+name = "cljrsh-nu"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded nushell engine for cljrsh: (nu/eval \"ls | where size > 1kb\") runs pipelines in-process and returns Clojure data"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cljrs-env     = { workspace = true }
+cljrs-interop = { workspace = true }
+cljrs-gc      = { workspace = true }
+cljrs-value   = { workspace = true }
+chrono = { version = "0.4", default-features = false }
+uuid = { workspace = true }
+nu-protocol = "=0.115.0"
+nu-parser   = "=0.115.0"
+nu-engine   = "=0.115.0"
+nu-cmd-lang = "=0.115.0"
+nu-command  = { version = "=0.115.0", default-features = false, features = ["os", "network", "rustls-tls"] }
+
+[dev-dependencies]
+cljrs-interp = { workspace = true }
+cljrs-stdlib = { workspace = true }
+cljrs-reader = { workspace = true }

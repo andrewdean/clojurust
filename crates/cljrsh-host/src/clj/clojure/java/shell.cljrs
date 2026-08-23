@@ -1,0 +1,8 @@
+;; clojure.java.shell compatibility veneer over cljrs.process.
+(ns clojure.java.shell
+  (:require [cljrs.process]))
+
+(def sh
+  "Run a command, capture output: {:exit N :out s :err s}. Trailing keyword
+  options: :in, :dir, :env, :extra-env (see cljrs.process/sh)."
+  cljrs.process/sh)

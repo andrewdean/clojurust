@@ -1,0 +1,14 @@
+;; clj-yaml.core compatibility veneer over the native cljrsh.yaml.
+(ns clj-yaml.core
+  (:require [cljrsh.yaml]))
+
+(defn parse-string
+  "Parse YAML. Keys are keywordized by default; pass :keywords false to keep
+  strings (clj-yaml's convention)."
+  [s & {:keys [keywords] :or {keywords true}}]
+  (cljrsh.yaml/parse-string s keywords))
+
+(defn generate-string
+  "Encode a value as YAML."
+  [v & _opts]
+  (cljrsh.yaml/generate-string v))

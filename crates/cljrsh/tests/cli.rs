@@ -205,3 +205,241 @@ fn classpath_adds_source_dir() {
     );
     assert_eq!(r.stdout, "42\n", "stderr: {}", r.stderr);
 }
+
+// ── Host-namespace / compat-layer coverage (cljrsh-host) ─────────────────────
+
+#[test]
+fn babashka_fs_compat() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[babashka.fs :as fs])
+         (fs/create-dirs (fs/path \"{d}\" \"sub\"))
+         (spit (str \"{d}\" \"/sub/x.clj\") \"1\")
+         [(fs/exists? (str \"{d}\" \"/sub/x.clj\"))
+          (count (fs/glob \"{d}\" \"**/*.clj\"))
+          (fs/file-name (str \"{d}\" \"/sub/x.clj\"))]"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[true 1 \"x.clj\"]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn cheshire_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[cheshire.core :as json])
+             (json/parse-string (json/generate-string {:a [1 2.5 nil] :b \"x\"}) true)",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "{:a [1 2.5 nil], :b \"x\"}\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn clojure_java_shell_compat() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clojure.java.shell :refer [sh]]) (:out (sh \"echo\" \"hi\"))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"hi\\n\"\n");
+}
+
+#[test]
+fn babashka_process_shell_throws_on_failure() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[babashka.process :as p]) (p/shell \"false\")",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.code, 1, "stderr: {}", r.stderr);
+}
+
+// ── Streaming I/O flags (-i/-I/-o/-O/--stream) ───────────────────────────────
+
+#[test]
+fn input_lines_lazy_seq() {
+    let r = run(
+        &["-i", "-e", "(map clojure.string/upper-case *input*)", "-o"],
+        Some("apple\nbanana\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "APPLE\nBANANA\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn input_edn_values() {
+    let r = run(
+        &["-I", "-e", "(reduce + (map :n *input*))"],
+        Some("{:n 1}\n{:n 2}\n{:n 5}\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "8\n");
+}
+
+#[test]
+fn output_prn_is_readable() {
+    let r = run(&["-e", "[\"a\" \"b\"]", "-O"], None, &[]);
+    assert_eq!(r.stdout, "\"a\"\n\"b\"\n");
+}
+
+#[test]
+fn stream_edn_per_value() {
+    let r = run(
+        &["-I", "--stream", "-e", "(* *input* 10)"],
+        Some("1\n2\n3\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "10\n20\n30\n");
+}
+
+#[test]
+fn stream_lines_with_output_mode() {
+    let r = run(
+        &["-i", "--stream", "-e", "(count *input*)", "-o"],
+        Some("a\nbb\nccc\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "1\n2\n3\n");
+}
+
+#[test]
+fn combined_io_flag() {
+    let r = run(
+        &["-io", "-e", "(map clojure.string/reverse *input*)"],
+        Some("ab\ncd\n"),
+        &[],
+    );
+    assert_eq!(r.stdout, "ba\ndc\n");
+}
+
+#[test]
+fn http_client_compat() {
+    use std::io::{Read as _, Write as _};
+    // One-shot HTTP server on an ephemeral port.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = sock.read(&mut buf);
+        sock.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+        )
+        .unwrap();
+    });
+    let expr = format!(
+        "(require '[babashka.http-client :as http])
+         (let [r (http/get \"http://127.0.0.1:{port}/\")]
+           [(:status r) (:body r)])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    server.join().unwrap();
+    assert_eq!(r.stdout, "[200 \"hello\"]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn yaml_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clj-yaml.core :as yaml])
+             (yaml/parse-string (yaml/generate-string {:name \"x\" :tags [\"a\"]}))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "{:name \"x\", :tags [\"a\"]}\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn csv_compat_roundtrip() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[clojure.data.csv :as csv])
+             (csv/read-csv (csv/write-csv-string [[\"a\" \"b\"] [\"1\" \"2,x\"]]))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[[\"a\" \"b\"] [\"1\" \"2,x\"]]\n", "stderr: {}", r.stderr);
+}
+
+// ── Embedded nushell (cljrsh-nu, feature "nu") ───────────────────────────────
+
+#[test]
+fn nu_eval_basic_and_tables() {
+    let r = run(&["-e", "(nu/eval \"2 + 2\")"], None, &[]);
+    assert_eq!(r.stdout, "4\n", "stderr: {}", r.stderr);
+    let r = run(
+        &[
+            "-e",
+            "(nu/eval \"[[name size]; [a 10] [b 2000]] | where size > 100 | get name | first\")",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"b\"\n");
+}
+
+#[test]
+fn nu_eval_pipeline_input_from_clojure() {
+    let r = run(
+        &[
+            "-e",
+            "(nu/eval \"$in | where price > 10 | get name\"
+                      {:in [{:name \"a\" :price 5} {:name \"b\" :price 20}]})",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "[\"b\"]\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn nu_session_persists_defs() {
+    let r = run(
+        &[
+            "-e",
+            "(let [s (nu/session)]
+               (nu/eval \"def greet [n] { $\\\"hi ($n)\\\" }\" {:session s})
+               (nu/eval \"greet world\" {:session s}))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "\"hi world\"\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn nu_parse_error_is_catchable() {
+    let r = run(
+        &[
+            "-e",
+            "(try (nu/eval \"definitely | | broken\") (catch Exception e :caught))",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, ":caught\n");
+}
+
+#[test]
+fn nu_ls_returns_keyword_maps() {
+    let r = run(
+        &["-e", "(pos? (:size (first (nu/eval \"ls Cargo.toml\"))))"],
+        None,
+        &[],
+    );
+    assert_eq!(r.stdout, "true\n", "stderr: {}", r.stderr);
+}

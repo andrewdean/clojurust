@@ -1,0 +1,58 @@
+;; babashka.fs compatibility veneer over the native cljrsh.fs namespace.
+;;
+;; Divergence from babashka: functions return path STRINGS, not
+;; java.nio.file.Path objects. Most scripts `str` their paths anyway; `path`
+;; and `file` are provided as string-joining constructors.
+(ns babashka.fs
+  (:require [clojure.string] [cljrsh.fs]))
+
+(def ^:private sep "/")
+
+(defn- as-path [x] (str x))
+
+(defn path
+  "Join path segments into a path string."
+  ([p] (as-path p))
+  ([p & more] (reduce (fn [acc x] (str acc sep (as-path x))) (as-path p) more)))
+
+(def file path)
+
+(defn exists? [p] (cljrsh.fs/exists? (as-path p)))
+(defn directory? [p] (cljrsh.fs/directory? (as-path p)))
+(defn regular-file? [p] (cljrsh.fs/regular-file? (as-path p)))
+(defn sym-link? [p] (cljrsh.fs/sym-link? (as-path p)))
+(defn readable? [p] (cljrsh.fs/readable? (as-path p)))
+(defn size [p] (cljrsh.fs/size (as-path p)))
+(defn list-dir [p] (cljrsh.fs/list-dir (as-path p)))
+(defn create-dirs [p] (cljrsh.fs/create-dirs (as-path p)))
+(defn delete [p] (cljrsh.fs/delete (as-path p)))
+(defn delete-tree [p] (cljrsh.fs/delete-tree (as-path p)))
+(defn delete-if-exists [p]
+  (if (cljrsh.fs/exists? (as-path p))
+    (do (cljrsh.fs/delete (as-path p)) true)
+    false))
+(defn copy [src dest] (cljrsh.fs/copy (as-path src) (as-path dest)))
+(defn copy-tree [src dest] (cljrsh.fs/copy-tree (as-path src) (as-path dest)))
+(defn move [src dest] (cljrsh.fs/move (as-path src) (as-path dest)))
+(defn absolutize [p] (cljrsh.fs/absolutize (as-path p)))
+(defn canonicalize [p] (cljrsh.fs/canonicalize (as-path p)))
+(defn file-name [p] (cljrsh.fs/file-name (as-path p)))
+(defn parent [p] (cljrsh.fs/parent (as-path p)))
+(defn extension [p] (cljrsh.fs/extension (as-path p)))
+(defn absolute? [p] (clojure.string/starts-with? (as-path p) sep))
+(defn relative? [p] (not (absolute? p)))
+(defn glob [root pattern] (cljrsh.fs/glob (as-path root) pattern))
+(defn which [prog] (cljrsh.fs/which prog))
+(defn temp-dir [] (cljrsh.fs/temp-dir))
+(defn create-temp-dir [] (cljrsh.fs/create-temp-dir))
+(defn cwd [] (cljrsh.fs/cwd))
+(defn home [] (cljrsh.fs/home))
+(defn expand-home [p]
+  (let [s (as-path p)]
+    (if (clojure.string/starts-with? s "~")
+      (str (cljrsh.fs/home) (subs s 1))
+      s)))
+(defn last-modified-time
+  "Epoch milliseconds (divergence: babashka returns a FileTime)."
+  [p]
+  (cljrsh.fs/modified-time-millis (as-path p)))

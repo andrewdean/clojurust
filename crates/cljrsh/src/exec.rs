@@ -32,21 +32,27 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
         }
     });
     cljrs_process::init(&globals);
+    cljrsh_host::init(&globals);
+    #[cfg(feature = "nu")]
+    cljrsh_nu::init(&globals);
 
     cljrs_builtins::system::set_command_line_args(&globals, args);
     globals
 }
 
+/// How a program's stdin/result should be wired (`-i/-I/-o/-O/--stream`).
+pub struct RunModes {
+    pub input: Option<crate::opts::InputMode>,
+    pub output: Option<crate::opts::OutputMode>,
+    pub stream: bool,
+    /// Print the final non-nil value (the `-e` behavior) when no output mode.
+    pub print_result: bool,
+}
+
 /// Evaluate `src` as a program: strip a shebang line, run preloads first,
-/// evaluate every form, and map the outcome to a process exit code.
-///
-/// `print_result` prints the final non-nil value (the `-e` behavior).
-pub fn run_program(
-    globals: &Arc<GlobalEnv>,
-    src: &str,
-    filename: &str,
-    print_result: bool,
-) -> i32 {
+/// bind `*input*` per the input mode, evaluate (once, or per stdin value with
+/// `--stream`), print per the output mode, and map the outcome to an exit code.
+pub fn run_program(globals: &Arc<GlobalEnv>, src: &str, filename: &str, modes: RunModes) -> i32 {
     let mut env = Env::new(globals.clone(), "user");
 
     if let Some(preloads) = preloads() {
@@ -57,15 +63,111 @@ pub fn run_program(
     }
 
     let src = strip_shebang(src);
+
+    if modes.stream {
+        return run_stream(globals, &mut env, src, filename, &modes);
+    }
+
+    if let Some(mode) = modes.input {
+        let def = match mode {
+            crate::opts::InputMode::Lines => {
+                "(def *input* ((fn line-seq* []
+                    (lazy-seq (when-let [l (cljrsh.io/stdin-read-line)]
+                                (cons l (line-seq*)))))))"
+            }
+            crate::opts::InputMode::Edn => {
+                "(def *input* (seq (cljrsh.io/read-edn-all (cljrsh.io/stdin-read-all))))"
+            }
+        };
+        if let Err(e) = eval_str(&mut env, def, "<input>") {
+            return report_error(e);
+        }
+    }
+
     match eval_str(&mut env, src, filename) {
         Ok(value) => {
-            if print_result && value != Value::Nil {
+            if let Some(out) = modes.output {
+                if let Err(e) = print_output(globals, &mut env, value, out) {
+                    return report_error(e);
+                }
+            } else if modes.print_result && value != Value::Nil {
                 println!("{value}");
             }
             0
         }
         Err(e) => report_error(e),
     }
+}
+
+/// `--stream`: read one line per iteration (parsed as a single EDN value with
+/// `-I`), bind it as `*input*`, evaluate the program, and print the result
+/// (element-wise with `-o`/`-O`, otherwise prn of non-nil).
+fn run_stream(
+    globals: &Arc<GlobalEnv>,
+    env: &mut Env,
+    src: &str,
+    filename: &str,
+    modes: &RunModes,
+) -> i32 {
+    let edn = matches!(modes.input, Some(crate::opts::InputMode::Edn));
+    while let Some(line) = cljrsh_host::io::read_line() {
+        let value = if edn {
+            match cljrsh_host::io::read_edn_one(&line, "<stdin>") {
+                Ok(Some(v)) => v,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!("cljrsh: {e}");
+                    return 1;
+                }
+            }
+        } else {
+            Value::string(line)
+        };
+        globals.intern("user", Arc::from("*input*"), value);
+        match eval_str(env, src, filename) {
+            Ok(result) => {
+                if let Some(out) = modes.output {
+                    if let Err(e) = print_output(globals, env, result, out) {
+                        return report_error(e);
+                    }
+                } else if result != Value::Nil {
+                    let _ = eval_with_value(globals, env, result, "(prn cljrsh-out*)");
+                }
+            }
+            Err(e) => return report_error(e),
+        }
+    }
+    0
+}
+
+/// Print `value` element-wise: collections one element per line, scalars as a
+/// single line; `-o` uses println (bare strings), `-O` uses prn (readable).
+fn print_output(
+    globals: &Arc<GlobalEnv>,
+    env: &mut Env,
+    value: Value,
+    mode: crate::opts::OutputMode,
+) -> Result<(), ExecError> {
+    let printer = match mode {
+        crate::opts::OutputMode::Println => {
+            "(run! println (if (or (nil? cljrsh-out*) (coll? cljrsh-out*) (seq? cljrsh-out*)) cljrsh-out* [cljrsh-out*]))"
+        }
+        crate::opts::OutputMode::Prn => {
+            "(run! prn (if (or (nil? cljrsh-out*) (coll? cljrsh-out*) (seq? cljrsh-out*)) cljrsh-out* [cljrsh-out*]))"
+        }
+    };
+    eval_with_value(globals, env, value, printer).map(|_| ())
+}
+
+/// Evaluate `src` with `value` bound to the var `cljrsh-out*` in `user`.
+fn eval_with_value(
+    globals: &Arc<GlobalEnv>,
+    env: &mut Env,
+    value: Value,
+    src: &str,
+) -> Result<Value, ExecError> {
+    globals.intern("user", Arc::from("cljrsh-out*"), value);
+    eval_str(env, src, "<output>")
 }
 
 /// `CLJRSH_PRELOADS` wins over `BABASHKA_PRELOADS`.

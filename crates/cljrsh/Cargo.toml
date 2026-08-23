@@ -23,9 +23,16 @@ cljrs-async    = { workspace = true }
 cljrs-io       = { workspace = true }
 cljrs-charset  = { workspace = true }
 cljrs-process  = { workspace = true }
+cljrsh-host    = { workspace = true }
+cljrsh-nu      = { workspace = true, optional = true }
 tokio = { version = "1.50.0", features = ["rt", "sync", "time", "macros"] }
 rustyline = { workspace = true }
 libc = "0.2"
+
+[features]
+default = ["nu"]
+# Embedded nushell engine (the `nu` Clojure namespace). Off ⇒ faster builds.
+nu = ["dep:cljrsh-nu"]
 
 [dev-dependencies]
 tempfile = "3"
