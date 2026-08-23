@@ -12,7 +12,7 @@ use cljrs_value::{Keyword, Value};
 pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> Arc<GlobalEnv> {
     // Widen reader conditionals before any source is read: bb-flavored .cljc
     // picks its :bb branch, cljrsh-specific code its :cljrsh branch.
-    cljrs_builtins::form::set_reader_features(["bb", "cljrsh", "rust"]);
+    cljrs_builtins::form::set_reader_features(["bb", "cljrsh", "clj", "rust"]);
 
     let globals = cljrs_stdlib::standard_env_with_paths_and_config(
         extra_paths,
@@ -36,6 +36,14 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
     cljrsh_pods::init(&globals);
     #[cfg(feature = "nu")]
     cljrsh_nu::init(&globals);
+    #[cfg(feature = "aws")]
+    cljrsh_aws::init(&globals);
+    cljrs_base64::init(&globals);
+    #[cfg(feature = "k8s")]
+    {
+        cljrsh_k8s::init(&globals);
+        cljrs_async::load_source(&globals, "k8s", cljrsh_k8s::K8S_SUGAR);
+    }
 
     cljrs_builtins::system::set_command_line_args(&globals, args);
     globals
@@ -232,7 +240,7 @@ pub enum ExecError {
 pub fn report_error(e: ExecError) -> i32 {
     match e {
         ExecError::Read(err) => {
-            eprintln!("cljrsh: read error: {err}");
+            crate::error::report_read(&err);
             1
         }
         ExecError::Eval(EvalError::Exit(code)) => code,

@@ -15,6 +15,8 @@ pub enum Program {
     /// the `tasks`/`run` subcommand. Resolved by `main` once the project file
     /// is loaded (babashka's file > task > subcommand order).
     FileOrTask(String),
+    /// `-x FN`: call FN with the remaining args parsed by babashka.cli.
+    Exec(String),
     /// Interactive REPL (explicit `--repl`, or no program on a tty).
     Repl,
     /// Read the program from stdin (no program given, stdin not a tty).
@@ -63,6 +65,7 @@ Usage: cljrsh [opts] [-e EXPR | -f FILE | FILE] [args...]
 
 Options:
   -e, --eval EXPR       evaluate an expression (prints a non-nil result)
+  -x, --exec FN         call FN with remaining args parsed by babashka.cli
   -f, --file FILE       run a script file
   -i                    bind *input* to a lazy seq of stdin lines
   -I                    bind *input* to the seq of EDN values from stdin
@@ -129,6 +132,13 @@ pub fn parse(argv: &[String]) -> Result<Opts, String> {
                     .get(i + 1)
                     .ok_or_else(|| format!("{arg} requires an expression"))?;
                 program = Some(Program::Eval(expr.clone()));
+                i += 2;
+            }
+            "-x" | "--exec" if program.is_none() => {
+                let f = argv
+                    .get(i + 1)
+                    .ok_or_else(|| format!("{arg} requires a function symbol"))?;
+                program = Some(Program::Exec(f.clone()));
                 i += 2;
             }
             "-f" | "--file" if program.is_none() => {

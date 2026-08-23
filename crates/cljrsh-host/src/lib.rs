@@ -21,6 +21,13 @@ pub mod yaml;
 
 /// Compat veneers shipped as embedded Clojure source, loaded on `require`.
 const COMPAT_SOURCES: &[(&str, &str)] = &[
+    // Vendored from org.babashka/cli 0.8.65 (EPL-1.0, github.com/babashka/cli)
+    // verbatim — it runs unmodified on cljrsh's :clj-featured runtime.
+    ("babashka.cli", include_str!("clj/babashka/cli.cljc")),
+    (
+        "babashka.cli.internal",
+        include_str!("clj/babashka/cli_internal.cljc"),
+    ),
     ("babashka.fs", include_str!("clj/babashka/fs.cljrs")),
     ("babashka.process", include_str!("clj/babashka/process.cljrs")),
     (
@@ -36,6 +43,9 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "clojure.java.shell",
         include_str!("clj/clojure/java/shell.cljrs"),
     ),
+    ("clojure.java.io", include_str!("clj/clojure/java/io.cljrs")),
+    ("tf", include_str!("clj/tf.cljrs")),
+    ("kustomize", include_str!("clj/kustomize.cljrs")),
 ];
 
 /// Register every native namespace and compat source into `globals`.

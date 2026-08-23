@@ -1,0 +1,3 @@
+{:tasks {clean (println "cleaning")
+         compile {:depends [clean] :task (println "compiling")}
+         build {:depends [compile] :task (println "building")}}}

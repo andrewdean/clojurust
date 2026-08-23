@@ -351,7 +351,7 @@ fn parse_payload(format: PayloadFormat, payload: &str) -> Result<Value, String> 
         PayloadFormat::TransitJson => {
             let parsed: serde_json_value = serde_json::from_str(payload)
                 .map_err(|e| format!("bad pod transit payload: {e}"))?;
-            transit::decode(&parsed)
+            transit::decode_with(&parsed, &registered_tag_handler)
         }
     }
 }
@@ -508,12 +508,43 @@ impl NativeObject for PodHandle {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
+/// Unknown-tag resolver backed by the Clojure-side registry
+/// `babashka.pods/transit-read-handlers` (an atom of tag-string → fn),
+/// invoked on the interpreter thread via the eval-context callback.
+fn registered_tag_handler(tag: &str, rep: Value) -> Option<Value> {
+    let (globals, _) = cljrs_env::callback::capture_eval_context()?;
+    let var = globals.lookup_var("babashka.pods", "transit-read-handlers")?;
+    let atom = cljrs_env::dynamics::deref_var(&var)?;
+    let Value::Atom(a) = atom else { return None };
+    let Value::Map(handlers) = a.get().deref() else {
+        return None;
+    };
+    let f = handlers.get(&Value::string(tag.to_string()))?;
+    cljrs_env::callback::invoke(&f, vec![rep]).ok()
+}
+
 const BABASHKA_PODS_SOURCE: &str = r#"
 ;; babashka.pods compatibility veneer over cljrsh.pods.
 (ns babashka.pods
   (:require [cljrsh.pods]))
 (def load-pod cljrsh.pods/load-pod)
 (def unload-pod cljrsh.pods/unload-pod)
+
+;; Custom transit tag handlers, consulted by the pod payload decoder for
+;; unknown ~#tags. Keyed by tag string; the handler receives the decoded rep.
+(def transit-read-handlers (atom {}))
+
+(defn add-transit-read-handler! [tag f]
+  (swap! transit-read-handlers assoc (str tag) f)
+  nil)
+
+(defn add-transit-write-handler!
+  "Accepted for compatibility; cljrsh's transit encoder writes plain data
+  only, so custom write handlers are ignored."
+  [& _]
+  nil)
+
+(defn set-default-transit-write-handler! [& _] nil)
 "#;
 
 /// Register `cljrsh.pods` and the `babashka.pods` veneer. Idempotent.

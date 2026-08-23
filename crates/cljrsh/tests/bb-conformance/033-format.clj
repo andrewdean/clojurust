@@ -1,0 +1,7 @@
+(println (format "%s=%d" "x" 42))
+(println (format "%.2f" 3.14159))
+(println (format "%5d|" 42))
+(println (format "%-5d|" 42))
+(println (format "%05d" 42))
+(println (format "%x %o" 255 8))
+(println (str "a" 1 nil :k [1 2]))

@@ -1,0 +1,6 @@
+(require '[clojure.core.async :as async :refer [chan >!! <!! close!]])
+(def c (chan 2))
+(>!! c :a)
+(>!! c :b)
+(close! c)
+(prn (<!! c) (<!! c) (<!! c))

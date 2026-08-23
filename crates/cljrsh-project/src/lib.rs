@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use cljrs_reader::{Form, FormKind};
 
+pub mod maven;
+
 /// A parsed project file.
 #[derive(Debug)]
 pub struct Project {
@@ -25,10 +27,24 @@ pub struct Project {
     pub paths: Vec<String>,
     /// `:min-bb-version` — warn-only (we are not babashka).
     pub min_bb_version: Option<String>,
+    /// `:deps` — lib symbol → coordinate, in source order.
+    pub deps: Vec<(String, DepCoord)>,
     /// `:tasks`, in source order.
     pub tasks: Vec<TaskDef>,
     /// `:tasks`' `:init` form, evaluated once before any task body.
     pub init: Option<Form>,
+}
+
+/// A `:deps` coordinate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DepCoord {
+    /// `{:local/root "path"}` — path relative to the project root.
+    Local { root: String },
+    /// `{:git/url "..." :git/sha "..."}`.
+    Git { url: String, sha: String },
+    /// `{:mvn/version "1.2.3"}` — group/artifact from the lib symbol
+    /// (`group/artifact`, or `name` meaning `name/name`).
+    Maven { version: String },
 }
 
 /// One entry under `:tasks`.
@@ -105,6 +121,7 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
         file: path.to_path_buf(),
         paths: Vec::new(),
         min_bb_version: None,
+        deps: Vec::new(),
         tasks: Vec::new(),
         init: None,
     };
@@ -132,11 +149,128 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
             FormKind::Keyword(key) if key == "tasks" => {
                 parse_tasks(v, &mut project)?;
             }
+            FormKind::Keyword(key) if key == "deps" => {
+                parse_deps(v, &mut project)?;
+            }
             // :deps, :pods — later milestones; ignore unknown keys like bb.
             _ => {}
         }
     }
     Ok(project)
+}
+
+fn parse_deps(deps_form: &Form, project: &mut Project) -> Result<(), ProjectError> {
+    let FormKind::Map(entries) = &deps_form.kind else {
+        return Err(ProjectError::Shape(":deps must be a map".to_string()));
+    };
+    for pair in entries.chunks(2) {
+        let [k, v] = pair else {
+            return Err(ProjectError::Shape(":deps has an odd entry".to_string()));
+        };
+        let FormKind::Symbol(lib) = &k.kind else {
+            return Err(ProjectError::Shape(":deps keys must be lib symbols".to_string()));
+        };
+        let FormKind::Map(coord) = &v.kind else {
+            return Err(ProjectError::Shape(format!(
+                ":deps value for {lib} must be a coordinate map"
+            )));
+        };
+        let field = |name: &str| -> Option<String> {
+            coord.chunks(2).find_map(|p| match (&p[0].kind, p.get(1)) {
+                (FormKind::Keyword(key), Some(val)) if key == name => match &val.kind {
+                    FormKind::Str(s) => Some(s.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+        };
+        let coord = if let Some(root) = field("local/root") {
+            DepCoord::Local { root }
+        } else if let Some(version) = field("mvn/version") {
+            DepCoord::Maven { version }
+        } else if let (Some(url), Some(sha)) = (field("git/url"), field("git/sha")) {
+            DepCoord::Git { url, sha }
+        } else {
+            return Err(ProjectError::Shape(format!(
+                "dep {lib}: expected :mvn/version, :git/url + :git/sha, or :local/root"
+            )));
+        };
+        project.deps.push((lib.clone(), coord));
+    }
+    Ok(())
+}
+
+/// Resolve every `:deps` entry to source directories: locals directly, git
+/// via the `git` CLI into `cache/git/`, maven via [`maven::ensure_deps`].
+/// The dep's own `src/` subdirectory is used when present, else its root.
+pub fn resolve_deps(project: &Project, cache: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let mut maven_roots = Vec::new();
+    for (lib, coord) in &project.deps {
+        match coord {
+            DepCoord::Local { root } => {
+                let dir = project.root.join(root);
+                if !dir.is_dir() {
+                    return Err(format!("local dep {lib}: {} not found", dir.display()));
+                }
+                out.push(source_root(&dir));
+            }
+            DepCoord::Git { url, sha } => {
+                let dir = ensure_git_dep(lib, url, sha, cache)?;
+                out.push(source_root(&dir));
+            }
+            DepCoord::Maven { version } => {
+                let (group, artifact) = match lib.split_once('/') {
+                    Some((g, a)) => (g.to_string(), a.to_string()),
+                    None => (lib.clone(), lib.clone()),
+                };
+                maven_roots.push(maven::Coord {
+                    group,
+                    artifact,
+                    version: version.clone(),
+                });
+            }
+        }
+    }
+    out.extend(maven::ensure_deps(&maven_roots, cache)?);
+    Ok(out)
+}
+
+fn source_root(dir: &Path) -> PathBuf {
+    let src = dir.join("src");
+    if src.is_dir() { src } else { dir.to_path_buf() }
+}
+
+/// Shallow-fetch `url` at `sha` into the cache via the `git` CLI (kept
+/// simple: bb shells out for deps too). Idempotent per sha.
+fn ensure_git_dep(lib: &str, url: &str, sha: &str, cache: &Path) -> Result<PathBuf, String> {
+    let dir = cache.join("git").join(lib.replace('/', "_")).join(sha);
+    if dir.join(".git").exists() {
+        return Ok(dir);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let run = |args: &[&str]| -> Result<(), String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .map_err(|e| format!("git dep {lib}: cannot run git: {e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "git dep {lib}: git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr)
+            ))
+        }
+    };
+    eprintln!("cljrsh: fetching git dep {lib} @ {sha}");
+    run(&["init", "-q"])?;
+    run(&["remote", "add", "origin", url])?;
+    run(&["fetch", "-q", "--depth", "1", "origin", sha])?;
+    run(&["checkout", "-q", sha])?;
+    Ok(dir)
 }
 
 fn parse_tasks(tasks_form: &Form, project: &mut Project) -> Result<(), ProjectError> {

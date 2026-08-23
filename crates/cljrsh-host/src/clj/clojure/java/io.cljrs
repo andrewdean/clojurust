@@ -1,0 +1,49 @@
+;; clojure.java.io compatibility subset for cljrsh (no JVM streams).
+;;
+;; Paths are strings; byte arrays stand in for streams (slurp decodes them,
+;; spit/copy write them). reader/writer of local files return their
+;; path-string (slurp/spit compose); everything else errors clearly.
+(ns clojure.java.io
+  (:require [cljrsh.fs] [clojure.string]))
+
+(defn file
+  "Join path segments into a path string (a File stand-in)."
+  ([p] (str p))
+  ([p & more] (clojure.string/join "/" (cons (str p) (map str more)))))
+
+(defn input-stream
+  "Byte arrays pass through (slurp decodes them); path strings pass through."
+  [x] x)
+
+(def output-stream
+  "Path strings pass through (spit writes them)."
+  identity)
+
+(defn reader [x] (str x))
+(defn writer [x] (str x))
+
+(defn copy
+  "Copy between byte-arrays/strings and path strings."
+  [from to]
+  (cond
+    (bytes? from) (spit (str to) (slurp from))
+    (string? from) (if (cljrsh.fs/exists? from)
+                     (cljrsh.fs/copy from (str to))
+                     (spit (str to) from))
+    :else (throw (ex-info "io/copy: unsupported source type" {:from from}))))
+
+(defn make-parents [& parts]
+  (when-let [p (cljrsh.fs/parent (apply file parts))]
+    (cljrsh.fs/create-dirs p))
+  true)
+
+(defn delete-file
+  ([f] (cljrsh.fs/delete (str f)))
+  ([f silently?] (try (cljrsh.fs/delete (str f)) true
+                      (catch Exception e (or silently? (throw e))))))
+
+(defn resource
+  "Classpath resources do not exist in cljrsh; returns the path when it is a
+  real file, else nil."
+  [n]
+  (when (cljrsh.fs/exists? (str n)) (str n)))

@@ -1,0 +1,10 @@
+"a\nb"
+\x
+x
+:k sym "s"
+[1 "two" \3 nil]
+{:a [1 2]}
+no-newline
+{"k" 1.5}
+:x
+a/b :ns/n

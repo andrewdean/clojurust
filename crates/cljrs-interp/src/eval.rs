@@ -296,45 +296,49 @@ fn eval_symbol(s: &str, env: &mut Env) -> EvalResult {
 
 /// Recognise JVM-style class names used in Clojure for `instance?`, `catch`, etc.
 pub fn is_jvm_class_name(s: &str) -> bool {
-    matches!(
-        s,
-        "clojure.lang.BigInt"
-            | "java.math.BigDecimal"
-            | "java.math.BigInteger"
-            | "clojure.lang.Ratio"
-            | "java.lang.Long"
-            | "java.lang.Double"
-            | "java.lang.String"
-            | "java.lang.Boolean"
-            | "java.lang.Character"
-            | "java.lang.Number"
-            | "clojure.lang.Symbol"
-            | "clojure.lang.Keyword"
-            | "clojure.lang.PersistentList"
-            | "clojure.lang.PersistentVector"
-            | "clojure.lang.PersistentHashMap"
-            | "clojure.lang.PersistentHashSet"
-            | "clojure.lang.PersistentArrayMap"
-            | "clojure.lang.IFn"
-            | "clojure.lang.ISeq"
-            | "clojure.lang.IPending"
-            | "clojure.lang.Atom"
-            | "clojure.lang.Var"
-            | "clojure.lang.Namespace"
-            | "java.util.UUID"
-            | "java.lang.Exception"
-            | "java.lang.Throwable"
-            | "java.lang.Error"
-            | "Exception"
-            | "Throwable"
-            | "Error"
-            | "clojure.lang.ExceptionInfo"
-            | "clojure.lang.IEditableCollection"
-            | "Boolean"
-            | "clojure.lang.PersistentQueue"
-            | "java.util.regex.Pattern"
-    )
+    // Class-name symbols evaluate to themselves (for instance?, catch type
+    // clauses, ...). Recognize the JVM namespace roots plus the
+    // capitalized-final-segment convention (java.io.File, ExceptionInfo).
+    if s.starts_with("java.")
+        || s.starts_with("javax.")
+        || s.starts_with("clojure.lang.")
+        || s.starts_with("com.amazonaws.")
+    {
+        return true;
+    }
+    // Bare capitalized names with no dots (Exception, Throwable, String, ...)
+    !s.contains('.')
+        && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && matches!(
+            s,
+            "Exception"
+                | "Throwable"
+                | "Error"
+                | "ExceptionInfo"
+                | "String"
+                | "Long"
+                | "Double"
+                | "Boolean"
+                | "Character"
+                | "Number"
+                | "BigInt"
+                | "BigDecimal"
+                | "Ratio"
+                | "Symbol"
+                | "Keyword"
+                | "List"
+                | "Vector"
+                | "Map"
+                | "Set"
+                | "IFn"
+                | "ISeq"
+                | "IPending"
+                | "PersistentHashMap"
+                | "PersistentHashSet"
+                | "PersistentVector"
+        )
 }
+
 
 // ── is_special_form ───────────────────────────────────────────────────────────
 
@@ -400,22 +404,9 @@ pub fn eval_body(forms: &[Form], env: &mut Env) -> EvalResult {
 // ── reader cond ───────────────────────────────────────────────────────────────
 
 fn eval_reader_cond(clauses: &[Form], env: &mut Env) -> EvalResult {
-    // clauses = [kw form kw form ...]
-    let mut i = 0;
-    let mut default: Option<&Form> = None;
-    while i + 1 < clauses.len() {
-        match &clauses[i].kind {
-            FormKind::Keyword(k) if k == "rust" => {
-                return eval(&clauses[i + 1], env);
-            }
-            FormKind::Keyword(k) if k == "default" => {
-                default = Some(&clauses[i + 1]);
-            }
-            _ => {}
-        }
-        i += 2;
-    }
-    match default {
+    // One selection rule everywhere: the process feature set in
+    // cljrs_builtins::form (clause order wins, :default always matches).
+    match cljrs_builtins::form::select_reader_cond(clauses) {
         Some(f) => eval(f, env),
         None => Ok(Value::Nil),
     }

@@ -1,0 +1,6 @@
+(require '[clojure.edn :as edn])
+(prn (edn/read-string "{:a [1 2] :b #{3}}"))
+(prn (pr-str {:x "quoted \"str\""}))
+(prn (read-string "(+ 1 2)"))
+(prn (edn/read-string "#inst \"2020-05-05T00:00:00Z\""))
+(prn (edn/read-string {:readers {'my/t inc}} "#my/t 41"))

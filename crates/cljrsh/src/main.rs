@@ -118,6 +118,24 @@ fn run(opts: Opts) -> i32 {
 
     match opts.program {
         Program::Eval(expr) => exec::run_program(&globals, &expr, "<expr>", modes(true)),
+        Program::Exec(fn_sym) => {
+            // `-x my.ns/fn --flag val` — babashka's exec convention: the fn
+            // receives one map of the remaining args parsed by babashka.cli.
+            let require = match fn_sym.split_once('/') {
+                Some((ns, _)) => format!("(require '{ns}) "),
+                None => String::new(),
+            };
+            let src = format!(
+                "{require}({fn_sym} (babashka.cli/parse-opts (vec (or *command-line-args* []))))"
+            );
+            let prelude = "(require 'babashka.cli) ";
+            exec::run_program(
+                &globals,
+                &format!("{prelude}{src}"),
+                "<exec>",
+                modes(true),
+            )
+        }
         Program::File(path) => {
             let src = match std::fs::read_to_string(&path) {
                 Ok(s) => s,

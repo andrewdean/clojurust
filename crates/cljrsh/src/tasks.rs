@@ -88,6 +88,17 @@ fn eval_form_checked(
     crate::exec::eval_form(form, env).map_err(ExecError::Eval)
 }
 
+/// `~/.cache/cljrsh` (or `$XDG_CACHE_HOME/cljrsh`).
+fn dep_cache_dir() -> std::path::PathBuf {
+    std::env::var("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|_| {
+            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".cache"))
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from(".cljrsh-cache"))
+        .join("cljrsh")
+}
+
 /// Load the nearest project file, apply its `:paths` to the source path, and
 /// warn about `:min-bb-version` (informational — we are not babashka).
 pub fn load_project(globals: &Arc<GlobalEnv>) -> Option<Project> {
@@ -95,11 +106,29 @@ pub fn load_project(globals: &Arc<GlobalEnv>) -> Option<Project> {
     let file = cljrsh_project::find_project_file(&cwd)?;
     match cljrsh_project::load(&file) {
         Ok(project) => {
-            let mut paths = globals.source_paths.write().unwrap();
-            for p in &project.paths {
-                let resolved = project.root.join(p);
-                if !paths.contains(&resolved) {
-                    paths.push(resolved);
+            {
+                let mut paths = globals.source_paths.write().unwrap();
+                for p in &project.paths {
+                    let resolved = project.root.join(p);
+                    if !paths.contains(&resolved) {
+                        paths.push(resolved);
+                    }
+                }
+            }
+            // :deps — local/git/maven, resolved into the source path. A
+            // failure warns rather than aborting: tasks that don't touch the
+            // dep still work, and requires of it fail with a clear message.
+            if !project.deps.is_empty() {
+                match cljrsh_project::resolve_deps(&project, &dep_cache_dir()) {
+                    Ok(dirs) => {
+                        let mut paths = globals.source_paths.write().unwrap();
+                        for dir in dirs {
+                            if !paths.contains(&dir) {
+                                paths.push(dir);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("cljrsh: warning: dependency resolution failed: {e}"),
                 }
             }
             Some(project)

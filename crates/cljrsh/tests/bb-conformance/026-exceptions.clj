@@ -1,0 +1,6 @@
+(prn (try (/ 1 0) (catch Exception e :div)))
+(prn (try (throw (ex-info "x" {:k 1}))
+          (catch Exception e [(ex-message e) (ex-data e)])))
+(prn (try :ok (finally (println "cleanup"))))
+(defn thrower [] (throw (ex-info "deep" {})))
+(prn (try (thrower) (catch Exception e (ex-message e))))

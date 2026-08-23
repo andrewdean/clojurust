@@ -1,0 +1,5 @@
+:div
+["x" {:k 1}]
+cleanup
+:ok
+"deep"

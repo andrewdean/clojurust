@@ -15,6 +15,8 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "set!",
     "throw",
     "try",
+    "macroexpand",
+    "macroexpand-1",
     "defn",
     "defn-",
     "defmacro",

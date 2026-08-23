@@ -1,0 +1,5 @@
+(defmacro unless [test & body] `(if ~test nil (do ~@body)))
+(prn (unless false :ran))
+(defmacro twice [x] `[~x ~x])
+(prn (twice (+ 1 2)))
+(prn (macroexpand '(unless c a)))

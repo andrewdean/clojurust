@@ -1260,15 +1260,20 @@ fn handle_vary_meta(arg_forms: &[Form], env: &mut Env) -> EvalResult {
 
     let current_meta = match &obj {
         Value::Var(vp) => vp.get().get_meta().unwrap_or(Value::Nil),
+        Value::WithMeta(_, meta) => meta.as_ref().clone(),
         _ => Value::Nil,
     };
     let mut call_args = vec![current_meta];
     call_args.extend(extra);
     let new_meta = cljrs_env::apply::apply_value(&f, call_args, env)?;
-    if let Value::Var(vp) = &obj {
-        vp.get().set_meta(new_meta);
+    match obj {
+        Value::Var(vp) => {
+            vp.get().set_meta(new_meta);
+            Ok(Value::Var(vp))
+        }
+        Value::WithMeta(inner, _) => Ok(Value::WithMeta(inner, Box::new(new_meta))),
+        other => Ok(Value::WithMeta(Box::new(other), Box::new(new_meta))),
     }
-    Ok(obj)
 }
 
 // ── Value-level special form dispatch (used by IR interpreter) ───────────────

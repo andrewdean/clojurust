@@ -106,6 +106,30 @@ fn default_property(name: &str) -> Option<String> {
     }
 }
 
+/// `(System/getProperties)` — the override overlay plus computed defaults.
+pub(crate) fn builtin_get_properties(_args: &[Value]) -> ValueResult<Value> {
+    let mut m = MapValue::empty();
+    for name in [
+        "user.home",
+        "user.dir",
+        "user.name",
+        "os.name",
+        "os.arch",
+        "file.separator",
+        "path.separator",
+        "line.separator",
+        "java.io.tmpdir",
+    ] {
+        if let Some(v) = default_property(name) {
+            m = m.assoc(Value::string(name.to_string()), Value::string(v));
+        }
+    }
+    for (k, v) in property_overrides().lock().unwrap().iter() {
+        m = m.assoc(Value::string(k.clone()), Value::string(v.clone()));
+    }
+    Ok(Value::Map(m))
+}
+
 /// `(System/getProperty name)` / `(System/getProperty name default)`.
 pub(crate) fn builtin_get_property(args: &[Value]) -> ValueResult<Value> {
     let (name, default) = match args {

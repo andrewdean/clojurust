@@ -147,7 +147,9 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
             return deref_async(v, env).await;
         }
         FormKind::Vector(elems) => {
-            let elems = elems.clone();
+            // Expand reader conditionals (incl. #?@ splices) exactly like the
+            // sync evaluator's collection literals.
+            let elems = cljrs_builtins::form::expand_reader_conds(elems);
             let mut vals: Vec<Value> = Vec::with_capacity(elems.len());
             for f in &elems {
                 vals.push(Box::pin(eval_async(f, env)).await?);
@@ -155,7 +157,9 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
             return Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(vals))));
         }
         FormKind::Map(elems) => {
-            if elems.len() % 2 != 0 {
+            let elems = cljrs_builtins::form::expand_reader_conds(elems);
+            let elems = &elems;
+            if !elems.len().is_multiple_of(2) {
                 return Err(EvalError::Runtime(
                     "map literal must have an even number of forms".into(),
                 ));

@@ -728,6 +728,28 @@ fn error_report_has_type_data_location_and_trace() {
 }
 
 #[test]
+fn reader_error_report_has_location_and_caret() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.clj");
+    std::fs::write(&path, "(println :ok)\n(def x {:a 1)\n").unwrap();
+    let r = run(&[path.to_str().unwrap()], None, &[]);
+    assert_eq!(r.code, 1);
+    let err = &r.stderr;
+    assert!(err.contains("Type:     Reader error"), "{err}");
+    assert!(err.contains("Message:  unexpected closing delimiter"), "{err}");
+    assert!(err.contains("bad.clj:2:13"), "location: {err}");
+    assert!(err.contains("^--- unexpected closing delimiter"), "caret: {err}");
+
+    // Unclosed-at-EOF points at the opening delimiter.
+    let path2 = dir.path().join("unclosed.clj");
+    std::fs::write(&path2, "(defn f [x]\n  (+ x 1)\n").unwrap();
+    let r2 = run(&[path2.to_str().unwrap()], None, &[]);
+    assert_eq!(r2.code, 1);
+    assert!(r2.stderr.contains("unclosed list"), "{}", r2.stderr);
+    assert!(r2.stderr.contains("unclosed.clj:1:1"), "{}", r2.stderr);
+}
+
+#[test]
 fn caught_error_does_not_pollute_later_trace() {
     let r = run(
         &[
@@ -757,4 +779,248 @@ fn unbound_symbol_report() {
         r.stderr
     );
     assert!(r.stderr.contains("user/f"), "{}", r.stderr);
+}
+
+// ── deps (:deps in bb.edn) + babashka.cli + -x (milestone B-M3) ──────────────
+
+#[test]
+fn local_root_dep_resolves() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("mylib/src/coollib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("core.clj"), "(ns coollib.core) (def marker :dep-loaded)").unwrap();
+    std::fs::write(
+        dir.path().join("bb.edn"),
+        r#"{:deps {coollib/coollib {:local/root "mylib"}}}"#,
+    )
+    .unwrap();
+    let r = run_in(
+        dir.path(),
+        &["-e", "(require 'coollib.core) coollib.core/marker"],
+    );
+    assert_eq!(r.stdout, ":dep-loaded\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn babashka_cli_is_builtin() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[babashka.cli :as cli])
+             (cli/parse-opts [\"--port\" \"8080\" \"--who\" \":admin\" \"-v\"]
+                             {:alias {:v :verbose}})",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(
+        r.stdout, "{:port 8080, :who :admin, :verbose true}\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn exec_flag_calls_fn_with_parsed_opts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/my")).unwrap();
+    std::fs::write(dir.path().join("bb.edn"), r#"{:paths ["src"]}"#).unwrap();
+    std::fs::write(
+        dir.path().join("src/my/tool.clj"),
+        "(ns my.tool)\n(defn hello [{:keys [name times] :or {times 1}}]\n  (dotimes [_ times] (println \"hi\" name)))",
+    )
+    .unwrap();
+    let r = run_in(
+        dir.path(),
+        &["-x", "my.tool/hello", "--name", "x", "--times", "2"],
+    );
+    assert_eq!(r.stdout, "hi x\nhi x\n", "stderr: {}", r.stderr);
+}
+
+// ── Built-in AWS client (cljrsh-aws, feature "aws") ──────────────────────────
+
+#[test]
+fn aws_s3_signing_and_list_against_mock() {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || -> String {
+        let (mut sock, _) = listener.accept().unwrap();
+        let mut buf = vec![0u8; 16384];
+        let n = sock.read(&mut buf).unwrap();
+        let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+        let xml = r#"<?xml version="1.0"?>
+<ListBucketResult><Name>b</Name><KeyCount>2</KeyCount><IsTruncated>false</IsTruncated>
+<Contents><Key>a/one.txt</Key><Size>3</Size><ETag>"e1"</ETag><LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>
+<Contents><Key>a/two.txt</Key><Size>7</Size><ETag>"e2"</ETag><LastModified>2026-01-02T00:00:00.000Z</LastModified></Contents>
+</ListBucketResult>"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            xml.len(),
+            xml
+        );
+        sock.write_all(resp.as_bytes()).unwrap();
+        req
+    });
+    let expr = format!(
+        "(def c (aws/client {{:api :s3 :region \"us-east-1\"
+                             :endpoint \"http://127.0.0.1:{port}\"
+                             :access-key-id \"AKIATEST\" :secret-access-key \"secret\"}}))
+         (let [r (aws/invoke c {{:op :ListObjectsV2 :request {{:Bucket \"b\" :Prefix \"a/\"}}}})]
+           [(:KeyCount r) (mapv :Key (:Contents r)) (:Size (first (:Contents r)))
+            (instant? (:LastModified (first (:Contents r))))])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    let req = server.join().unwrap();
+    assert_eq!(
+        r.stdout, "[2 [\"a/one.txt\" \"a/two.txt\"] 3 true]\n",
+        "stderr: {}",
+        r.stderr
+    );
+    // Path-style URL against custom endpoint + SigV4 headers.
+    assert!(req.starts_with("GET /b/?list-type=2&prefix=a%2F"), "req: {req}");
+    assert!(req.contains("authorization: AWS4-HMAC-SHA256"), "req: {req}");
+    assert!(req.contains("Credential=AKIATEST/"), "req: {req}");
+    assert!(req.contains("x-amz-date:"), "req: {req}");
+    assert!(req.contains("x-amz-content-sha256:"), "req: {req}");
+}
+
+#[test]
+fn aws_presign_and_anomaly() {
+    let expr = "(def c (aws/client {:api :s3 :region \"us-east-1\"
+                                    :access-key-id \"AKIATEST\" :secret-access-key \"secret\"}))
+         (let [url (aws/presign c {:op :GetObject :request {:Bucket \"b\" :Key \"k/x.txt\"} :expires 600})]
+           [(clojure.string/includes? url \"X-Amz-Signature=\")
+            (clojure.string/includes? url \"X-Amz-Expires=600\")
+            (clojure.string/starts-with? url \"https://b.s3.us-east-1.amazonaws.com/k/x.txt\")])";
+    let r = run(&["-e", expr], None, &[]);
+    assert_eq!(r.stdout, "[true true true]\n", "stderr: {}", r.stderr);
+}
+
+// ── Built-in Kubernetes client (cljrsh-k8s, feature "k8s") ───────────────────
+
+/// Full e2e against a real cluster; set CLJRSH_K8S_TEST_CONTEXT (e.g. a k3d
+/// context) to enable. Skipped silently otherwise so CI without a cluster
+/// stays green.
+#[test]
+fn k8s_end_to_end_when_cluster_available() {
+    let Ok(context) = std::env::var("CLJRSH_K8S_TEST_CONTEXT") else {
+        eprintln!("skipping: CLJRSH_K8S_TEST_CONTEXT not set");
+        return;
+    };
+    let expr = format!(
+        "(def c (k8s/client {{:context \"{context}\"}}))
+         (k8s/apply c {{:apiVersion \"v1\" :kind \"ConfigMap\"
+                        :metadata {{:name \"cljrsh-test-cm\" :namespace \"default\"}}
+                        :data {{:k \"v\"}}}})
+         (let [got (get-in (k8s/get c :ConfigMap \"cljrsh-test-cm\" {{:namespace \"default\"}})
+                           [:data :k])
+               n (count (k8s/list c :namespaces))]
+           (k8s/delete c :ConfigMap \"cljrsh-test-cm\" {{:namespace \"default\"}})
+           [got (pos? n)])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[\"v\" true]\n", "stderr: {}", r.stderr);
+}
+
+// ── Infrastructure DSLs: tf + kustomize (cljrsh-host) ────────────────────────
+
+#[test]
+fn tf_stack_emission_and_conflicts() {
+    let r = run(
+        &[
+            "-e",
+            "(require '[tf])
+             (let [s (tf/stack (tf/provider :aws {:region \"us-east-1\"})
+                               (tf/resource :aws_s3_bucket :content {:bucket \"b\"})
+                               (tf/output :arn {:value (tf/ref :aws_s3_bucket.content.arn)}))]
+               [(get-in s [:resource :aws_s3_bucket :content :bucket])
+                (get-in s [:output :arn :value])
+                (tf/var-ref :region)
+                (try (tf/stack (tf/resource :a :x {:v 1}) (tf/resource :a :x {:v 2}))
+                     (catch Exception e :duplicate-detected))])",
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(
+        r.stdout,
+        "[\"b\" \"${aws_s3_bucket.content.arn}\" \"${var.region}\" :duplicate-detected]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn tf_engine_loop_when_tofu_available() {
+    if std::process::Command::new("tofu")
+        .arg("version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skipping: tofu not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[tf])
+         (tf/write! \"{d}\" (tf/stack
+           (tf/terraform {{:required_providers {{:local {{:source \"hashicorp/local\"}}}}}})
+           (tf/resource :local_file :f {{:filename \"${{path.module}}/out.txt\"
+                                        :content \"from-cljrsh\"}})))
+         (tf/init! \"{d}\") (tf/validate! \"{d}\") (tf/apply! \"{d}\")
+         (slurp \"{d}/out.txt\")"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "\"from-cljrsh\"\n", "stderr: {}", r.stderr);
+}
+
+#[test]
+fn kustomize_overlay_and_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[kustomize :as k])
+         (let [base (k/manifest \"apps/v1\" :Deployment \"web\" {{}} {{:replicas 1 :extra {{:keep 1 :drop 2}}}})
+               prod (k/overlay base {{:spec {{:replicas 3 :extra {{:drop nil}}}}}})]
+           (k/write! \"{d}\" {{:kustomization {{:namespace \"x\"}}
+                              :resources {{\"deploy.yaml\" prod}}}})
+           [(get-in prod [:spec :replicas])
+            (get-in prod [:spec :extra])
+            (cljrsh.fs/exists? \"{d}/kustomization.yaml\")
+            (some? (clojure.string/index-of (slurp \"{d}/kustomization.yaml\") \"deploy.yaml\"))])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(
+        r.stdout, "[3 {:keep 1} true true]\n",
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn kustomize_build_when_kubectl_available() {
+    if std::process::Command::new("kubectl")
+        .arg("version")
+        .arg("--client")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skipping: kubectl not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap();
+    let expr = format!(
+        "(require '[kustomize :as k])
+         (k/write! \"{d}\" {{:kustomization {{:namespace \"ns1\"}}
+                            :resources {{\"cm.yaml\" (k/manifest \"v1\" :ConfigMap \"c\" {{}})}}}})
+         (let [rendered (k/build \"{d}\")]
+           [(mapv :kind rendered) (get-in (first rendered) [:metadata :namespace])])"
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.stdout, "[[\"ConfigMap\"] \"ns1\"]\n", "stderr: {}", r.stderr);
 }

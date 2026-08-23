@@ -90,7 +90,11 @@ fn format_frame(frame: &Frame) -> String {
 /// ±2 lines around the failing line, with a caret under the column.
 fn render_context(frame: &Frame, message: &str) -> Option<String> {
     let src = lookup_source(frame.span.file.as_str())?;
-    let line_no = frame.span.line as usize;
+    snippet(&src, frame.span.line as usize, frame.span.col as usize, message)
+}
+
+/// ±2 lines of `src` around `line_no`, with a caret under `col`.
+fn snippet(src: &str, line_no: usize, col: usize, message: &str) -> Option<String> {
     let lines: Vec<&str> = src.lines().collect();
     if line_no == 0 || line_no > lines.len() {
         return None;
@@ -102,11 +106,43 @@ fn render_context(frame: &Frame, message: &str) -> Option<String> {
     for n in first..=last {
         out.push_str(&format!("{n:width$}: {}\n", lines[n - 1]));
         if n == line_no {
-            let pad = width + 2 + (frame.span.col as usize).saturating_sub(1);
+            let pad = width + 2 + col.saturating_sub(1);
             out.push_str(&format!("{}^--- {message}\n", " ".repeat(pad)));
         }
     }
     Some(out)
+}
+
+/// Render a full report for a reader (parse) error to stderr, using the
+/// span and source the reader attached to the error.
+pub fn report_read(err: &cljrs_types::error::CljxError) {
+    use cljrs_types::error::CljxError;
+    let CljxError::ReadError { message, span, src } = err else {
+        eprintln!("cljrsh: read error: {err}");
+        return;
+    };
+    let source = src.inner().as_str();
+    // Translate the byte offset into a 1-based line/column.
+    let offset = span.map(|s| s.offset()).unwrap_or(0).min(source.len());
+    let (mut line, mut col) = (1usize, 1usize);
+    for ch in source[..offset].chars() {
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+
+    eprintln!("----- Error {RULE}");
+    eprintln!("Type:     Reader error");
+    eprintln!("Message:  {message}");
+    eprintln!("Location: {}:{line}:{col}", src.name());
+    if let Some(context) = snippet(source, line, col, message) {
+        eprintln!();
+        eprintln!("----- Context {RULE}");
+        eprint!("{context}");
+    }
 }
 
 /// (type, message, data) for the banner.

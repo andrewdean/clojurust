@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use crate::collections::{
+    SortedByMap, SortedBySet,
     PersistentArrayMap, PersistentHashMap, PersistentHashSet, PersistentList, PersistentQueue,
     PersistentVector, SortedMap, SortedSet, TransientMap, TransientSet, TransientVector,
 };
@@ -168,6 +169,9 @@ pub enum MapValue {
     Array(GcPtr<PersistentArrayMap>),
     Hash(GcPtr<PersistentHashMap>),
     Sorted(GcPtr<SortedMap>),
+    /// `sorted-map-by`: comparator-ordered; ordering-sensitive updates are
+    /// applied by the builtins layer (which can invoke the comparator).
+    SortedBy(GcPtr<SortedByMap>),
 }
 
 impl MapValue {
@@ -212,6 +216,7 @@ impl MapValue {
             MapValue::Array(m) => m.get().get(key).cloned(),
             MapValue::Hash(m) => m.get().get(key).cloned(),
             MapValue::Sorted(m) => m.get().get(key).cloned(),
+            MapValue::SortedBy(m) => m.get().get(key).cloned(),
         }
     }
 
@@ -220,6 +225,7 @@ impl MapValue {
             MapValue::Array(m) => m.get().count(),
             MapValue::Hash(m) => m.get().count(),
             MapValue::Sorted(m) => m.get().count(),
+            MapValue::SortedBy(m) => m.get().count(),
         }
     }
 
@@ -236,6 +242,21 @@ impl MapValue {
             },
             MapValue::Hash(m) => MapValue::Hash(GcPtr::new(m.get().assoc(k, v))),
             MapValue::Sorted(m) => MapValue::Sorted(GcPtr::new(m.get().assoc(k, v))),
+            // Comparator-ordered assoc lives in the builtins layer; this
+            // fallback keeps `=`-replacement semantics but appends new keys.
+            MapValue::SortedBy(m) => {
+                let sbm = m.get();
+                let mut pairs: Vec<(Value, Value)> =
+                    sbm.iter().map(|(a, b)| (a.clone(), b.clone())).collect();
+                match pairs.iter_mut().find(|(a, _)| *a == k) {
+                    Some(slot) => slot.1 = v,
+                    None => pairs.push((k, v)),
+                }
+                MapValue::SortedBy(GcPtr::new(SortedByMap::from_sorted_pairs(
+                    sbm.comparator.clone(),
+                    pairs,
+                )))
+            }
         }
     }
 
@@ -244,6 +265,7 @@ impl MapValue {
             MapValue::Array(m) => MapValue::Array(GcPtr::new(m.get().dissoc(key))),
             MapValue::Hash(m) => MapValue::Hash(GcPtr::new(m.get().dissoc(key))),
             MapValue::Sorted(m) => MapValue::Sorted(GcPtr::new(m.get().dissoc(key))),
+            MapValue::SortedBy(m) => MapValue::SortedBy(GcPtr::new(m.get().dissoc(key))),
         }
     }
 
@@ -252,6 +274,7 @@ impl MapValue {
             MapValue::Array(m) => m.get().contains_key(key),
             MapValue::Hash(m) => m.get().contains_key(key),
             MapValue::Sorted(m) => m.get().contains_key(key),
+            MapValue::SortedBy(m) => m.get().contains_key(key),
         }
     }
 
@@ -273,6 +296,11 @@ impl MapValue {
                     f(k, v);
                 }
             }
+            MapValue::SortedBy(m) => {
+                for (k, v) in m.get().iter() {
+                    f(k, v);
+                }
+            }
         }
     }
 
@@ -282,6 +310,7 @@ impl MapValue {
             MapValue::Array(m) => Box::new(m.get().iter()),
             MapValue::Hash(m) => Box::new(m.get().iter()),
             MapValue::Sorted(m) => Box::new(m.get().iter()),
+            MapValue::SortedBy(m) => Box::new(m.get().iter()),
         }
     }
 }
@@ -291,6 +320,8 @@ impl MapValue {
 pub enum SetValue {
     Hash(GcPtr<PersistentHashSet>),
     Sorted(GcPtr<SortedSet>),
+    /// `sorted-set-by`: comparator-ordered (see `MapValue::SortedBy`).
+    SortedBy(GcPtr<SortedBySet>),
 }
 
 impl SetValue {
@@ -302,6 +333,7 @@ impl SetValue {
         match self {
             SetValue::Hash(m) => m.get().count(),
             SetValue::Sorted(m) => m.get().count(),
+            SetValue::SortedBy(m) => m.get().count(),
         }
     }
 
@@ -309,6 +341,7 @@ impl SetValue {
         match self {
             SetValue::Hash(m) => m.get().is_empty(),
             SetValue::Sorted(m) => m.get().is_empty(),
+            SetValue::SortedBy(m) => m.get().is_empty(),
         }
     }
 
@@ -316,6 +349,7 @@ impl SetValue {
         match self {
             SetValue::Hash(m) => m.get().contains(key),
             SetValue::Sorted(m) => m.get().contains(key),
+            SetValue::SortedBy(m) => m.get().contains(key),
         }
     }
 
@@ -323,6 +357,13 @@ impl SetValue {
         match self {
             SetValue::Hash(m) => SetValue::Hash(GcPtr::new(m.get().conj(value))),
             SetValue::Sorted(m) => SetValue::Sorted(GcPtr::new(m.get().conj(value))),
+            // Comparator-ordered conj lives in the builtins layer; this
+            // fallback appends new elements.
+            SetValue::SortedBy(m) => {
+                let mut s = m.get().clone();
+                s.push_if_absent(value);
+                SetValue::SortedBy(GcPtr::new(s))
+            }
         }
     }
 
@@ -334,6 +375,9 @@ impl SetValue {
             SetValue::Sorted(s) => {
                 s.get_mut().conj_mut(value);
             }
+            SetValue::SortedBy(s) => {
+                s.get_mut().push_if_absent(value);
+            }
         }
         self
     }
@@ -342,6 +386,7 @@ impl SetValue {
         match self {
             SetValue::Hash(m) => SetValue::Hash(GcPtr::new(m.get().disj(value))),
             SetValue::Sorted(m) => SetValue::Sorted(GcPtr::new(m.get().disj(value))),
+            SetValue::SortedBy(m) => SetValue::SortedBy(GcPtr::new(m.get().disj(value))),
         }
     }
 
@@ -349,6 +394,7 @@ impl SetValue {
         match self {
             SetValue::Hash(s) => Box::new(s.get().iter()),
             SetValue::Sorted(s) => Box::new(s.get().iter()),
+            SetValue::SortedBy(s) => Box::new(s.get().iter()),
         }
     }
 }
@@ -359,6 +405,7 @@ impl cljrs_gc::Trace for SetValue {
         match self {
             SetValue::Hash(s) => visitor.visit(s),
             SetValue::Sorted(s) => visitor.visit(s),
+            SetValue::SortedBy(s) => visitor.visit(s),
         }
     }
 }
@@ -416,8 +463,9 @@ impl PartialEq for Value {
             (Value::BigInt(a), Value::Long(b)) => *a.get() == BigInt::from(*b),
             (Value::BigInt(a), Value::BigInt(b)) => a.get() == b.get(),
             (Value::Double(a), Value::Double(b)) => a == b, // NaN != NaN
-            (Value::Long(a), Value::Double(b)) => b.fract() == 0.0 && b.to_i64() == Some(*a),
-            (Value::Double(a), Value::Long(b)) => a.fract() == 0.0 && a.to_i64() == Some(*b),
+            // Clojure `=` never equates integer and floating-point types:
+            // (= 1 1.0) is false; numeric-only comparison is `==`.
+            (Value::Long(_), Value::Double(_)) | (Value::Double(_), Value::Long(_)) => false,
             (Value::BigDecimal(a), Value::BigDecimal(b)) => a.get() == b.get(),
             (Value::Ratio(a), Value::Ratio(b)) => a.get() == b.get(),
             (Value::Char(a), Value::Char(b)) => a == b,
@@ -1347,6 +1395,7 @@ impl cljrs_gc::Trace for MapValue {
             MapValue::Array(p) => visitor.visit(p),
             MapValue::Hash(p) => visitor.visit(p),
             MapValue::Sorted(p) => visitor.visit(p),
+            MapValue::SortedBy(p) => visitor.visit(p),
         }
     }
 }
@@ -1399,10 +1448,10 @@ mod tests {
         let big1 = Value::BigInt(GcPtr::new(BigInt::from(1i64)));
         assert_eq!(int(1), big1.clone());
         assert_eq!(big1, int(1));
-        // 1.0 == 1
-        assert_eq!(Value::Double(1.0), int(1));
-        assert_eq!(int(1), Value::Double(1.0));
-        // 1.5 != 1
+        // Clojure `=` keeps integer and floating-point types distinct:
+        // (= 1 1.0) is false (numeric-only equality is `==`).
+        assert_ne!(Value::Double(1.0), int(1));
+        assert_ne!(int(1), Value::Double(1.0));
         assert_ne!(Value::Double(1.5), int(1));
     }
 

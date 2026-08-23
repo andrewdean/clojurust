@@ -1,0 +1,7 @@
+(defmulti area :shape)
+(defmethod area :circle [{:keys [r]}] (* 3 r r))
+(defmethod area :rect [{:keys [w h]}] (* w h))
+(defmethod area :default [_] :unknown)
+(prn (area {:shape :circle :r 2}))
+(prn (area {:shape :rect :w 3 :h 4}))
+(prn (area {:shape :blob}))

@@ -51,13 +51,27 @@ fn cacheable(s: &str) -> bool {
     s.len() > 3 && (s.starts_with("~:") || s.starts_with("~$") || s.starts_with("~#"))
 }
 
+/// Handler for tags the codec doesn't know: `(tag, decoded-rep) -> value`.
+pub type TagHandler<'a> = &'a dyn Fn(&str, Value) -> Option<Value>;
+
 /// Decode a transit-JSON document into a Clojure value.
 pub fn decode(json: &Json) -> Result<Value, String> {
-    let mut cache = ReadCache::default();
-    decode_inner(json, &mut cache, false)
+    decode_with(json, &|_, _| None)
 }
 
-fn decode_inner(json: &Json, cache: &mut ReadCache, as_map_key: bool) -> Result<Value, String> {
+/// Like [`decode`], consulting `handler` for unknown `~#tag` values
+/// (the babashka.pods `add-transit-read-handler!` mechanism).
+pub fn decode_with(json: &Json, handler: TagHandler) -> Result<Value, String> {
+    let mut cache = ReadCache::default();
+    decode_inner_h(json, &mut cache, false, handler)
+}
+
+fn decode_inner_h(
+    json: &Json,
+    cache: &mut ReadCache,
+    as_map_key: bool,
+    handler: TagHandler,
+) -> Result<Value, String> {
     Ok(match json {
         Json::Null => Value::Nil,
         Json::Bool(b) => Value::Bool(*b),
@@ -79,8 +93,8 @@ fn decode_inner(json: &Json, cache: &mut ReadCache, as_map_key: bool) -> Result<
                         return Err("transit map with odd entry count".to_string());
                     }
                     for pair in entries.chunks(2) {
-                        let k = decode_inner(&pair[0], cache, true)?;
-                        let v = decode_inner(&pair[1], cache, false)?;
+                        let k = decode_inner_h(&pair[0], cache, true, handler)?;
+                        let v = decode_inner_h(&pair[1], cache, false, handler)?;
                         m = m.assoc(k, v);
                     }
                     return Ok(Value::Map(m));
@@ -90,12 +104,12 @@ fn decode_inner(json: &Json, cache: &mut ReadCache, as_map_key: bool) -> Result<
                 if let Some(tag) = tag
                     && items.len() == 2
                 {
-                    return decode_tagged(&tag, &items[1], cache);
+                    return decode_tagged(&tag, &items[1], cache, handler);
                 }
             }
             let vals: Vec<Value> = items
                 .iter()
-                .map(|i| decode_inner(i, cache, false))
+                .map(|i| decode_inner_h(i, cache, false, handler))
                 .collect::<Result<_, _>>()?;
             Value::Vector(GcPtr::new(PersistentVector::from_iter(vals)))
         }
@@ -104,13 +118,13 @@ fn decode_inner(json: &Json, cache: &mut ReadCache, as_map_key: bool) -> Result<
             if entries.len() == 1 {
                 let (k, v) = entries.iter().next().unwrap();
                 if let Some(tag) = k.strip_prefix("~#") {
-                    return decode_tagged(tag, v, cache);
+                    return decode_tagged(tag, v, cache, handler);
                 }
             }
             let mut m = MapValue::empty();
             for (k, v) in entries {
                 let key = decode_string(k, cache, true)?;
-                m = m.assoc(key, decode_inner(v, cache, false)?);
+                m = m.assoc(key, decode_inner_h(v, cache, false, handler)?);
             }
             Value::Map(m)
         }
@@ -134,7 +148,12 @@ fn resolve_tag(head: &str, cache: &mut ReadCache) -> Option<String> {
     None
 }
 
-fn decode_tagged(tag: &str, value: &Json, cache: &mut ReadCache) -> Result<Value, String> {
+fn decode_tagged(
+    tag: &str,
+    value: &Json,
+    cache: &mut ReadCache,
+    handler: TagHandler,
+) -> Result<Value, String> {
     match tag {
         "set" => {
             let Json::Array(items) = value else {
@@ -142,7 +161,7 @@ fn decode_tagged(tag: &str, value: &Json, cache: &mut ReadCache) -> Result<Value
             };
             let mut s = PersistentHashSet::empty();
             for item in items {
-                s = s.conj(decode_inner(item, cache, false)?);
+                s = s.conj(decode_inner_h(item, cache, false, handler)?);
             }
             Ok(Value::Set(SetValue::Hash(GcPtr::new(s))))
         }
@@ -152,11 +171,11 @@ fn decode_tagged(tag: &str, value: &Json, cache: &mut ReadCache) -> Result<Value
             };
             let vals: Vec<Value> = items
                 .iter()
-                .map(|i| decode_inner(i, cache, false))
+                .map(|i| decode_inner_h(i, cache, false, handler))
                 .collect::<Result<_, _>>()?;
             Ok(Value::List(GcPtr::new(PersistentList::from_iter(vals))))
         }
-        "'" => decode_inner(value, cache, false),
+        "'" => decode_inner_h(value, cache, false, handler),
         "cmap" => {
             let Json::Array(items) = value else {
                 return Err("transit cmap body must be an array".to_string());
@@ -167,13 +186,17 @@ fn decode_tagged(tag: &str, value: &Json, cache: &mut ReadCache) -> Result<Value
             let mut m = MapValue::empty();
             for pair in items.chunks(2) {
                 m = m.assoc(
-                    decode_inner(&pair[0], cache, false)?,
-                    decode_inner(&pair[1], cache, false)?,
+                    decode_inner_h(&pair[0], cache, false, handler)?,
+                    decode_inner_h(&pair[1], cache, false, handler)?,
                 );
             }
             Ok(Value::Map(m))
         }
-        other => Err(format!("unsupported transit tag ~#{other}")),
+        other => {
+            let rep = decode_inner_h(value, cache, false, handler)?;
+            handler(other, rep)
+                .ok_or_else(|| format!("unsupported transit tag ~#{other}"))
+        }
     }
 }
 
@@ -279,10 +302,7 @@ pub fn encode(v: &Value) -> Result<Json, String> {
             Json::Array(items.get().iter().map(encode).collect::<Result<_, _>>()?),
         ]),
         Value::Set(set) => {
-            let items: Vec<Json> = match set {
-                SetValue::Hash(s) => s.get().iter().map(encode).collect::<Result<_, _>>()?,
-                SetValue::Sorted(s) => s.get().iter().map(encode).collect::<Result<_, _>>()?,
-            };
+            let items: Vec<Json> = set.iter().map(encode).collect::<Result<_, _>>()?;
             Json::Array(vec![Json::String("~#set".to_string()), Json::Array(items)])
         }
         Value::Map(m) => {

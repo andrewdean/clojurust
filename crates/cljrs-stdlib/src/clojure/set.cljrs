@@ -2,3 +2,19 @@
 ;; Native implementations are pre-registered by cljx-stdlib before this
 ;; source is evaluated.
 (ns clojure.set)
+
+(defn rename-keys
+  "Returns the map with the keys in kmap renamed to the vals in kmap."
+  [map kmap]
+  (reduce
+    (fn [m [old new]]
+      (if (contains? map old)
+        (assoc m new (get map old))
+        m))
+    (apply dissoc map (keys kmap))
+    (seq kmap)))
+
+(defn map-invert
+  "Returns the map with the vals mapped to the keys."
+  [m]
+  (reduce (fn [acc [k v]] (assoc acc v k)) {} (seq m)))
