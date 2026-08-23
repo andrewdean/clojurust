@@ -1,0 +1,115 @@
+(ns clojure.repl)
+
+;; REPL introspection: doc / source / apropos / find-doc / dir / pst.
+;; `source` reads the defining namespace's recorded source file (see
+;; ns-source-file) and extracts the balanced def form textually — vars
+;; from builtins or inline evaluation have no source to show.
+
+(defmacro doc
+  "Prints documentation for the var or special form named by SYM."
+  [sym]
+  `(clojure.core/doc ~sym))
+
+(defn dir-fn
+  "Sorted names of the public vars in namespace NS."
+  [ns*]
+  (sort (keys (ns-publics ns*))))
+
+(defmacro dir
+  "Prints a sorted directory of the public vars in NSNAME."
+  [nsname]
+  `(doseq [s# (dir-fn '~nsname)]
+     (println s#)))
+
+(defn- matcher-fn [str-or-pattern]
+  (if (string? str-or-pattern)
+    (fn [s] (clojure.string/includes? s str-or-pattern))
+    (fn [s] (re-find str-or-pattern s))))
+
+(defn apropos
+  "Public vars whose name matches STR-OR-PATTERN (substring or regex),
+  as qualified symbols across all loaded namespaces."
+  [str-or-pattern]
+  (let [matches? (matcher-fn str-or-pattern)]
+    (sort
+     (for [ns* (all-ns)
+           [sym _] (ns-publics ns*)
+           :when (matches? (str sym))]
+       (symbol (str (ns-name ns*)) (str sym))))))
+
+(defn find-doc
+  "Prints documentation for every public var whose name or docstring
+  matches STR-OR-PATTERN (substring or regex)."
+  [str-or-pattern]
+  (let [matches? (matcher-fn str-or-pattern)]
+    (doseq [ns* (all-ns)
+            [sym v] (ns-publics ns*)
+            :let [m (meta v)]
+            :when (or (matches? (str sym))
+                      (and (:doc m) (matches? (:doc m))))]
+      (print-doc* (assoc m :name sym :ns (str (ns-name ns*)))))))
+
+;; ── source ──────────────────────────────────────────────────────────────────
+
+(defn- extract-form
+  "The balanced form starting at START in SRC (string/char/comment aware)."
+  [src start]
+  (let [n (count src)]
+    (loop [i start depth 0 in-str? false escaped? false in-comment? false]
+      (if (>= i n)
+        (subs src start)
+        (let [c (nth src i)]
+          (cond
+            escaped? (recur (inc i) depth in-str? false in-comment?)
+            in-str? (case c
+                      \\ (recur (inc i) depth true true false)
+                      \" (recur (inc i) depth false false false)
+                      (recur (inc i) depth true false false))
+            in-comment? (recur (inc i) depth false false (not= c \newline))
+            :else
+            (case c
+              \" (recur (inc i) depth true false false)
+              \; (recur (inc i) depth false false true)
+              ;; A char literal: skip the next character blindly (covers
+              ;; \( \) \" — longer names contain no delimiters).
+              \\ (recur (+ i 2) depth false false false)
+              \( (recur (inc i) (inc depth) false false false)
+              \) (if (= depth 1)
+                   (subs src start (inc i))
+                   (recur (inc i) (dec depth) false false false))
+              (recur (inc i) depth in-str? false in-comment?))))))))
+
+(defn source-fn
+  "The source text of the def form for SYM, or nil when unavailable."
+  [sym]
+  (when-let [v (resolve sym)]
+    (let [m (meta v)
+          ns* (:ns m)
+          file (when ns* (ns-source-file (the-ns (symbol (str ns*)))))]
+      (when (and file (not (clojure.string/starts-with? (str file) "<")))
+        (when-let [src (try (slurp file) (catch Exception _ nil))]
+          (let [quoted (clojure.string/replace (str (:name m))
+                                               #"[.*+?^${}()\[\]\\|]"
+                                               "\\\\$0")
+                pattern (re-pattern
+                         (str "(?m)^\\(def[a-z!-]*\\s+(?:\\^\\S+\\s+)*"
+                              quoted "[\\s\\n(\\[]"))]
+            (when-let [hit (re-find pattern src)]
+              (let [start (clojure.string/index-of src (if (coll? hit) (first hit) hit))]
+                (extract-form src start)))))))))
+
+(defmacro source
+  "Prints the source of the def form for SYM, when its namespace was
+  loaded from a source file."
+  [sym]
+  `(println (or (source-fn '~sym) "Source not found")))
+
+(defn pst
+  "Prints the message and data of the most recent REPL exception (*e),
+  or of E."
+  ([] (pst *e))
+  ([e]
+   (when e
+     (println (or (ex-message e) (str e)))
+     (when-let [data (ex-data e)]
+       (println " " (pr-str data))))))

@@ -11,6 +11,9 @@ pub enum EvalError {
     /// The cooperative execution-credit budget was exhausted.
     #[error("gas exhausted")]
     GasExhausted,
+    /// SIGINT: unwind the current form; finally runs, catch never sees it.
+    #[error("interrupted")]
+    Interrupted,
 
     /// Clean process-exit request (`System/exit`). A control signal, not a
     /// catchable condition: it unwinds past `try`/`catch` and the hosting

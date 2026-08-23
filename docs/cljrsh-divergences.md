@@ -112,3 +112,21 @@ exit codes through `try/finally`) are not listed.
   not maps, even when they implement lookup).
 - `pr`/`prn` of an `#inst` prints the RFC3339 form with a `-00:00`
   offset and milliseconds.
+
+## clojure.repl
+
+- `source`/`source-fn` extract source **textually**: the defining
+  namespace records its source file, and the def form is found by a
+  regex on the var name plus balanced-paren extraction. Vars defined at
+  the REPL, in builtins, or via macros that generate defs with computed
+  names have no source to show (Clojure has the same limits, but keys
+  off `:file`/`:line` var metadata instead).
+- `pst` prints the exception message and `ex-data` only; there are no
+  JVM stack frames to list.
+
+## Privacy
+
+- `defn-` marks the var `{:private true}` and `ns-publics`/`dir`/
+  `apropos` exclude it, but privacy is **not enforced at resolution**:
+  a fully-qualified reference to another namespace's private var still
+  resolves (Clojure throws unless you go through `#'`/`var`).

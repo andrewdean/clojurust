@@ -346,6 +346,10 @@ async fn eval_try_async(args: &[Form], env: &mut Env) -> EvalResult {
             result = Err(EvalError::Exit(code));
             None
         }
+        Err(EvalError::Interrupted) => {
+            result = Err(EvalError::Interrupted);
+            None
+        }
         Err(other) => Some(other),
     };
 
@@ -504,7 +508,7 @@ async fn eval_call_async(head: &Form, args: &[Form], whole: &Form, env: &mut Env
         head.span.clone(),
     );
     let result = eval_call_async_inner(head, args, whole, env).await;
-    if matches!(&result, Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_))) {
+    if matches!(&result, Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_) | EvalError::Interrupted)) {
         cljrs_interp::trace::record_error_trace();
     }
     result

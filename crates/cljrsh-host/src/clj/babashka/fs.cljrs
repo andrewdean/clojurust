@@ -56,3 +56,90 @@
   "Epoch milliseconds (divergence: babashka returns a FileTime)."
   [p]
   (cljrsh.fs/modified-time-millis (as-path p)))
+
+(defn create-sym-link
+  "Create a symbolic link at PATH pointing to TARGET."
+  [path target] (cljrsh.fs/create-sym-link (as-path path) (as-path target)))
+(defn create-link
+  "Create a hard link at PATH to TARGET."
+  [path target] (cljrsh.fs/create-link (as-path path) (as-path target)))
+(defn read-link [p] (cljrsh.fs/read-link (as-path p)))
+(defn create-dir [p] (cljrsh.fs/create-dir (as-path p)))
+(defn create-file [p] (cljrsh.fs/create-file (as-path p)))
+(defn create-temp-file [] (cljrsh.fs/create-temp-file))
+(defn executable? [p] (cljrsh.fs/executable? (as-path p)))
+(defn writable? [p] (cljrsh.fs/writable? (as-path p)))
+(defn hidden? [p] (cljrsh.fs/hidden? (as-path p)))
+(defn normalize [p] (cljrsh.fs/normalize (as-path p)))
+(defn relativize
+  "The relative path from BASE to OTHER (lexical)."
+  [base other] (cljrsh.fs/relativize (as-path base) (as-path other)))
+(defn real-path [p] (cljrsh.fs/canonicalize (as-path p)))
+(defn creation-time-millis [p] (cljrsh.fs/creation-time-millis (as-path p)))
+(defn delete-on-exit
+  "Register PATH for best-effort removal at clean process exit."
+  [p] (cljrsh.fs/delete-on-exit (as-path p)))
+(defn components [p] (vec (remove clojure.string/blank? (clojure.string/split (as-path p) #"/"))))
+(defn split-ext
+  "[path-without-extension extension-or-nil] — the whole path, minus the
+  final extension of its file name (babashka.fs semantics)."
+  [p]
+  (let [p (as-path p)
+        n (file-name p)
+        i (clojure.string/last-index-of n ".")]
+    (if (and i (pos? i))
+      (let [cut (- (count p) (- (count n) i))]
+        [(subs p 0 cut) (subs p (inc cut))])
+      [p nil])))
+(defn strip-ext [p] (first (split-ext p)))
+(defn ends-with? [p other] (clojure.string/ends-with? (as-path p) (as-path other)))
+(defn starts-with? [p other] (clojure.string/starts-with? (as-path p) (as-path other)))
+(def path-separator ":")
+(def file-separator "/")
+(defn windows? [] false)
+(defn unixify [p] (as-path p))
+(defn exec-paths [] (vec (clojure.string/split (or (System/getenv "PATH") "") #":")))
+(defn list-dirs
+  "Directories among DIR's entries."
+  [dir] (vec (filter directory? (list-dir dir))))
+(defn same-file?
+  [a b]
+  (= (cljrsh.fs/canonicalize (as-path a)) (cljrsh.fs/canonicalize (as-path b))))
+(defn modified-since
+  "Entries under PATHS modified after ANCHOR (a path). Returns the newer ones."
+  [anchor paths]
+  (let [t (last-modified-time anchor)]
+    (vec (filter (fn [p] (> (last-modified-time p) t))
+                 (if (coll? paths) paths [paths])))))
+(defn posix->str
+  "Mode bits (int) as the rwxrwxrwx string."
+  [mode]
+  (apply str (map (fn [[bit ch]] (if (pos? (bit-and mode bit)) ch "-"))
+                  [[8r400 "r"] [8r200 "w"] [8r100 "x"]
+                   [8r040 "r"] [8r020 "w"] [8r010 "x"]
+                   [8r004 "r"] [8r002 "w"] [8r001 "x"]])))
+(defn str->posix
+  "The rwxrwxrwx string as mode bits (int)."
+  [s]
+  (reduce (fn [acc [ch bit]] (if (= ch \-) acc (bit-or acc bit)))
+          0
+          (map vector s [8r400 8r200 8r100 8r040 8r020 8r010 8r004 8r002 8r001])))
+(defn posix-file-permissions [p] (posix->str (cljrsh.fs/unix-mode (as-path p))))
+(defn set-posix-file-permissions
+  "PERMS is mode bits (int) or an rwxrwxrwx string."
+  [p perms]
+  (cljrsh.fs/set-unix-mode (as-path p)
+                           (if (string? perms) (str->posix perms) perms)))
+(defn read-all-lines [p] (vec (clojure.string/split-lines (slurp (as-path p)))))
+(defn write-lines [p lines] (spit (as-path p) (str (clojure.string/join "\n" lines) "\n")))
+(defmacro with-temp-dir
+  "binding => [name] — evaluates BODY with NAME bound to a fresh temp dir,
+  deleting the tree afterwards."
+  [[name*] & body]
+  `(let [~name* (create-temp-dir)]
+     (try ~@body
+          (finally (delete-tree ~name*)))))
+(defn xdg-config-home [] (or (System/getenv "XDG_CONFIG_HOME") (str (home) "/.config")))
+(defn xdg-cache-home [] (or (System/getenv "XDG_CACHE_HOME") (str (home) "/.cache")))
+(defn xdg-data-home [] (or (System/getenv "XDG_DATA_HOME") (str (home) "/.local/share")))
+(defn xdg-state-home [] (or (System/getenv "XDG_STATE_HOME") (str (home) "/.local/state")))

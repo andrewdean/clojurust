@@ -196,7 +196,7 @@ pub fn eval_call(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalRes
     // Control-flow signals (recur, exit) are not error conditions.
     if matches!(
         &result,
-        Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_))
+        Err(e) if !matches!(e, EvalError::Recur(_) | EvalError::Exit(_) | EvalError::Interrupted)
     ) {
         crate::trace::record_error_trace();
     }
@@ -244,7 +244,8 @@ fn eval_call_inner(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalR
             "alter-var-root" => return handle_alter_var_root(arg_forms, env),
             "vary-meta" => return handle_vary_meta(arg_forms, env),
             "find-ns" | "the-ns" => return handle_find_ns(arg_forms, env),
-            "ns-interns" | "ns-publics" => return handle_ns_interns(arg_forms, env),
+            "ns-interns" => return handle_ns_interns(arg_forms, env),
+            "ns-publics" => return handle_ns_publics(arg_forms, env),
             "ns-refers" => return handle_ns_refers(arg_forms, env),
             "ns-map" => return handle_ns_map(arg_forms, env),
             "all-ns" => return handle_all_ns(arg_forms, env),
@@ -1640,6 +1641,21 @@ fn handle_ns_interns(arg_forms: &[Form], env: &mut Env) -> EvalResult {
     let arg = eval(&arg_forms[0], env)?;
     let ns = the_ns(&arg, env)?;
     cljrs_builtins::builtins::builtin_ns_interns(&[Value::Namespace(ns)])
+        .map_err(cljrs_env::error::value_error_to_eval_error)
+}
+
+/// `(ns-publics ns)` — interned vars minus those marked `:private`.
+fn handle_ns_publics(arg_forms: &[Form], env: &mut Env) -> EvalResult {
+    if arg_forms.is_empty() {
+        return Err(EvalError::Arity {
+            name: "ns-publics".into(),
+            expected: "1".into(),
+            got: 0,
+        });
+    }
+    let arg = eval(&arg_forms[0], env)?;
+    let ns = the_ns(&arg, env)?;
+    cljrs_builtins::builtins::builtin_ns_publics(&[Value::Namespace(ns)])
         .map_err(cljrs_env::error::value_error_to_eval_error)
 }
 

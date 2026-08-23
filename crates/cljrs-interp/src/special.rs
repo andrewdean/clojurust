@@ -36,7 +36,8 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "try" => eval_try(args, env),
         "macroexpand" => eval_macroexpand(args, env, false),
         "macroexpand-1" => eval_macroexpand(args, env, true),
-        "defn" | "defn-" => eval_defn(args, env),
+        "defn" => eval_defn(args, env, false),
+        "defn-" => eval_defn(args, env, true),
         "defmacro" => eval_defmacro(args, env),
         "defonce" => eval_defonce(args, env),
         "and" => eval_and(args, env),
@@ -1083,6 +1084,11 @@ fn eval_try(args: &[Form], env: &mut Env) -> EvalResult {
             result = Err(EvalError::Exit(code));
             None
         }
+        // SIGINT likewise: finally runs, catch never sees it.
+        Err(EvalError::Interrupted) => {
+            result = Err(EvalError::Interrupted);
+            None
+        }
         Err(other) => Some(other),
     };
 
@@ -1180,7 +1186,7 @@ pub fn parse_try_args(args: &[Form]) -> (&[Form], Vec<CatchClause<'_>>, &[Form])
 
 // ── defn ──────────────────────────────────────────────────────────────────────
 
-pub fn eval_defn(args: &[Form], env: &mut Env) -> EvalResult {
+pub fn eval_defn(args: &[Form], env: &mut Env, private: bool) -> EvalResult {
     // The name may carry reader metadata, e.g. `(defn ^:async fetch ...)`.
     let (name, mut is_async) = match args.first().map(|f| &f.kind) {
         Some(FormKind::Symbol(s)) => (s.clone(), false),
@@ -1226,6 +1232,15 @@ pub fn eval_defn(args: &[Form], env: &mut Env) -> EvalResult {
         .globals
         .intern(&env.current_ns, Arc::from(name.as_str()), fn_val.clone());
     let mut meta = attr_meta;
+    if private {
+        meta = merge_meta(
+            meta,
+            Some(Value::Map(MapValue::empty().assoc(
+                Value::keyword(Keyword::parse("private")),
+                Value::Bool(true),
+            ))),
+        );
+    }
     if let Some(doc) = &docstring {
         meta = merge_meta(meta, Some(doc_meta(doc)));
     }
@@ -1333,6 +1348,13 @@ fn eval_defmacro(args: &[Form], env: &mut Env) -> EvalResult {
         .globals
         .intern(&env.current_ns, Arc::from(name.as_str()), macro_val.clone());
     let mut meta = merge_meta(name_meta, attr_meta);
+    meta = merge_meta(
+        meta,
+        Some(Value::Map(MapValue::empty().assoc(
+            Value::keyword(Keyword::parse("macro")),
+            Value::Bool(true),
+        ))),
+    );
     if let Some(doc) = &docstring {
         meta = merge_meta(meta, Some(doc_meta(doc)));
     }

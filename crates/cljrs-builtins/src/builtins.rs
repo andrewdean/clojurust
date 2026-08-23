@@ -1323,6 +1323,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("spit", Arity::Variadic { min: 2 }, builtin_spit),
         ("slurp", Arity::Variadic { min: 1 }, builtin_slurp),
         ("read-line", Arity::Fixed(0), builtin_read_line),
+        ("ns-source-file", Arity::Fixed(1), builtin_ns_source_file),
         ("extend", Arity::Variadic { min: 3 }, builtin_extend),
         ("extenders", Arity::Fixed(1), builtin_extenders),
         ("close", Arity::Fixed(1), builtin_close),
@@ -1640,7 +1641,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("namespace?", Arity::Fixed(1), builtin_namespace_q),
         ("ns-name", Arity::Fixed(1), builtin_ns_name),
         ("ns-interns", Arity::Fixed(1), builtin_ns_interns_sentinel),
-        ("ns-publics", Arity::Fixed(1), builtin_ns_publics_sentinel), // alias: no private yet
+        ("ns-publics", Arity::Fixed(1), builtin_ns_publics_sentinel),
         ("ns-refers", Arity::Fixed(1), builtin_ns_refers_sentinel),
         ("ns-map", Arity::Fixed(1), builtin_ns_map_sentinel),
         ("find-ns", Arity::Fixed(1), builtin_find_ns_sentinel),
@@ -1848,6 +1849,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
 pub const BOOTSTRAP_SOURCE: &str = include_str!("bootstrap.cljrs");
 pub const CLOJURE_TEST_SOURCE: &str = include_str!("clojure_test.cljrs");
 pub const CLOJURE_PPRINT_SOURCE: &str = include_str!("clojure_pprint.cljrs");
+pub const CLOJURE_REPL_SOURCE: &str = include_str!("clojure_repl.cljrs");
 
 // ── Helper: lazy value iterator ──────────────────────────────────────────────
 
@@ -7516,6 +7518,21 @@ fn builtin_extenders(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::List(GcPtr::new(PersistentList::from_iter(tags))))
 }
 
+/// `(ns-source-file ns)` — the absolute source path a namespace was loaded
+/// from (nil for builtins and inline definitions). Feeds clojure.repl/source.
+fn builtin_ns_source_file(args: &[Value]) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Namespace(ns) => Ok(match ns.get().source_file.lock().unwrap().clone() {
+            Some(path) => Value::string(path.to_string()),
+            None => Value::Nil,
+        }),
+        v => Err(ValueError::WrongType {
+            expected: "namespace",
+            got: v.type_name().to_string(),
+        }),
+    }
+}
+
 fn builtin_read_line(_args: &[Value]) -> ValueResult<Value> {
     use std::io::BufRead;
     let mut line = String::new();
@@ -8966,6 +8983,29 @@ pub fn builtin_ns_interns(args: &[Value]) -> ValueResult<Value> {
     let interns = ns.get().interns.lock().unwrap();
     let mut m = MapValue::empty();
     for (name, var) in interns.iter() {
+        let sym = Value::symbol(Symbol::simple(name.clone()));
+        m = m.assoc(sym, Value::Var(var.clone()));
+    }
+    Ok(Value::Map(m))
+}
+
+/// `(ns-publics ns)` — like [`builtin_ns_interns`] but excludes vars whose
+/// metadata carries a truthy `:private` (set by `defn-` / `^:private`).
+pub fn builtin_ns_publics(args: &[Value]) -> ValueResult<Value> {
+    let ns = ns_from_arg(&args[0])?;
+    let interns = ns.get().interns.lock().unwrap();
+    let private_kw = Value::keyword(Keyword::parse("private"));
+    let mut m = MapValue::empty();
+    for (name, var) in interns.iter() {
+        let private = match var.get().get_meta() {
+            Some(Value::Map(meta)) => meta
+                .get(&private_kw)
+                .is_some_and(|v| !matches!(v, Value::Nil | Value::Bool(false))),
+            _ => false,
+        };
+        if private {
+            continue;
+        }
         let sym = Value::symbol(Symbol::simple(name.clone()));
         m = m.assoc(sym, Value::Var(var.clone()));
     }

@@ -50,6 +50,16 @@ fn main() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+    // SIGINT interrupts the RUNNING FORM instead of killing the process:
+    // the handler flips the evaluator's interrupt flag (and nushell's, so
+    // in-flight nu pipelines stop); every tier checks it at its gas
+    // checkpoint and unwinds with finally blocks intact. The REPL prints
+    // "Interrupted." and prompts again; scripts exit 130. A second Ctrl-C
+    // hard-kills (native code that never reaches a checkpoint).
+    #[cfg(unix)]
+    {
+        install_sigint_handler();
+    }
 
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let opts = match opts::parse(&argv) {
@@ -85,6 +95,7 @@ fn main() {
             let code = run(opts);
             // Clean pod shutdown before process::exit (which skips Drop).
             cljrsh_pods::shutdown_all();
+            cljrsh_host::fs::run_exit_deletes();
             ASYNC_DRIVER.with(|d| *d.borrow_mut() = None);
             code
         })
@@ -95,6 +106,46 @@ fn main() {
         101
     });
     std::process::exit(code);
+}
+
+#[cfg(unix)]
+static SIGINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+#[cfg(all(unix, feature = "nu"))]
+static NU_INTERRUPT: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicBool>> =
+    std::sync::OnceLock::new();
+
+#[cfg(unix)]
+extern "C" fn on_sigint(_: libc::c_int) {
+    use std::sync::atomic::Ordering;
+    // Async-signal-safe: atomic stores and _exit only.
+    if SIGINT_COUNT.fetch_add(1, Ordering::SeqCst) >= 1 {
+        unsafe { libc::_exit(130) };
+    }
+    cljrs_env::interrupt::request();
+    #[cfg(feature = "nu")]
+    if let Some(flag) = NU_INTERRUPT.get() {
+        flag.store(true, Ordering::SeqCst);
+    }
+}
+
+#[cfg(unix)]
+fn install_sigint_handler() {
+    #[cfg(feature = "nu")]
+    let _ = NU_INTERRUPT.set(cljrsh_nu::default_interrupt_flag());
+    unsafe {
+        libc::signal(libc::SIGINT, on_sigint as libc::sighandler_t);
+    }
+}
+
+/// Reset interrupt state for the next interactive form (REPLs).
+pub(crate) fn clear_interrupt() {
+    cljrs_env::interrupt::clear();
+    #[cfg(unix)]
+    SIGINT_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(all(unix, feature = "nu"))]
+    if let Some(flag) = NU_INTERRUPT.get() {
+        flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 fn run(opts: Opts) -> i32 {

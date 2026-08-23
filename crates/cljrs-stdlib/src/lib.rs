@@ -90,6 +90,10 @@ pub fn register(globals: &Arc<GlobalEnv>) {
         "clojure.pprint",
         cljrs_builtins::builtins::CLOJURE_PPRINT_SOURCE,
     );
+    globals.register_builtin_source(
+        "clojure.repl",
+        cljrs_builtins::builtins::CLOJURE_REPL_SOURCE,
+    );
 
     // clojure.rust.io and clojure.edn use std::fs, unavailable on wasm32.
     #[cfg(not(target_arch = "wasm32"))]

@@ -255,6 +255,11 @@ pub fn report_error(e: ExecError) -> i32 {
             1
         }
         ExecError::Eval(EvalError::Exit(code)) => code,
+        // SIGINT: conventional 128+SIGINT exit; finally blocks already ran.
+        ExecError::Eval(EvalError::Interrupted) => {
+            eprintln!("Interrupted.");
+            130
+        }
         ExecError::Eval(EvalError::Thrown(val)) => {
             if let Some((code, message)) = requested_exit(&val) {
                 if let Some(msg) = message

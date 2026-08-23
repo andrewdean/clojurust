@@ -1493,13 +1493,25 @@
   (let [matcher (re-matcher re s)]
     (seq (take-while identity (repeatedly #(re-find matcher))))))
 
+(defn print-doc*
+  "Print DOC-DATA's map in clojure.repl format."
+  [{:keys [ns name arglists macro doc]}]
+  (println "-------------------------")
+  (println (if ns (str ns "/" name) (str name)))
+  (when (seq arglists) (println arglists))
+  (when macro (println "Macro"))
+  (when doc (println (str "  " doc))))
+
 (defmacro doc
-  "Returns the docstring of the given symbol (a var, macro, or special
-  form), or nil if it has none or doesn't resolve. See also `doc-data`,
-  which returns the docstring alongside the arglists."
+  "Prints documentation for the var or special form named by SYM
+  (clojure.repl format: name, arglists, docstring)."
   [sym]
   `(try
-     (:doc (doc-data (var ~sym)))
+     (let [v# (resolve '~sym)
+           m# (when v# (meta v#))
+           d# (try (doc-data (var ~sym)) (catch Exception e# nil))]
+       (when (or m# d#)
+         (print-doc* (merge {:name '~sym} d# m#))))
      (catch Exception e# nil)))
 
 

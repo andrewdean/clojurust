@@ -1,6 +1,7 @@
 //! `doc` / `doc-data`: docstrings on `def`, `defn`, `defmacro`, and native
-//! builtins are captured as `:doc` (and `:arglists`) var metadata and
-//! readable back through `doc` / `doc-data`.
+//! builtins are captured as `:doc` (and `:arglists`) var metadata. `doc`
+//! prints the Clojure-style block (name, arglists, docstring) and returns
+//! nil, so these tests capture it with `with-out-str`.
 
 use std::sync::Arc;
 
@@ -29,16 +30,28 @@ fn defn_docstring_is_readable_via_doc() {
     let (_, mut env) = make_env();
     let result = eval_all(
         &mut env,
-        r#"(defn add1 "Adds one to x." [x] (+ x 1)) (doc add1)"#,
+        r#"(defn add1 "Adds one to x." [x] (+ x 1)) (with-out-str (doc add1))"#,
     );
-    assert_eq!(result, Value::string("Adds one to x.".to_string()));
+    let Value::Str(s) = result else {
+        panic!("expected printed doc, got {result:?}");
+    };
+    let printed = s.get();
+    assert!(printed.contains("user/add1"), "missing name: {printed}");
+    assert!(printed.contains("[x]"), "missing arglists: {printed}");
+    assert!(printed.contains("Adds one to x."), "missing doc: {printed}");
 }
 
 #[test]
 fn def_docstring_is_readable_via_doc() {
     let (_, mut env) = make_env();
-    let result = eval_all(&mut env, r#"(def answer "The answer." 42) (doc answer)"#);
-    assert_eq!(result, Value::string("The answer.".to_string()));
+    let result = eval_all(
+        &mut env,
+        r#"(def answer "The answer." 42) (with-out-str (doc answer))"#,
+    );
+    let Value::Str(s) = result else {
+        panic!("expected printed doc, got {result:?}");
+    };
+    assert!(s.get().contains("The answer."), "missing doc: {}", s.get());
 }
 
 #[test]
@@ -47,9 +60,14 @@ fn defmacro_docstring_is_readable_via_doc() {
     let result = eval_all(
         &mut env,
         r#"(defmacro my-when "Like when." [test & body] (list 'if test (cons 'do body) nil))
-           (doc my-when)"#,
+           (with-out-str (doc my-when))"#,
     );
-    assert_eq!(result, Value::string("Like when.".to_string()));
+    let Value::Str(s) = result else {
+        panic!("expected printed doc, got {result:?}");
+    };
+    let printed = s.get();
+    assert!(printed.contains("Like when."), "missing doc: {printed}");
+    assert!(printed.contains("Macro"), "missing Macro marker: {printed}");
 }
 
 #[test]
@@ -62,9 +80,9 @@ fn doc_returns_nil_for_unresolvable_symbol() {
 #[test]
 fn doc_works_on_native_builtins() {
     let (_, mut env) = make_env();
-    let result = eval_all(&mut env, "(doc +)");
+    let result = eval_all(&mut env, "(with-out-str (doc +))");
     let Value::Str(s) = result else {
-        panic!("expected a docstring, got {result:?}");
+        panic!("expected printed doc, got {result:?}");
     };
     assert!(s.get().contains("sum"));
 }

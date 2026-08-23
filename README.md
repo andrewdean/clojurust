@@ -61,6 +61,29 @@ Tooling:
 
 ---
 
+## cljrsh: the scripting shell
+
+[cljrsh](crates/cljrsh) is a babashka-style scripting binary built on this
+runtime. It starts in about 15 ms, needs no JVM, and bundles a scripting
+standard library (`cljrsh.fs`, `cljrsh.process`, `cljrsh.http`, JSON/YAML/CSV,
+and more), a babashka compatibility layer, `bb.edn` task running, pods, an
+nREPL server, and optional Kubernetes/AWS clients plus an embedded nushell
+engine.
+
+```bash
+cargo install --git https://github.com/andrewdean/clojurust cljrsh
+
+cljrsh -e '(+ 1 2 3)'
+cljrsh tasks && cljrsh run build     # bb.edn tasks
+cljrsh                               # REPL with tab completion and clojure.repl
+```
+
+Scripts written for babashka generally run unchanged: the CLI grammar,
+`babashka.*` namespaces, reader feature `:bb`, and exit-code conventions all
+match. See the [cljrsh README](crates/cljrsh/README.md) for the full tour.
+
+---
+
 ## Status
 
 | Phase | Description | Status |
@@ -147,11 +170,23 @@ See [`TODO.md`](TODO.md) for the full itemised roadmap.
 | [`cljrs-nrepl`](crates/cljrs-nrepl) | nREPL server (`cljrs nrepl`): bencode over TCP for CIDER/Calva/Conjure | implemented |
 | [`cljrs-wasm`](crates/cljrs-wasm) | Browser REPL compiled to `wasm32-unknown-unknown` (wasm-bindgen) | implemented |
 
-### Binary
+### Binaries
 
 | Crate | Description | Status |
 |-------|-------------|--------|
 | [`cljrs`](crates/cljrs) | `cljrs` CLI: `run`, `repl`, `eval`, `test`, `compile`, `ir` (`build`/`dump`/`viz`), `deps`, `lsp`, `nrepl`, `build-native` (clap-based) | functional |
+| [`cljrsh`](crates/cljrsh) | `cljrsh` scripting shell: file-first CLI, shebang scripts, bb.edn tasks, REPL with completion, nREPL/socket servers | functional |
+
+### Scripting shell libraries
+
+| Crate | Description | Status |
+|-------|-------------|--------|
+| [`cljrsh-host`](crates/cljrsh-host) | The `cljrsh.*` host namespaces (fs, process, http, json, yaml, csv, …) plus the embedded `babashka.*` compatibility layer | implemented |
+| [`cljrsh-project`](crates/cljrsh-project) | `bb.edn` discovery/parsing and the task graph (`:paths`, `:deps`, `:depends` ordering) | implemented |
+| [`cljrsh-pods`](crates/cljrsh-pods) | babashka pod protocol client: bencode over stdio, pod namespaces as native fns | implemented |
+| [`cljrsh-nu`](crates/cljrsh-nu) | Embedded nushell engine: `(nu/eval "ls \| where size > 1kb")` returns Clojure data | implemented |
+| [`cljrsh-aws`](crates/cljrsh-aws) | Data-driven AWS client: SigV4, S3 (rest-xml, Garage-compatible), generic awsJson invoke | implemented |
+| [`cljrsh-k8s`](crates/cljrsh-k8s) | Data-driven Kubernetes client on kube-rs: any resource (CRDs included) as Clojure maps | implemented |
 
 Each crate has its own `README.md` with purpose, status, file layout, and public API.
 
@@ -180,6 +215,17 @@ cljrs ir build -o bundle.bin --ns clojure.core  # pre-lower namespaces to a seri
 cljrs deps fetch                  # fetch git deps declared in cljrs.edn
 cljrs lsp                         # start an LSP server (stdio)
 cljrs nrepl --port 7888           # start an nREPL server
+```
+
+The scripting shell has its own file-first grammar:
+
+```bash
+cljrsh script.clj arg1 arg2       # run a script (or use a #!/usr/bin/env cljrsh shebang)
+cljrsh -e '(+ 1 2 3)'             # evaluate an expression
+cljrsh -io -e '(map clojure.string/upper-case *input*)'  # stream stdin lines
+cljrsh tasks                      # list bb.edn tasks
+cljrsh run build                  # run a bb.edn task
+cljrsh nrepl-server               # nREPL for CIDER/Calva/Conjure (port 1667)
 ```
 
 The JIT runs by default. `--jit-threshold N` sets the per-arity invocation
@@ -351,8 +397,16 @@ crates/
   cljrs-lsp/             # LSP server
   cljrs-nrepl/           # nREPL server
   cljrs-wasm/            # browser REPL (wasm)
-  # binary
+  # binaries
   cljrs/                 # CLI binary
+  cljrsh/                # scripting shell binary
+  # scripting shell libraries
+  cljrsh-host/           # cljrsh.* + babashka.* namespaces
+  cljrsh-project/        # bb.edn parsing + task graph
+  cljrsh-pods/           # babashka pod protocol client
+  cljrsh-nu/             # embedded nushell engine
+  cljrsh-aws/            # AWS client
+  cljrsh-k8s/            # Kubernetes client
 examples/
   rust-interop/         # Rust interop example
 tests/

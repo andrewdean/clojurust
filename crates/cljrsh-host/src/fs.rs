@@ -25,6 +25,26 @@ fn io_err(op: &str, path: &str, e: impl std::fmt::Display) -> String {
     format!("{op} {path}: {e}")
 }
 
+/// Paths registered by `fs/delete-on-exit`, removed by the hosting binary
+/// on clean shutdown (see cljrsh's main).
+static EXIT_DELETES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn register_exit_delete(path: &str) {
+    EXIT_DELETES.lock().unwrap().push(path.to_string());
+}
+
+/// Best-effort removal of every delete-on-exit registration.
+pub fn run_exit_deletes() {
+    for path in EXIT_DELETES.lock().unwrap().drain(..) {
+        let p = Path::new(&path);
+        let _ = if p.is_dir() {
+            std::fs::remove_dir_all(p)
+        } else {
+            std::fs::remove_file(p)
+        };
+    }
+}
+
 pub fn register(registry: &mut Registry) {
     let ns = "cljrsh.fs";
     let def1 = |registry: &mut Registry,
@@ -90,6 +110,162 @@ pub fn register(registry: &mut Registry) {
         out.sort();
         Ok(string_vec(out))
     });
+    def1(registry, "read-link", |p| {
+        let target = std::fs::read_link(p).map_err(|e| io_err("read-link", p, e))?;
+        Ok(Value::string(target.display().to_string()))
+    });
+    def1(registry, "create-dir", |p| {
+        std::fs::create_dir(p).map_err(|e| io_err("create-dir", p, e))?;
+        Ok(Value::string(p.to_string()))
+    });
+    def1(registry, "create-file", |p| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(p)
+            .map_err(|e| io_err("create-file", p, e))?;
+        Ok(Value::string(p.to_string()))
+    });
+    def1(registry, "executable?", |p| {
+        use std::os::unix::fs::PermissionsExt;
+        Ok(Value::Bool(
+            std::fs::metadata(p)
+                .map(|md| md.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false),
+        ))
+    });
+    def1(registry, "writable?", |p| {
+        Ok(Value::Bool(
+            std::fs::metadata(p)
+                .map(|md| !md.permissions().readonly())
+                .unwrap_or(false),
+        ))
+    });
+    def1(registry, "hidden?", |p| {
+        Ok(Value::Bool(
+            Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().starts_with('.'))
+                .unwrap_or(false),
+        ))
+    });
+    def1(registry, "creation-time-millis", |p| {
+        let md = std::fs::metadata(p).map_err(|e| io_err("creation-time-millis", p, e))?;
+        Ok(match md.created().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH).ok()
+        }) {
+            Some(d) => Value::Long(d.as_millis() as i64),
+            None => Value::Nil,
+        })
+    });
+    def1(registry, "normalize", |p| {
+        // Lexical normalization (no IO): resolve `.` and non-leading `..`.
+        let mut out: Vec<std::path::Component> = Vec::new();
+        for c in Path::new(p).components() {
+            match c {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => match out.last() {
+                    Some(std::path::Component::Normal(_)) => {
+                        out.pop();
+                    }
+                    Some(std::path::Component::RootDir) => {}
+                    _ => out.push(c),
+                },
+                other => out.push(other),
+            }
+        }
+        let joined: std::path::PathBuf = out.iter().collect();
+        Ok(Value::string(joined.display().to_string()))
+    });
+    registry.define(
+        "cljrsh.fs/create-sym-link",
+        wrap_fn2(
+            "cljrsh.fs/create-sym-link",
+            |link: Value, target: Value| -> Result<Value, String> {
+                let link = str_arg(&link, "link path")?;
+                let target = str_arg(&target, "target path")?;
+                std::os::unix::fs::symlink(&target, &link)
+                    .map_err(|e| io_err("create-sym-link", &link, e))?;
+                Ok(Value::string(link))
+            },
+        ),
+    );
+    registry.define(
+        "cljrsh.fs/create-link",
+        wrap_fn2(
+            "cljrsh.fs/create-link",
+            |link: Value, target: Value| -> Result<Value, String> {
+                let link = str_arg(&link, "link path")?;
+                let target = str_arg(&target, "target path")?;
+                std::fs::hard_link(&target, &link)
+                    .map_err(|e| io_err("create-link", &link, e))?;
+                Ok(Value::string(link))
+            },
+        ),
+    );
+    registry.define(
+        "cljrsh.fs/set-unix-mode",
+        wrap_fn2(
+            "cljrsh.fs/set-unix-mode",
+            |path: Value, mode: Value| -> Result<Value, String> {
+                use std::os::unix::fs::PermissionsExt;
+                let path = str_arg(&path, "path")?;
+                let Value::Long(mode) = mode else {
+                    return Err("set-unix-mode: mode must be an integer".into());
+                };
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode as u32))
+                    .map_err(|e| io_err("set-unix-mode", &path, e))?;
+                Ok(Value::string(path))
+            },
+        ),
+    );
+    registry.define(
+        "cljrsh.fs/relativize",
+        wrap_fn2(
+            "cljrsh.fs/relativize",
+            |base: Value, other: Value| -> Result<Value, String> {
+                let base = str_arg(&base, "base path")?;
+                let other = str_arg(&other, "other path")?;
+                let base_parts: Vec<_> = Path::new(&base).components().collect();
+                let other_parts: Vec<_> = Path::new(&other).components().collect();
+                let common = base_parts
+                    .iter()
+                    .zip(other_parts.iter())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                let mut rel = std::path::PathBuf::new();
+                for _ in common..base_parts.len() {
+                    rel.push("..");
+                }
+                for c in &other_parts[common..] {
+                    rel.push(c);
+                }
+                Ok(Value::string(rel.display().to_string()))
+            },
+        ),
+    );
+    registry.define(
+        "cljrsh.fs/create-temp-file",
+        wrap_fn_variadic(
+            "cljrsh.fs/create-temp-file",
+            0,
+            |_args: &[Value]| -> Result<Value, String> {
+                let file = tempfile::Builder::new()
+                    .prefix("cljrsh-")
+                    .tempfile()
+                    .map_err(|e| format!("create-temp-file: {e}"))?;
+                let (_, path) = file
+                    .keep()
+                    .map_err(|e| format!("create-temp-file: {e}"))?;
+                Ok(Value::string(path.display().to_string()))
+            },
+        ),
+    );
+    def1(registry, "delete-on-exit", |p| {
+        crate::fs::register_exit_delete(p);
+        Ok(Value::string(p.to_string()))
+    });
+
     def1(registry, "create-dirs", |p| {
         std::fs::create_dir_all(p).map_err(|e| io_err("create-dirs", p, e))?;
         Ok(Value::string(p.to_string()))

@@ -4444,7 +4444,7 @@ pub extern "C" fn rt_box_bool(b: u8) -> *const Value {
 /// Charge a weighted compiled basic-block checkpoint.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_gas_charge(cost: u64) -> u8 {
-    let charged = cljrs_env::gas::charge(cost);
+    let charged = !cljrs_env::interrupt::take() && cljrs_env::gas::charge(cost);
     if !charged {
         unwind_all_native_regions();
     }

@@ -2,21 +2,154 @@
 //! (keeps reading while delimiters are unbalanced), history in
 //! `~/.cache/cljrsh/history`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cljrs_env::env::{Env, GlobalEnv};
+use cljrs_value::{Keyword, Value};
 
 use crate::exec::{ExecError, eval_str};
 
+/// rustyline helper: tab completion over special forms, the current
+/// namespace's interns/refers/aliases, loaded namespace names, and
+/// `alias/`-qualified publics. Highlighting/hinting/validation are the
+/// rustyline defaults.
+struct ReplHelper {
+    globals: Arc<GlobalEnv>,
+    /// Mirrors `env.current_ns`; refreshed by the REPL loop after each eval
+    /// (in-ns can change it mid-session).
+    current_ns: Arc<Mutex<String>>,
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || "*+!-_?<>=./&$%".contains(c)
+}
+
+fn word_start(line: &str, pos: usize) -> usize {
+    let mut start = pos;
+    for (i, c) in line[..pos].char_indices().rev() {
+        if is_word_char(c) {
+            start = i;
+        } else {
+            break;
+        }
+    }
+    start
+}
+
+/// True when the var's metadata carries a truthy `:private`.
+fn var_is_private(var: &cljrs_gc::GcPtr<cljrs_value::Var>) -> bool {
+    let private_kw = Value::keyword(Keyword::parse("private"));
+    match var.get().get_meta() {
+        Some(Value::Map(m)) => m
+            .get(&private_kw)
+            .is_some_and(|v| !matches!(v, Value::Nil | Value::Bool(false))),
+        _ => false,
+    }
+}
+
+impl ReplHelper {
+    fn completions(&self, word: &str) -> Vec<String> {
+        let cur_ns = self.current_ns.lock().unwrap().clone();
+        let mut out: Vec<String> = Vec::new();
+        if let Some((prefix, rest)) = word.split_once('/') {
+            // alias/… or full-ns/… — complete that namespace's publics.
+            let target = self
+                .globals
+                .resolve_alias(&cur_ns, prefix)
+                .unwrap_or_else(|| Arc::from(prefix));
+            let namespaces = self.globals.namespaces.read().unwrap();
+            if let Some(ns) = namespaces.get(&target) {
+                for (name, var) in ns.get().interns.lock().unwrap().iter() {
+                    if name.starts_with(rest) && !var_is_private(var) {
+                        out.push(format!("{prefix}/{name}"));
+                    }
+                }
+            }
+        } else {
+            for sf in cljrs_builtins::special::SPECIAL_FORMS {
+                if sf.starts_with(word) {
+                    out.push((*sf).to_string());
+                }
+            }
+            let namespaces = self.globals.namespaces.read().unwrap();
+            if let Some(ns) = namespaces.get(cur_ns.as_str()) {
+                let ns = ns.get();
+                for name in ns.interns.lock().unwrap().keys() {
+                    if name.starts_with(word) {
+                        out.push(name.to_string());
+                    }
+                }
+                for name in ns.refers.lock().unwrap().keys() {
+                    if name.starts_with(word) {
+                        out.push(name.to_string());
+                    }
+                }
+                for alias in ns.aliases.lock().unwrap().keys() {
+                    if alias.starts_with(word) {
+                        out.push(format!("{alias}/"));
+                    }
+                }
+            }
+            // Namespace names (loaded and lazily-registered builtins) — for
+            // `(require '…` and fully-qualified symbols.
+            for name in namespaces.keys() {
+                if name.starts_with(word) {
+                    out.push(name.to_string());
+                }
+            }
+            for name in self.globals.builtin_sources.read().unwrap().keys() {
+                if name.starts_with(word) {
+                    out.push(name.to_string());
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+impl rustyline::completion::Completer for ReplHelper {
+    type Candidate = String;
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<String>)> {
+        let start = word_start(line, pos);
+        let word = &line[start..pos];
+        // Keywords (and the empty word) get no candidates.
+        if word.is_empty() || word.starts_with(':') {
+            return Ok((start, Vec::new()));
+        }
+        Ok((start, self.completions(word)))
+    }
+}
+
+impl rustyline::hint::Hinter for ReplHelper {
+    type Hint = String;
+}
+impl rustyline::highlight::Highlighter for ReplHelper {}
+impl rustyline::validate::Validator for ReplHelper {}
+impl rustyline::Helper for ReplHelper {}
+
+type ReplEditor = rustyline::Editor<ReplHelper, rustyline::history::DefaultHistory>;
+
 pub fn run(globals: Arc<GlobalEnv>) -> i32 {
     println!("cljrsh {} — :repl/quit or Ctrl-D to exit", crate::opts::VERSION);
-    let mut rl = match rustyline::DefaultEditor::new() {
+    let mut rl: ReplEditor = match rustyline::Editor::new() {
         Ok(rl) => rl,
         Err(e) => {
             eprintln!("cljrsh: cannot start REPL: {e}");
             return 1;
         }
     };
+    let current_ns = Arc::new(Mutex::new("user".to_string()));
+    rl.set_helper(Some(ReplHelper {
+        globals: globals.clone(),
+        current_ns: current_ns.clone(),
+    }));
     let history_path = history_path();
     if let Some(p) = &history_path {
         let _ = rl.load_history(p);
@@ -26,8 +159,12 @@ pub fn run(globals: Arc<GlobalEnv>) -> i32 {
     let mut buffer = String::new();
 
     loop {
-        let prompt = if buffer.is_empty() { "user=> " } else { "  ...  " };
-        match rl.readline(prompt) {
+        let prompt = if buffer.is_empty() {
+            format!("{}=> ", env.current_ns)
+        } else {
+            "  ...  ".to_string()
+        };
+        match rl.readline(&prompt) {
             Ok(line) => {
                 if buffer.is_empty() && line.trim() == ":repl/quit" {
                     break;
@@ -49,8 +186,13 @@ pub fn run(globals: Arc<GlobalEnv>) -> i32 {
                         save_history(&mut rl, &history_path);
                         return code;
                     }
+                    Err(ExecError::Eval(cljrs_env::error::EvalError::Interrupted)) => {
+                        eprintln!("Interrupted.");
+                    }
                     Err(ExecError::Eval(e)) => eprintln!("error: {e}"),
                 }
+                crate::clear_interrupt();
+                *current_ns.lock().unwrap() = env.current_ns.to_string();
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 buffer.clear();
@@ -77,7 +219,7 @@ fn history_path() -> Option<std::path::PathBuf> {
     Some(dir.join("history"))
 }
 
-fn save_history(rl: &mut rustyline::DefaultEditor, path: &Option<std::path::PathBuf>) {
+fn save_history(rl: &mut ReplEditor, path: &Option<std::path::PathBuf>) {
     if let Some(p) = path {
         let _ = rl.save_history(p);
     }
@@ -207,6 +349,10 @@ fn serve_connection(
                     match crate::exec::eval_form(form, &mut env) {
                         Ok(v) => writeln!(writer, "{v}")?,
                         Err(cljrs_env::error::EvalError::Exit(_)) => return Ok(()),
+                        Err(cljrs_env::error::EvalError::Interrupted) => {
+                            crate::clear_interrupt();
+                            writeln!(writer, "Interrupted.")?;
+                        }
                         Err(e) => writeln!(writer, "ERROR: {e}")?,
                     }
                 }

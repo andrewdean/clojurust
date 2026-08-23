@@ -21,6 +21,9 @@ use fancy_regex::Regex;
 
 /// Evaluate a `Form` in the given `Env`.
 pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
+    if cljrs_env::interrupt::take() {
+        return Err(EvalError::Interrupted);
+    }
     if !cljrs_env::gas::charge(1) {
         return Err(EvalError::GasExhausted);
     }

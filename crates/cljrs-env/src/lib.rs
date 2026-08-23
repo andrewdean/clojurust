@@ -4,6 +4,7 @@
 pub mod apply;
 pub mod async_hook;
 pub mod callback;
+pub mod interrupt;
 pub mod io_target;
 pub mod dynamics;
 pub mod env;

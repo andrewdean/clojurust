@@ -733,6 +733,27 @@ impl Lexer {
             }
         }
 
+        // Leading-zero integer literals are OCTAL (Clojure/Java parity:
+        // 0400 => 256). Only plain integers — floats (0.5), ratios, and
+        // suffixed forms keep their meaning; 08/09 are invalid numbers.
+        if int_part.len() > 1
+            && int_part.starts_with('0')
+            && !matches!(
+                self.peek(),
+                Some('.') | Some('e') | Some('E') | Some('N') | Some('M') | Some('/')
+            )
+        {
+            if int_part.bytes().any(|b| b == b'8' || b == b'9') {
+                let span = self.span_from(start_pos, start_line, start_col);
+                return Err(
+                    self.make_error(format!("invalid octal number: {sign_str}{int_part}"), span)
+                );
+            }
+            let value = i64::from_str_radix(&int_part, 8).unwrap_or(0);
+            let span = self.span_from(start_pos, start_line, start_col);
+            return Ok((Token::Int(if negative { -value } else { value }), span));
+        }
+
         // BigInt suffix 'N'
         if self.peek() == Some('N') {
             self.advance();

@@ -353,6 +353,9 @@ fn interpret_ir_inner(
         // of IR operations keeps Tier 1 and generated native code on the same
         // approximate scale without putting a branch around every operation.
         let block_cost = (block.phis.len() + block.insts.len() + 1) as u64;
+        if cljrs_env::interrupt::take() {
+            return Err(cljrs_env::error::EvalError::Interrupted);
+        }
         if !cljrs_env::gas::charge(block_cost) {
             return Err(EvalError::GasExhausted);
         }

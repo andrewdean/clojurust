@@ -1250,6 +1250,10 @@ fn format_eval_error(e: EvalError) -> miette::Report {
         EvalError::NotCallable(s) => miette::miette!("Not a function: {}", s),
         EvalError::Runtime(msg) => miette::miette!("{}", msg),
         EvalError::GasExhausted => miette::miette!("gas exhausted"),
+        EvalError::Interrupted => {
+            // Ctrl-C unwound the evaluation; conventional 128+SIGINT code.
+            std::process::exit(130);
+        }
         EvalError::ForbiddenEffect(operation) => {
             miette::miette!("effect forbidden in transaction function: {operation}")
         }
