@@ -215,9 +215,11 @@ fn qualify_symbol(
         });
         return generated.as_ref().to_string();
     }
-    // Special forms and try-related tokens: never qualify.
+    // Special forms, try-related tokens, and the variadic marker `&`:
+    // never qualify (a qualified `&` in a binding vector would stop
+    // parsing as the rest-args marker).
     if SPECIAL_FORMS.contains(&s)
-        || matches!(s, "catch" | "finally" | "Exception" | "Throwable" | "Error")
+        || matches!(s, "&" | "catch" | "finally" | "Exception" | "Throwable" | "Error")
     {
         return s.to_string();
     }
