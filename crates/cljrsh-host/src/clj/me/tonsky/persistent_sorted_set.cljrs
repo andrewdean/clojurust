@@ -1,0 +1,56 @@
+;; Pure-Clojure shim for me.tonsky/persistent-sorted-set, the index
+;; structure under datascript. Sets are ordinary cljrs sorted sets with
+;; the comparator kept in metadata so `slice` can compare against bounds.
+;; `slice`/`rslice`/`seek` are O(n) scans: correct first, fast later
+;; (the native datalog store replaces this whole layer).
+(ns me.tonsky.persistent-sorted-set
+  (:refer-clojure :exclude [conj disj sorted-set]))
+
+(def ^:private cmp-key ::cmp)
+
+(defn- cmp-of [s] (or (get (meta s) cmp-key) compare))
+
+(defn sorted-set-by [cmp & keys]
+  (with-meta (into (clojure.core/sorted-set-by cmp) keys) {cmp-key cmp}))
+
+(defn sorted-set [& keys]
+  (apply sorted-set-by compare keys))
+
+(defn sorted-set*
+  "Options map form: honors :cmp, ignores storage and branching settings."
+  [opts]
+  (sorted-set-by (or (:cmp opts) compare)))
+
+(defn settings [_set] {})
+
+(defn from-sorted-array
+  ([cmp arr] (apply sorted-set-by cmp (seq arr)))
+  ([cmp arr _len] (from-sorted-array cmp arr))
+  ([cmp arr _len _opts] (from-sorted-array cmp arr)))
+
+(defn conj
+  ([s x] (clojure.core/conj s x))
+  ([s x _cmp] (clojure.core/conj s x)))
+
+(defn disj
+  ([s x] (clojure.core/disj s x))
+  ([s x _cmp] (clojure.core/disj s x)))
+
+(defn slice
+  "Ascending seq of elements between FROM and TO inclusive under the
+  set's comparator; nil bounds are open."
+  ([s from to] (slice s from to (cmp-of s)))
+  ([s from to cmp]
+   (seq (cond->> (seq s)
+          from (drop-while (fn [x] (neg? (cmp x from))))
+          to   (take-while (fn [x] (not (pos? (cmp x to)))))))))
+
+(defn rslice
+  "Descending seq between FROM (upper) and TO (lower) inclusive."
+  ([s from to] (rslice s from to (cmp-of s)))
+  ([s from to cmp] (some-> (slice s to from cmp) reverse seq)))
+
+(defn seek
+  "Seq starting at the first element >= FROM."
+  ([s from] (seek s from (cmp-of s)))
+  ([s from cmp] (seq (drop-while (fn [x] (neg? (cmp x from))) (seq s)))))

@@ -20,8 +20,11 @@ fn check_arity(arity: &Arity, argc: usize, name: &str) -> EvalResult<()> {
 }
 
 /// Return the canonical type tag for a value (used by protocol dispatch).
+///
+/// Metadata wrappers are transparent here: `(with-meta record m)` keeps the
+/// record's type for dispatch, `instance?`, and `satisfies?`.
 pub fn type_tag_of(val: &Value) -> Arc<str> {
-    match val {
+    match val.unwrap_meta() {
         Value::Nil => Arc::from("nil"),
         Value::Bool(_) => Arc::from("Boolean"),
         Value::Long(_) => Arc::from("Long"),

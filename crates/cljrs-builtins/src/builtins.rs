@@ -3759,6 +3759,25 @@ fn builtin_dissoc(args: &[Value]) -> ValueResult<Value> {
     let meta = args[0].get_meta().cloned();
     match args[0].unwrap_meta() {
         Value::Nil => Ok(Value::Nil),
+        // Records keep their type on dissoc (JVM converts to a plain map
+        // when a basis field is removed; extension keys keep the record —
+        // we keep the record either way, which callers observe identically
+        // through get/keyword access).
+        Value::TypeInstance(ti) => {
+            let inner = ti.get();
+            let mut fields = inner.fields.clone();
+            for k in &args[1..] {
+                fields = fields.dissoc(k);
+            }
+            let v = Value::TypeInstance(GcPtr::new(cljrs_value::value::TypeInstance {
+                type_tag: inner.type_tag.clone(),
+                fields,
+            }));
+            Ok(match meta {
+                Some(m) => v.with_meta(m),
+                None => v,
+            })
+        }
         Value::Map(m) => {
             let mut result = m.clone();
             for k in &args[1..] {
@@ -3916,41 +3935,17 @@ fn builtin_get_in(args: &[Value]) -> ValueResult<Value> {
     if matches!(&args[0], Value::Nil) {
         return Ok(Value::Nil);
     }
+    // Each step is one `get`, so every container `get` supports (maps,
+    // vectors, records, sets, strings, meta-wrapped values) works here too.
     let mut current = args[0].clone();
     let default = args.get(2).cloned().unwrap_or(Value::Nil);
     for k in ValueIter::new(args[1].clone()) {
-        current = match current {
-            Value::Map(m) => m.get(&k).unwrap_or(Value::Nil),
-            Value::Vector(v) => {
-                if let Value::Long(idx) = &k {
-                    v.get().nth(*idx as usize).cloned().unwrap_or(Value::Nil)
-                } else {
-                    Value::Nil
-                }
-            }
-            Value::Str(s) => {
-                if let Value::Long(idx) = &k {
-                    match s.get().chars().nth(*idx as usize) {
-                        Some(c) => Value::Char(c),
-                        None => return Ok(default),
-                    }
-                } else {
-                    return Ok(default);
-                }
-            }
-            Value::Nil => {
-                return Ok(default);
-            }
-            _ => {
-                return Ok(default);
-            }
-        };
+        current = builtin_get(&[current, k])?;
+        if matches!(current, Value::Nil) {
+            return Ok(default);
+        }
     }
-    if current == Value::Nil {
-        Ok(default)
-    } else {
-        Ok(current)
-    }
+    Ok(current)
 }
 
 fn builtin_count(args: &[Value]) -> ValueResult<Value> {
@@ -7622,13 +7617,23 @@ fn builtin_intern_sentinel(_args: &[Value]) -> ValueResult<Value> {
 // ── not-empty ────────────────────────────────────────────────────────────────
 
 fn builtin_not_empty(args: &[Value]) -> ValueResult<Value> {
-    let is_empty = match &args[0] {
+    let is_empty = match args[0].unwrap_meta() {
         Value::Nil => true,
         Value::List(l) => l.get().is_empty(),
         Value::Vector(v) => v.get().is_empty(),
         Value::Map(m) => m.count() == 0,
         Value::Set(s) => s.count() == 0,
         Value::Str(s) => s.get().is_empty(),
+        // A cons cell or realized lazy seq always has a head.
+        Value::Cons(_) => false,
+        Value::LazySeq(_) => {
+            let mut iter = ValueIter::new(args[0].unwrap_meta().clone());
+            let empty = iter.next().is_none();
+            if let Some(err) = iter.take_error() {
+                return Err(ValueError::Other(err));
+            }
+            empty
+        }
         v => {
             return Err(ValueError::WrongType {
                 expected: "seqable",
@@ -8663,7 +8668,7 @@ fn builtin_instance_q(args: &[Value]) -> ValueResult<Value> {
         Value::Str(s) => s.get().clone(),
         _ => return Ok(Value::Bool(false)),
     };
-    let val = &args[1];
+    let val = args[1].unwrap_meta();
     let result = match expected_tag.as_ref() {
         "clojure.lang.BigInt" | "BigInt" => matches!(val, Value::BigInt(_)),
         "java.math.BigDecimal" | "BigDecimal" => matches!(val, Value::BigDecimal(_)),

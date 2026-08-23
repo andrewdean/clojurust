@@ -185,6 +185,8 @@ pub fn bind_associative(pattern: &[Form], val: &Value, env: &mut Env) -> EvalRes
     let get_val = |key: &Value| -> Value {
         match val.unwrap_meta() {
             Value::Map(m) => m.get(key).unwrap_or(Value::Nil),
+            // Records destructure like maps ({:keys [attrs]} on a defrecord).
+            Value::TypeInstance(ti) => ti.get().fields.get(key).unwrap_or(Value::Nil),
             _ => Value::Nil,
         }
     };
@@ -214,22 +216,41 @@ pub fn bind_associative(pattern: &[Form], val: &Value, env: &mut Env) -> EvalRes
             FormKind::Keyword(_) if directive_name == "keys" => {
                 if let FormKind::Vector(syms) = &v.kind {
                     for sym_form in syms {
-                        if let FormKind::Symbol(sym) = &sym_form.kind {
-                            let parsed = Symbol::parse(sym);
-                            let key =
-                                match parsed.namespace.clone().or_else(|| directive_ns.clone()) {
-                                    Some(ns) => {
-                                        Value::keyword(Keyword::qualified(ns, parsed.name.clone()))
-                                    }
-                                    None => Value::keyword(Keyword::simple(parsed.name.clone())),
-                                };
+                        // Entries may be symbols (`a`, `ns/a`), keywords
+                        // (`:a`, `:ns/a`), or auto-resolved keywords
+                        // (`::a`); all bind the NAME part, looked up by the
+                        // full (possibly qualified) keyword.
+                        let entry = match &sym_form.kind {
+                            FormKind::Symbol(sym) => {
+                                let parsed = Symbol::parse(sym);
+                                Some((parsed.name.clone(), parsed.namespace.clone()))
+                            }
+                            FormKind::Keyword(kw) => {
+                                let parsed = Keyword::parse(kw);
+                                Some((parsed.name.clone(), parsed.namespace.clone()))
+                            }
+                            FormKind::AutoKeyword(kw) => {
+                                let full = env
+                                    .globals
+                                    .resolve_auto_keyword(&env.current_ns, kw)
+                                    .map_err(EvalError::Runtime)?;
+                                let parsed = Keyword::parse(&full);
+                                Some((parsed.name.clone(), parsed.namespace.clone()))
+                            }
+                            _ => None,
+                        };
+                        if let Some((name, entry_ns)) = entry {
+                            let key = match entry_ns.or_else(|| directive_ns.clone()) {
+                                Some(ns) => Value::keyword(Keyword::qualified(ns, name.clone())),
+                                None => Value::keyword(Keyword::simple(name.clone())),
+                            };
                             let mut bound_val = get_val(&key);
                             if matches!(bound_val, Value::Nil)
-                                && let Some(d) = defaults.get(parsed.name.as_ref())
+                                && let Some(d) = defaults.get(name.as_ref())
                             {
                                 bound_val = d.clone();
                             }
-                            env.bind(parsed.name.clone(), bound_val);
+                            env.bind(name, bound_val);
                         }
                     }
                 }

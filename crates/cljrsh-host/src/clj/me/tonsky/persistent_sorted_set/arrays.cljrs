@@ -1,0 +1,49 @@
+;; Array helpers datascript expects from me.tonsky.persistent-sorted-set,
+;; expressed over cljrs object arrays.
+(ns me.tonsky.persistent-sorted-set.arrays
+  (:refer-clojure :exclude [array into-array aget aset alength]))
+
+(defn array [& xs] (object-array (vec xs)))
+
+(defn into-array [coll] (object-array (vec coll)))
+
+(defn aget [a i] (clojure.core/aget a i))
+
+(defn aset [a i v] (clojure.core/aset a i v))
+
+(defn alength [a] (clojure.core/alength a))
+
+(defn asort
+  "Sort the array in place; returns it."
+  ([a] (asort a compare))
+  ([a cmp]
+   (let [sorted (vec (sort cmp (seq a)))]
+     (dotimes [i (count sorted)]
+       (clojure.core/aset a i (nth sorted i)))
+     a)))
+
+(defn amap
+  [f a]
+  (into-array (map f (seq a))))
+
+(defn array?
+  "True when X is an object array."
+  [x]
+  (try (do (clojure.core/alength x) true)
+       (catch Exception _ false)))
+
+(defn make-array
+  "New object array of SIZE nils."
+  [size]
+  (object-array size))
+
+(defn aclone
+  [a]
+  (object-array (vec a)))
+
+(defn acopy
+  "Copy SRC into DEST starting at DEST-OFF; returns DEST."
+  [src dest dest-off]
+  (dotimes [i (clojure.core/alength src)]
+    (clojure.core/aset dest (+ dest-off i) (clojure.core/aget src i)))
+  dest)

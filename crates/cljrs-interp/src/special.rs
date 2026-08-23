@@ -344,6 +344,17 @@ pub fn parse_arity(params_form: &Form, body: &[Form]) -> EvalResult<CljxFnArity>
             ));
         }
     };
+    // Params may contain reader conditionals (e.g. `[#?(:clj ^ISeq xs :cljs xs)]`).
+    let expanded_params: Vec<Form>;
+    let param_forms: &[Form] = if param_forms
+        .iter()
+        .any(|f| matches!(f.kind, FormKind::ReaderCond { .. }))
+    {
+        expanded_params = cljrs_builtins::form::expand_reader_conds(param_forms);
+        &expanded_params
+    } else {
+        param_forms
+    };
 
     let mut params: Vec<Arc<str>> = Vec::new();
     let mut param_hints: Vec<Option<TypeHint>> = Vec::new();
@@ -1522,11 +1533,25 @@ fn parse_require_spec_form(form: &Form) -> Result<RequireSpec, String> {
                 refer: RequireRefer::None,
             })
         }
-        FormKind::Vector(items) => {
+        FormKind::Vector(raw_items) => {
+            // Expand reader conditionals first so both `#?` in any position
+            // (`[#?(:cljs cljs.core :clj clojure.core) :as c]`) and splicing
+            // `#?@(... [:refer [...]])` forms resolve before parsing.
+            let expanded_items: Vec<Form>;
+            let items: &[Form] = if raw_items
+                .iter()
+                .any(|f| matches!(f.kind, FormKind::ReaderCond { .. }))
+            {
+                expanded_items = expand_reader_conds(raw_items);
+                &expanded_items
+            } else {
+                raw_items
+            };
             if items.is_empty() {
                 return Err("require spec vector must not be empty".into());
             }
-            let (ns, version) = match &items[0].kind {
+            let head = &items[0];
+            let (ns, version) = match &head.kind {
                 FormKind::Symbol(s) => {
                     let sym = cljrs_value::Symbol::parse(s);
                     (sym.name.clone(), sym.version.clone())

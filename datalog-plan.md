@@ -107,6 +107,21 @@ default, and it stays contained inside the store crate.
 1. **Vendor datascript** as `cljrs` source: in-memory `q` for
    read-model queries, immediate removal of the pod fetch from the
    common path, and the cheap test of how this library family runs.
+   **Done 2026-08-23.** datascript 1.8.1 runs on cljrs: the full query
+   engine over plain collections (joins, predicates, fn bindings, not,
+   rules, aggregates, collection/tuple ins) and the in-memory DB path
+   (transact with upserts and unique identity, index queries, pull with
+   ref navigation). Port cost: ~30 small `:cljrsh` reader arms in the
+   vendored sources plus a pure-Clojure persistent-sorted-set shim, and
+   eight genuine cljrs runtime fixes the spike surfaced (reader
+   conditionals in require specs and fn params, params shadowing the
+   fn's own name, meta-transparent type dispatch, get-in/dissoc/
+   destructuring on records, JVM array identity equality, not-empty on
+   cons/lazy-seq). Known gaps: the `entity` facade needs ILookup-style
+   dispatch (use `pull`), and `slice` is O(n) in the shim. Conformance
+   case 079 locks the port in. Verdict for phase 4: the datalevin port
+   is viable; the same fix classes will recur and the runtime absorbed
+   all of them.
 2. **`cljrs-lmdb`**: native crate exposing environments, named DBIs,
    read/write transactions, cursors, and ranges. Substrate decision
    inside this phase: bind dlmdb (preferred: rank, count-range, and

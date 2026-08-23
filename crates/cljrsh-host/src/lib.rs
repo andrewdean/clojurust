@@ -56,6 +56,40 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     ("clojure.java.io", include_str!("clj/clojure/java/io.cljrs")),
     ("tf", include_str!("clj/tf.cljrs")),
     ("kustomize", include_str!("clj/kustomize.cljrs")),
+    // Vendored from datascript 1.8.1 (EPL-1.0, github.com/tonsky/datascript)
+    // with :cljrsh reader branches where the :clj branches assume the JVM.
+    // The me.tonsky.persistent-sorted-set namespaces are cljrsh shims, not
+    // vendored source.
+    (
+        "me.tonsky.persistent-sorted-set",
+        include_str!("clj/me/tonsky/persistent_sorted_set.cljrs"),
+    ),
+    (
+        "me.tonsky.persistent-sorted-set.arrays",
+        include_str!("clj/me/tonsky/persistent_sorted_set/arrays.cljrs"),
+    ),
+    ("datascript.util", include_str!("clj/datascript/util.cljc")),
+    ("datascript.lru", include_str!("clj/datascript/lru.cljc")),
+    ("datascript.inline", include_str!("clj/datascript/inline.clj")),
+    ("datascript.db", include_str!("clj/datascript/db.cljc")),
+    ("datascript.parser", include_str!("clj/datascript/parser.cljc")),
+    (
+        "datascript.built-ins",
+        include_str!("clj/datascript/built_ins.cljc"),
+    ),
+    (
+        "datascript.pull-parser",
+        include_str!("clj/datascript/pull_parser.cljc"),
+    ),
+    (
+        "datascript.pull-api",
+        include_str!("clj/datascript/pull_api.cljc"),
+    ),
+    (
+        "datascript.impl.entity",
+        include_str!("clj/datascript/impl/entity.cljc"),
+    ),
+    ("datascript.query", include_str!("clj/datascript/query.cljc")),
 ];
 
 /// Register every native namespace and compat source into `globals`.

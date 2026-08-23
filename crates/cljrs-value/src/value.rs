@@ -437,6 +437,11 @@ impl PartialEq for Value {
         {
             return true;
         }
+        // Arrays compare by identity, matching JVM Java-array semantics:
+        // (= a a) is true for the same array, never structural.
+        if let (Value::ObjectArray(a), Value::ObjectArray(b)) = (self, other) {
+            return GcPtr::ptr_eq(a, b);
+        }
         // Realize lazy sequences before comparing.
         // A lazy-seq that realizes to nil is an empty sequence, which is equal
         // to both nil and any empty sequential collection (matching Clojure).

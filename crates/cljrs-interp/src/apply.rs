@@ -368,16 +368,13 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
             ))),
         },
         // deftype/defrecord instances: (.-field x) and bare (.field x) read
-        // fields (JVM interop field access).
+        // fields (JVM interop field access). An absent field reads as nil:
+        // `map->Record` accepts partial maps, and the JVM fills missing
+        // basis fields with nil rather than erroring.
         Value::TypeInstance(ti) => {
             let field = method.strip_prefix('-').unwrap_or(method);
             let key = Value::keyword(cljrs_value::Keyword::simple(field));
-            ti.get().fields.get(&key).ok_or_else(|| {
-                EvalError::Runtime(format!(
-                    ".{method} not supported on {} (no such field)",
-                    ti.get().type_tag
-                ))
-            })
+            Ok(ti.get().fields.get(&key).unwrap_or(Value::Nil))
         }
         Value::NativeObject(obj) => {
             if let Some(r) = cljrs_builtins::javamap::dispatch_any(obj.get(), method, args) {
@@ -628,9 +625,6 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
         #[cfg(not(feature = "no-gc"))]
         let _call_frame = cljrs_gc::push_alloc_frame();
 
-        // Bind params.
-        bind_fn_params(arity, &current_args, &mut env)?;
-
         // Self-reference for named functions: bind only when self_ptr was
         // wired (eval_fn does this for (fn name ...) / defn). Protocol METHOD
         // fns carry a name for stack traces but must NOT self-bind — inside a
@@ -638,11 +632,18 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
         // dispatch fn (JVM semantics); self-binding sent every same-name
         // protocol call back into the same method body (infinite recursion in
         // malli's composite registry).
+        //
+        // Bound BEFORE the params so a parameter that shares the function's
+        // name shadows the self-reference, matching Clojure
+        // (datascript's `(defn q [q & inputs] ...)` relies on this).
         if let Some(ref name) = f.name
             && let Some(ref p) = f.self_ptr
         {
             env.bind(name.clone(), Value::Fn(p.clone()));
         }
+
+        // Bind params.
+        bind_fn_params(arity, &current_args, &mut env)?;
 
         // Eval body, catching Recur.
         // Under no-gc: push a scratch region; evaluate all-but-last in it,
