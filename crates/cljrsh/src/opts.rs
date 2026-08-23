@@ -17,6 +17,9 @@ pub enum Program {
     FileOrTask(String),
     /// `-x FN`: call FN with the remaining args parsed by babashka.cli.
     Exec(String),
+    /// `-m NS` (or `-m NS/FN`): require NS and apply its `-main` (or FN)
+    /// to the remaining args as strings.
+    Main(String),
     /// Interactive REPL (explicit `--repl`, or no program on a tty).
     Repl,
     /// Read the program from stdin (no program given, stdin not a tty).
@@ -66,6 +69,7 @@ Usage: cljrsh [opts] [-e EXPR | -f FILE | FILE] [args...]
 Options:
   -e, --eval EXPR       evaluate an expression (prints a non-nil result)
   -x, --exec FN         call FN with remaining args parsed by babashka.cli
+  -m, --main NS         require NS and apply NS/-main (or NS/FN) to the args
   -f, --file FILE       run a script file
   -i                    bind *input* to a lazy seq of stdin lines
   -I                    bind *input* to the seq of EDN values from stdin
@@ -77,6 +81,16 @@ Options:
       --repl            start the interactive REPL
   -v, --version         print version
   -h, --help            this help
+
+Subcommands (when not shadowed by a task of the same name):
+  tasks | run TASK      list / run bb.edn tasks
+  prepare               download :deps ahead of time
+  uberscript OUT (-m NS | FILE)
+                        bundle a program and its source dependencies into
+                        one self-contained script
+  nrepl-server [ADDR]   start an nREPL server (default 127.0.0.1:1667)
+  socket-repl [ADDR]    start a plain socket REPL (default 127.0.0.1:1666)
+  describe | print-deps runtime / dependency info as EDN
 
 With no program: starts a REPL on a terminal, otherwise reads the script
 from stdin. Remaining arguments are bound to *command-line-args*.
@@ -132,6 +146,13 @@ pub fn parse(argv: &[String]) -> Result<Opts, String> {
                     .get(i + 1)
                     .ok_or_else(|| format!("{arg} requires an expression"))?;
                 program = Some(Program::Eval(expr.clone()));
+                i += 2;
+            }
+            "-m" | "--main" if program.is_none() => {
+                let m = argv
+                    .get(i + 1)
+                    .ok_or_else(|| format!("{arg} requires a namespace"))?;
+                program = Some(Program::Main(m.clone()));
                 i += 2;
             }
             "-x" | "--exec" if program.is_none() => {
