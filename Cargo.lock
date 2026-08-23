@@ -1572,6 +1572,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-lmdb"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "tempfile",
+]
+
+[[package]]
 name = "cljrs-logging"
 version = "0.1.0"
 

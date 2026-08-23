@@ -1,0 +1,13 @@
+[package]
+name = "cljrs-lmdb"
+version = "0.1.0"
+edition = "2024"
+license = "EPL-1.0"
+description = "Safe wrapper over vendored dlmdb (datalevin's LMDB fork): environments, DBIs, transactions, cursors, ranges, and the counted-database rank/count extensions"
+links = "dlmdb"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+tempfile = "3"

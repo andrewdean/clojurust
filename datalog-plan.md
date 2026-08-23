@@ -127,6 +127,18 @@ default, and it stays contained inside the store crate.
    inside this phase: bind dlmdb (preferred: rank, count-range, and
    sampling come free) or stock LMDB via heed (fallback: sampling is
    hand-rolled in phase 3).
+   **Done 2026-08-23, substrate: dlmdb.** Evaluation: dlmdb keeps the
+   full stock LMDB API, compiles clean as two C files, and its
+   extensions are exactly the optimizer's needs (count_all,
+   count_range with MDB_COUNT_*_INCL bound flags, get_rank,
+   key_rank, prefix compression, in-memory mode). License is the
+   OpenLDAP Public License 2.8, not BSD-3 as the survey said. Vendored
+   at d79120e2 under crates/cljrs-lmdb/lmdb with a hand-written FFI
+   subset and a safe wrapper (zero-copy txn-scoped reads, in-process
+   writer mutex, inclusive RangeIter, dupsort cursors). Eight tests
+   including snapshot isolation and a re-exec cross-process reader.
+   Custom comparators deliberately unexposed: phase 3 uses
+   order-preserving key encoding over the default byte comparator.
 3. **`cljrs-datalog-store`**: implement datalevin's `IStore`/lmdb
    protocol surface in Rust: EAV/AVE/VAE orderings as sorted keys,
    native serde (replacing bits/nippy/zstd-jni/FastPFOR), sampling

@@ -32,6 +32,7 @@ members = [
     "crates/cljrs-bencode",
     "crates/cljrs-qt",
     "crates/cljrs-process",
+    "crates/cljrs-lmdb",
     "crates/cljrsh",
     "crates/cljrsh-host",
     "crates/cljrsh-nu",

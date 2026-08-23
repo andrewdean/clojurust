@@ -166,8 +166,11 @@ fn required_namespaces(src: &str) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
-/// `'x` reads as `(quote x)` — strip it.
+/// `'x` reads as `FormKind::Quote` (or a literal `(quote x)` list) — strip it.
 fn unquote(form: &Form) -> &Form {
+    if let FormKind::Quote(inner) = &form.kind {
+        return inner;
+    }
     if let FormKind::List(items) = &form.kind
         && items.len() == 2
         && matches!(&items[0].kind, FormKind::Symbol(s) if s == "quote")
