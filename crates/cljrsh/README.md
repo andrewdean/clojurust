@@ -33,6 +33,10 @@ or a smaller binary: `nu` (embedded nushell), `aws` (AWS client), and `k8s`
 (Kubernetes client). For example, `--no-default-features` builds the core
 shell alone.
 
+New here? The [tutorial series](../../docs/tutorials/README.md) walks from
+install through the REPL, scripting, Kubernetes, AWS, Terraform, schemas,
+and configuration, with every example verified against the tree.
+
 ## Quick start
 
 Evaluate an expression, run a script, or pipe a program through stdin:

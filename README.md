@@ -80,7 +80,9 @@ cljrsh                               # REPL with tab completion and clojure.repl
 
 Scripts written for babashka generally run unchanged: the CLI grammar,
 `babashka.*` namespaces, reader feature `:bb`, and exit-code conventions all
-match. See the [cljrsh README](crates/cljrsh/README.md) for the full tour.
+match. See the [cljrsh README](crates/cljrsh/README.md) for the full tour,
+and the [tutorial series](docs/tutorials/README.md) for a guided path from
+install through Kubernetes, AWS, Terraform, schemas, and configuration.
 
 ---
 

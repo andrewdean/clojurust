@@ -1560,6 +1560,16 @@ edition = "2024"
 {native_deps}"#,
     );
     std::fs::write(harness_dir.join("Cargo.toml"), cargo_toml)?;
+    // Seed the harness lockfile from the workspace lock in path-dep mode:
+    // without it cargo re-locks shared deps to the newest compatible
+    // versions, which may not be in the local cache, and the --offline
+    // build fails to download them.
+    if let HarnessDeps::Workspace(root) = &deps {
+        let lock = root.join("Cargo.lock");
+        if lock.exists() {
+            let _ = std::fs::copy(&lock, harness_dir.join("Cargo.lock"));
+        }
+    }
 
     // Write build.rs — tells Cargo to link our object file.
     let obj_abs = std::fs::canonicalize(&obj_path)?;
@@ -1858,7 +1868,18 @@ fn link_with_cargo(harness_dir: &Path, out_path: &Path, offline: bool) -> AotRes
     if offline {
         cmd.arg("--offline");
     }
-    let output = cmd.current_dir(harness_dir).output()?;
+    let mut output = cmd.current_dir(harness_dir).output()?;
+
+    if !output.status.success() && offline {
+        // The local cache can miss a re-locked version; retry with the
+        // network before giving up.
+        eprintln!("[aot] offline harness build failed; retrying online...");
+        output = std::process::Command::new("cargo")
+            .arg("build")
+            .arg("--release")
+            .current_dir(harness_dir)
+            .output()?;
+    }
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
