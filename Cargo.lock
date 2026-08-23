@@ -1130,6 +1130,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-process"
+version = "0.1.0"
+dependencies = [
+ "cljrs-env",
+ "cljrs-gc",
+ "cljrs-interop",
+ "cljrs-interp",
+ "cljrs-reader",
+ "cljrs-value",
+]
+
+[[package]]
 name = "cljrs-reader"
 version = "0.1.0"
 dependencies = [
@@ -1237,6 +1249,28 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "cljrsh"
+version = "0.1.0"
+dependencies = [
+ "cljrs-async",
+ "cljrs-builtins",
+ "cljrs-charset",
+ "cljrs-env",
+ "cljrs-gc",
+ "cljrs-interp",
+ "cljrs-io",
+ "cljrs-process",
+ "cljrs-reader",
+ "cljrs-stdlib",
+ "cljrs-types",
+ "cljrs-value",
+ "libc",
+ "rustyline",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -1,0 +1,31 @@
+[package]
+name = "cljrsh"
+version = "0.1.0"
+edition = "2024"
+description = "cljrsh — Clojure Rust Shell: a babashka-style scripting binary built on clojurust"
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cljrsh"
+path = "src/main.rs"
+
+[dependencies]
+cljrs-stdlib   = { workspace = true }
+cljrs-interp   = { workspace = true }
+cljrs-builtins = { workspace = true }
+cljrs-env      = { workspace = true }
+cljrs-value    = { workspace = true }
+cljrs-reader   = { workspace = true }
+cljrs-types    = { workspace = true }
+cljrs-gc       = { workspace = true }
+cljrs-async    = { workspace = true }
+cljrs-io       = { workspace = true }
+cljrs-charset  = { workspace = true }
+cljrs-process  = { workspace = true }
+tokio = { version = "1.50.0", features = ["rt", "sync", "time", "macros"] }
+rustyline = { workspace = true }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
