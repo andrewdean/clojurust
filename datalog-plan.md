@@ -56,6 +56,42 @@ with Rust plays each runtime to its strength.
   Eclipse licenses; record the version difference in COPYING when
   vendoring.
 
+## Landscape survey (2026-08-23)
+
+A crate survey before starting confirmed the port and altered the
+storage substrate:
+
+- **No whole-engine replacement exists.** CozoDB is abandoned (last
+  release 2023-12, no maintainer response since 2024), Mozilla Mentat
+  is archived with no revived fork, minigraf is a 30-star single-author
+  project in a foreign dialect, and oxigraph/terminusdb-store are the
+  wrong data model. The logic-engine family (ascent, crepe, datafrog,
+  egglog) remains compile-time rules without storage.
+- **Plan-altering find: dlmdb and dtlv.** Since 0.10.1 datalevin's
+  storage is not stock LMDB but dlmdb
+  (github.com/datalevin/dlmdb, BSD-3-Clause, active), huahaiy's C fork
+  adding exactly what the store crate needs: O(log n) rank and
+  count-range lookups, sparse sampling for optimizer statistics,
+  prefix compression, optimized dup iteration, and an in-memory mode.
+  The dtlvnative repo layers a dtlv C wrapper implementing datalevin's
+  iterator, counter, and sampler surface. Phase 2 therefore evaluates
+  binding dlmdb (a forked -sys crate plus a heed-style safe wrapper)
+  before falling back to stock LMDB with hand-rolled sampling. Risk:
+  dlmdb is single-maintainer; mitigation: it stays LMDB-API-compatible,
+  so the fallback is mechanical.
+- **No pure-Rust engine supports multi-process readers** as of
+  2026-08: redb and fjall exclude it explicitly, canopydb and the
+  lmdb-rs-core reimplementation are immature. The small C dependency
+  stays, and it is the most boring one available.
+- **Helper picks**: roaring (bitmaps), bitpacking (integer batches),
+  quick_cache or moka (LRU), zstd bindings only if dlmdb's prefix
+  compression proves insufficient. storekey and memcomparable are
+  reference reading for the order-preserving key codec, which is
+  hand-written to match datalevin's key semantics.
+- **Port from the 1.0.x line.** Datalevin reached 1.0.0 on 2026-07-20;
+  1.0.2 added late-clause costing, range fusion, and parallel index
+  scans. The assessed commit `78b199e8` is post-1.0.2.
+
 ## Why LMDB and not redb here
 
 cljrsh's access pattern is many short-lived processes sharing one
@@ -71,12 +107,17 @@ default, and it stays contained inside the store crate.
 1. **Vendor datascript** as `cljrs` source: in-memory `q` for
    read-model queries, immediate removal of the pod fetch from the
    common path, and the cheap test of how this library family runs.
-2. **`cljrs-lmdb`**: native crate over heed exposing environments,
-   named DBIs, read/write transactions, cursors, and ranges.
+2. **`cljrs-lmdb`**: native crate exposing environments, named DBIs,
+   read/write transactions, cursors, and ranges. Substrate decision
+   inside this phase: bind dlmdb (preferred: rank, count-range, and
+   sampling come free) or stock LMDB via heed (fallback: sampling is
+   hand-rolled in phase 3).
 3. **`cljrs-datalog-store`**: implement datalevin's `IStore`/lmdb
    protocol surface in Rust: EAV/AVE/VAE orderings as sorted keys,
    native serde (replacing bits/nippy/zstd-jni/FastPFOR), sampling
-   for the optimizer.
+   for the optimizer. With dlmdb underneath, this shrinks toward
+   serde, schema, and transaction logic; the dtlv C layer is the
+   reference implementation of the iterator and sampler surface.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
