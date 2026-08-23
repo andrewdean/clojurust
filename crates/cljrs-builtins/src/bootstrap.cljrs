@@ -1283,6 +1283,11 @@
            (finally
              (close ~name)))))))
 
+(defmacro ..
+  "Chained interop: (.. x foo (bar y)) => (. (. x foo) (bar y))."
+  ([x form] `(. ~x ~form))
+  ([x form & more] `(.. (. ~x ~form) ~@more)))
+
 (defn with-redefs-fn
   "Temporarily redefines Vars during a call to func.  Each val of
   binding-map will replace the root value of its key which must be

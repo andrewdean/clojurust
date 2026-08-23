@@ -31,6 +31,7 @@ pub fn type_tag_of(val: &Value) -> Arc<str> {
         Value::Ratio(_) => Arc::from("Ratio"),
         Value::Char(_) => Arc::from("Character"),
         Value::Str(_) => Arc::from("String"),
+        Value::Pattern(_) => Arc::from("Pattern"),
         Value::Keyword(_) => Arc::from("Keyword"),
         Value::Symbol(_) => Arc::from("Symbol"),
         Value::List(_) | Value::Cons(_) | Value::LazySeq(_) => Arc::from("List"),
@@ -55,6 +56,34 @@ pub fn type_tag_of(val: &Value) -> Arc<str> {
     }
 }
 
+/// The dispatch tags a class designator in an `extend*` form maps to.
+/// JVM and cljs class names normalize to cljrs value tags (last
+/// dot-segment, then aliases); `Number` fans out to every numeric tag.
+pub fn dispatch_tags_for_class(class_sym: &str) -> Vec<Arc<str>> {
+    let last = class_sym.rsplit('.').next().unwrap_or(class_sym);
+    let tags: &[&str] = match last {
+        "Integer" | "Short" | "Byte" => &["Long"],
+        "Float" => &["Double"],
+        "Number" => &["Long", "Double", "BigInt", "BigDecimal", "Ratio"],
+        "BigInteger" => &["BigInt"],
+        "IPersistentVector" | "PersistentVector" | "APersistentVector" | "MapEntry" => {
+            &["Vector"]
+        }
+        "IPersistentMap" | "PersistentArrayMap" | "PersistentHashMap" | "APersistentMap" => {
+            &["Map"]
+        }
+        "IPersistentSet" | "PersistentHashSet" | "PersistentTreeSet" | "APersistentSet" => {
+            &["Set"]
+        }
+        "IPersistentList" | "PersistentList" | "ISeq" | "ASeq" | "LazySeq" | "Cons"
+        | "Seqable" => &["List"],
+        "IPersistentCollection" => &["List", "Vector", "Map", "Set"],
+        "IFn" | "AFunction" => &["Fn"],
+        other => return vec![Arc::from(other)],
+    };
+    tags.iter().map(|t| Arc::from(*t)).collect()
+}
+
 /// Allocation-free check that `val`'s protocol dispatch tag equals `tag`.
 ///
 /// Must agree exactly with [`type_tag_of`] — it exists so inline caches
@@ -69,6 +98,7 @@ pub fn type_tag_matches(val: &Value, tag: &str) -> bool {
             // allocating.  `type_tag_of` is the source of truth.
             match val {
                 Value::Nil => "nil",
+                Value::Pattern(_) => "Pattern",
                 Value::Bool(_) => "Boolean",
                 Value::Long(_) => "Long",
                 Value::Double(_) => "Double",

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cljrs_value::{NativeObject, NativeObjectBox, Value, ValueResult};
+use cljrs_value::error::ValueError;
 
 #[derive(Debug)]
 pub struct JavaHashMap {
@@ -165,6 +166,9 @@ pub fn dispatch_any(
     if obj.downcast_ref::<JavaDateFormatter>().is_some() {
         return dispatch_date_formatter(method, args);
     }
+    if let Some(sb) = obj.downcast_ref::<JavaStringBuilder>() {
+        return dispatch_string_builder(sb, method, args);
+    }
     None
 }
 
@@ -308,4 +312,77 @@ pub fn builtin_instant_of_epoch_milli(args: &[Value]) -> ValueResult<Value> {
 /// `(MapEntry. k v)` — clojure.lang.MapEntry constructor.
 pub fn builtin_map_entry_new(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::map_entry(args[0].clone(), args[1].clone()))
+}
+
+// ── java.lang.StringBuilder (honeysql's join, string-building :clj paths) ────
+
+#[derive(Debug)]
+pub struct JavaStringBuilder {
+    pub buf: Mutex<String>,
+}
+
+impl NativeObject for JavaStringBuilder {
+    fn type_tag(&self) -> &str {
+        "StringBuilder"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaStringBuilder {
+    fn trace(&self, _visitor: &mut cljrs_gc::MarkVisitor) {}
+}
+
+pub fn builtin_string_builder_new(args: &[Value]) -> ValueResult<Value> {
+    let init = match args.first() {
+        Some(Value::Str(s)) => s.get().clone(),
+        _ => String::new(),
+    };
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaStringBuilder {
+            buf: Mutex::new(init),
+        },
+    )))
+}
+
+fn str_content(v: &Value) -> String {
+    match v {
+        Value::Nil => String::new(),
+        Value::Str(s) => s.get().to_string(),
+        Value::Char(c) => c.to_string(),
+        other => format!("{other}"),
+    }
+}
+
+fn dispatch_string_builder(
+    sb: &JavaStringBuilder,
+    method: &str,
+    args: &[Value],
+) -> Option<ValueResult<Value>> {
+    Some(match method {
+        "append" => {
+            let mut buf = sb.buf.lock().unwrap();
+            for a in args {
+                buf.push_str(&str_content(a));
+            }
+            // Chaining callers use doto; the mutation is the point.
+            Ok(Value::Nil)
+        }
+        "toString" => Ok(Value::string(sb.buf.lock().unwrap().clone())),
+        "length" => Ok(Value::Long(sb.buf.lock().unwrap().chars().count() as i64)),
+        "setLength" => {
+            if let Some(Value::Long(n)) = args.first() {
+                let mut buf = sb.buf.lock().unwrap();
+                let keep: String = buf.chars().take(*n as usize).collect();
+                *buf = keep;
+            }
+            Ok(Value::Nil)
+        }
+        _ => {
+            return Some(Err(ValueError::Other(format!(
+                ".{method} not supported on StringBuilder"
+            ))));
+        }
+    })
 }

@@ -327,6 +327,16 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
         return cljrs_builtins::javamap::iterator_of(target)
             .map_err(|e| EvalError::Runtime(e.to_string()));
     }
+    // Universal toString: every value prints. NativeObjects fall through
+    // to their own dispatch (a StringBuilder's toString is its content,
+    // not its object repr).
+    if method == "toString" && !matches!(target, Value::NativeObject(_)) {
+        return Ok(Value::string(match target {
+            Value::Str(s) => s.get().to_string(),
+            Value::Char(c) => c.to_string(),
+            other => format!("{other}"),
+        }));
+    }
     // Boxed-number interop: (.longValue n) etc.
     match (method, target) {
         ("longValue" | "intValue", Value::Long(n)) => return Ok(Value::Long(*n)),
@@ -456,7 +466,18 @@ fn dispatch_string_method(method: &str, s: &str, args: &[Value]) -> EvalResult {
             };
             Ok(Value::Str(GcPtr::new(result.to_string())))
         }
+        // Optional Locale args (ignored: Rust's case mapping is unconditional).
         "toUpperCase" => Ok(Value::Str(GcPtr::new(s.to_uppercase()))),
+        "concat" => {
+            let mut out = s.to_string();
+            for a in args {
+                match a {
+                    Value::Str(t) => out.push_str(t.get()),
+                    other => out.push_str(&format!("{other}")),
+                }
+            }
+            Ok(Value::Str(GcPtr::new(out)))
+        }
         "toLowerCase" => Ok(Value::Str(GcPtr::new(s.to_lowercase()))),
         "trim" => Ok(Value::Str(GcPtr::new(s.trim().to_string()))),
         "replace" => {
