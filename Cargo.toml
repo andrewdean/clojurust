@@ -30,6 +30,7 @@ members = [
     "crates/cljrs-lsp",
     "crates/cljrs-nrepl",
     "crates/cljrs-bencode",
+    "crates/cljrs-qt",
     "crates/cljrs-process",
     "crates/cljrsh",
     "crates/cljrsh-host",
@@ -77,6 +78,7 @@ cljrs-charset      = { path = "crates/cljrs-charset",      version = "0.1.0" }
 cljrs-lsp          = { path = "crates/cljrs-lsp",          version = "0.1.0" }
 cljrs-nrepl        = { path = "crates/cljrs-nrepl",        version = "0.1.0" }
 cljrs-bencode      = { path = "crates/cljrs-bencode",      version = "0.1.0" }
+cljrs-qt           = { path = "crates/cljrs-qt",           version = "0.1.0" }
 cljrs-process      = { path = "crates/cljrs-process",      version = "0.1.0" }
 cljrsh-host        = { path = "crates/cljrsh-host",        version = "0.1.0" }
 cljrsh-nu          = { path = "crates/cljrsh-nu",          version = "0.1.0" }

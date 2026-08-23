@@ -1643,6 +1643,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-qt"
+version = "0.1.0"
+dependencies = [
+ "cljrs-bencode",
+ "cljrs-eval",
+ "cljrs-gc",
+ "cljrs-nrepl",
+ "cljrs-stdlib",
+ "cljrs-value",
+]
+
+[[package]]
 name = "cljrs-reader"
 version = "0.1.0"
 dependencies = [
