@@ -228,8 +228,29 @@ impl WorkerState {
         }
     }
 
-    fn api(&self, kind: &KindRef, ns: Option<&str>) -> Result<Api<DynamicObject>, String> {
-        let (ar, scope) = self.resolve(kind)?;
+    /// Re-run API discovery (CRDs may have been installed since connect).
+    async fn refresh_discovery(&mut self) -> Result<(), String> {
+        self.discovery = Discovery::new(self.client.clone())
+            .run()
+            .await
+            .map_err(|e| format!("api discovery: {e}"))?;
+        Ok(())
+    }
+
+    /// Resolve, refreshing the discovery cache once on a miss so kinds from
+    /// CRDs installed after connect (or by this very session) still resolve.
+    async fn resolve_fresh(&mut self, kind: &KindRef) -> Result<(ApiResource, Scope), String> {
+        match self.resolve(kind) {
+            Ok(found) => Ok(found),
+            Err(first_miss) => {
+                self.refresh_discovery().await?;
+                self.resolve(kind).map_err(|_| first_miss)
+            }
+        }
+    }
+
+    async fn api(&mut self, kind: &KindRef, ns: Option<&str>) -> Result<Api<DynamicObject>, String> {
+        let (ar, scope) = self.resolve_fresh(kind).await?;
         Ok(match (scope, ns) {
             (Scope::Namespaced, Some(ns)) => Api::namespaced_with(self.client.clone(), ns, &ar),
             (Scope::Namespaced, None) => {
@@ -249,7 +270,7 @@ impl WorkerState {
     async fn handle(&mut self, cmd: Cmd) -> Reply {
         match cmd {
             Cmd::Get { kind, name, ns } => {
-                let api = self.api(&kind, ns.as_deref())?;
+                let api = self.api(&kind, ns.as_deref()).await?;
                 let obj = api.get(&name).await.map_err(fmt_err)?;
                 serde_json::to_value(obj).map_err(|e| e.to_string())
             }
@@ -260,7 +281,7 @@ impl WorkerState {
                 label_selector,
                 field_selector,
             } => {
-                let (ar, scope) = self.resolve(&kind)?;
+                let (ar, scope) = self.resolve_fresh(&kind).await?;
                 let api: Api<DynamicObject> = if all_namespaces || scope == Scope::Cluster {
                     Api::all_with(self.client.clone(), &ar)
                 } else {
@@ -286,11 +307,17 @@ impl WorkerState {
             }
             Cmd::Apply { manifest } => {
                 let (gvk, name, ns) = manifest_coords(&manifest)?;
-                let (ar, scope) = self
-                    .discovery
-                    .resolve_gvk(&gvk)
-                    .map(|(ar, caps)| (ar, caps.scope))
-                    .ok_or_else(|| format!("cluster does not serve {gvk:?}"))?;
+                let resolved = match self.discovery.resolve_gvk(&gvk) {
+                    Some((ar, caps)) => Some((ar, caps.scope)),
+                    None => {
+                        self.refresh_discovery().await?;
+                        self.discovery
+                            .resolve_gvk(&gvk)
+                            .map(|(ar, caps)| (ar, caps.scope))
+                    }
+                };
+                let (ar, scope) =
+                    resolved.ok_or_else(|| format!("cluster does not serve {gvk:?}"))?;
                 let api: Api<DynamicObject> = match (scope, ns.as_deref()) {
                     (Scope::Namespaced, Some(ns)) => {
                         Api::namespaced_with(self.client.clone(), ns, &ar)
@@ -316,7 +343,7 @@ impl WorkerState {
                 ns,
                 patch,
             } => {
-                let api = self.api(&kind, ns.as_deref())?;
+                let api = self.api(&kind, ns.as_deref()).await?;
                 let obj = api
                     .patch(&name, &PatchParams::default(), &Patch::Merge(&patch))
                     .await
@@ -324,7 +351,7 @@ impl WorkerState {
                 serde_json::to_value(obj).map_err(|e| e.to_string())
             }
             Cmd::Delete { kind, name, ns } => {
-                let api = self.api(&kind, ns.as_deref())?;
+                let api = self.api(&kind, ns.as_deref()).await?;
                 api.delete(&name, &DeleteParams::default())
                     .await
                     .map_err(fmt_err)?;
