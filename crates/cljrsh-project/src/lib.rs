@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use cljrs_reader::{Form, FormKind};
 
 pub mod maven;
+pub mod pods;
 
 /// A parsed project file.
 #[derive(Debug)]
@@ -33,6 +34,14 @@ pub struct Project {
     pub tasks: Vec<TaskDef>,
     /// `:tasks`' `:init` form, evaluated once before any task body.
     pub init: Option<Form>,
+    /// `:pods` — registry pods to load before evaluation: (name, version).
+    pub pods: Vec<(String, String)>,
+    /// `:tasks`-level `:requires` libspec forms, required before any task.
+    pub requires: Vec<Form>,
+    /// `:tasks`-level `:enter` / `:leave` hooks, run around every task
+    /// (unless a task defines its own).
+    pub enter: Option<Form>,
+    pub leave: Option<Form>,
 }
 
 /// A `:deps` coordinate.
@@ -58,6 +67,12 @@ pub struct TaskDef {
     pub body: Form,
     /// `:private` tasks are hidden from `cljrsh tasks`.
     pub private: bool,
+    /// Task-local `:requires` libspec forms.
+    pub requires: Vec<Form>,
+    /// Task-local `:enter` / `:leave` hooks (override the `:tasks`-level
+    /// ones for this task).
+    pub enter: Option<Form>,
+    pub leave: Option<Form>,
 }
 
 #[derive(Debug)]
@@ -124,6 +139,10 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
         deps: Vec::new(),
         tasks: Vec::new(),
         init: None,
+        pods: Vec::new(),
+        requires: Vec::new(),
+        enter: None,
+        leave: None,
     };
 
     for pair in entries.chunks(2) {
@@ -152,11 +171,48 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
             FormKind::Keyword(key) if key == "deps" => {
                 parse_deps(v, &mut project)?;
             }
-            // :deps, :pods — later milestones; ignore unknown keys like bb.
+            FormKind::Keyword(key) if key == "pods" => {
+                parse_pods(v, &mut project)?;
+            }
+            // Ignore unknown keys, like bb.
             _ => {}
         }
     }
     Ok(project)
+}
+
+/// `:pods {org.babashka/go-sqlite3 {:version "0.1.0"}}`
+fn parse_pods(pods_form: &Form, project: &mut Project) -> Result<(), ProjectError> {
+    let FormKind::Map(entries) = &pods_form.kind else {
+        return Err(ProjectError::Shape(":pods must be a map".to_string()));
+    };
+    for pair in entries.chunks(2) {
+        let [k, v] = pair else {
+            return Err(ProjectError::Shape(":pods has an odd entry".to_string()));
+        };
+        let FormKind::Symbol(name) = &k.kind else {
+            return Err(ProjectError::Shape(
+                ":pods keys must be qualified symbols".to_string(),
+            ));
+        };
+        let FormKind::Map(coord) = &v.kind else {
+            return Err(ProjectError::Shape(format!(
+                "pod {name}: coordinate must be a map with :version"
+            )));
+        };
+        let version = coord
+            .chunks(2)
+            .find(|p| matches!(&p[0].kind, FormKind::Keyword(key) if key == "version"))
+            .and_then(|p| match &p[1].kind {
+                FormKind::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                ProjectError::Shape(format!("pod {name}: missing :version string"))
+            })?;
+        project.pods.push((name.clone(), version));
+    }
+    Ok(())
 }
 
 fn parse_deps(deps_form: &Form, project: &mut Project) -> Result<(), ProjectError> {
@@ -285,7 +341,17 @@ fn parse_tasks(tasks_form: &Form, project: &mut Project) -> Result<(), ProjectEr
             FormKind::Keyword(key) if key == "init" => {
                 project.init = Some(v.clone());
             }
-            // :requires / :enter / :leave at the tasks level: later milestone.
+            FormKind::Keyword(key) if key == "requires" => {
+                if let FormKind::Vector(items) | FormKind::List(items) = &v.kind {
+                    project.requires.extend(items.iter().cloned());
+                }
+            }
+            FormKind::Keyword(key) if key == "enter" => {
+                project.enter = Some(v.clone());
+            }
+            FormKind::Keyword(key) if key == "leave" => {
+                project.leave = Some(v.clone());
+            }
             FormKind::Keyword(_) => {}
             FormKind::Symbol(name) => {
                 project.tasks.push(parse_task_def(name.clone(), v)?);
@@ -307,6 +373,9 @@ fn parse_task_def(name: String, v: &Form) -> Result<TaskDef, ProjectError> {
         depends: Vec::new(),
         body: v.clone(),
         private: false,
+        requires: Vec::new(),
+        enter: None,
+        leave: None,
     };
     if let FormKind::Map(entries) = &v.kind {
         // Map form: {:task expr :depends [...] :doc "..." :private true}
@@ -337,6 +406,13 @@ fn parse_task_def(name: String, v: &Form) -> Result<TaskDef, ProjectError> {
                 FormKind::Keyword(key) if key == "private" => {
                     def.private = matches!(val.kind, FormKind::Bool(true));
                 }
+                FormKind::Keyword(key) if key == "requires" => {
+                    if let FormKind::Vector(items) | FormKind::List(items) = &val.kind {
+                        def.requires.extend(items.iter().cloned());
+                    }
+                }
+                FormKind::Keyword(key) if key == "enter" => def.enter = Some(val.clone()),
+                FormKind::Keyword(key) if key == "leave" => def.leave = Some(val.clone()),
                 _ => {}
             }
         }

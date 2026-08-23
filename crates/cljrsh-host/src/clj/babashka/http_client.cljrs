@@ -1,35 +1,12 @@
-;; babashka.http-client compatibility veneer over the native cljrsh.http.
-;;
-;; Subset: request, get, post, put, patch, delete, head with :headers,
-;; :query-params, :form-params, :body, :basic-auth, :timeout (ms),
-;; :follow-redirects, and :throw (default true — non-2xx/3xx throws ex-info
-;; with the response as data, matching babashka.http-client).
+;; babashka.http-client compatibility shim — the implementation is
+;; cljrsh.http.
 (ns babashka.http-client
   (:require [cljrsh.http]))
 
-(defn- normalize-opts [opts]
-  (let [opts (if (:timeout opts)
-               (-> opts (assoc :timeout-ms (:timeout opts)) (dissoc :timeout))
-               opts)]
-    opts))
-
-(defn request
-  "Perform a request. opts must include :url (and usually :method)."
-  [opts]
-  (let [throw? (clojure.core/get opts :throw true)
-        resp (cljrsh.http/request (dissoc (normalize-opts opts) :throw))]
-    (if (and throw? (>= (:status resp) 400))
-      (throw (ex-info (str "Exceptional status code: " (:status resp)) resp))
-      resp)))
-
-(defn- verb [method]
-  (fn f
-    ([url] (f url {}))
-    ([url opts] (request (assoc opts :method method :url url)))))
-
-(def get (verb :get))
-(def post (verb :post))
-(def put (verb :put))
-(def patch (verb :patch))
-(def delete (verb :delete))
-(def head (verb :head))
+(def request cljrsh.http/request)
+(def get cljrsh.http/get)
+(def post cljrsh.http/post)
+(def put cljrsh.http/put)
+(def patch cljrsh.http/patch)
+(def delete cljrsh.http/delete)
+(def head cljrsh.http/head)

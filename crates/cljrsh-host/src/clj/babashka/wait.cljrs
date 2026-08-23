@@ -1,37 +1,6 @@
-;; babashka.wait compatibility veneer.
+;; babashka.wait compatibility shim — the implementation is cljrsh.wait.
 (ns babashka.wait
-  (:require [cljrsh.term] [cljrsh.fs]))
+  (:require [cljrsh.wait]))
 
-(defn wait-for-port
-  "Poll until host:port accepts a TCP connection.
-  opts: :timeout (ms, nil = forever), :pause (ms, default 100),
-  :default (returned on timeout). Returns {:host h :port p :took ms}."
-  ([host port] (wait-for-port host port {}))
-  ([host port {:keys [timeout pause default] :or {pause 100}}]
-   (let [start (cljrsh.term/now-millis)]
-     (loop []
-       (cond
-         (cljrsh.term/tcp-open? host port (long (or pause 100)))
-         {:host host :port port :took (- (cljrsh.term/now-millis) start)}
-
-         (and timeout (>= (- (cljrsh.term/now-millis) start) timeout))
-         default
-
-         :else
-         (do (cljrsh.term/sleep-ms pause) (recur)))))))
-
-(defn wait-for-path
-  "Poll until path exists. Same opts/return shape as wait-for-port."
-  ([path] (wait-for-path path {}))
-  ([path {:keys [timeout pause default] :or {pause 100}}]
-   (let [start (cljrsh.term/now-millis)]
-     (loop []
-       (cond
-         (cljrsh.fs/exists? path)
-         {:path path :took (- (cljrsh.term/now-millis) start)}
-
-         (and timeout (>= (- (cljrsh.term/now-millis) start) timeout))
-         default
-
-         :else
-         (do (cljrsh.term/sleep-ms pause) (recur)))))))
+(def wait-for-port cljrsh.wait/wait-for-port)
+(def wait-for-path cljrsh.wait/wait-for-path)

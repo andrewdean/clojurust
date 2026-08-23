@@ -13,6 +13,7 @@ use cljrs_interop::Registry;
 
 pub mod csv;
 pub mod fs;
+pub mod hash;
 pub mod http;
 pub mod io;
 pub mod json;
@@ -21,6 +22,12 @@ pub mod yaml;
 
 /// Compat veneers shipped as embedded Clojure source, loaded on `require`.
 const COMPAT_SOURCES: &[(&str, &str)] = &[
+    // Primary cljrsh.* namespaces implemented in embedded Clojure (loaded on
+    // require; the babashka.* entries below are compatibility shims over
+    // them).
+    ("cljrsh.process", include_str!("clj/cljrsh/process.cljrs")),
+    ("cljrsh.wait", include_str!("clj/cljrsh/wait.cljrs")),
+    ("cljrsh.http", include_str!("clj/cljrsh/http.cljrs")),
     // Vendored from org.babashka/cli 0.8.65 (EPL-1.0, github.com/babashka/cli)
     // verbatim — it runs unmodified on cljrsh's :clj-featured runtime.
     ("babashka.cli", include_str!("clj/babashka/cli.cljc")),
@@ -54,7 +61,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     if globals.is_loaded("cljrsh.fs") {
         return;
     }
-    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv", "cljrsh.term"] {
+    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv", "cljrsh.term", "cljrsh.hash"] {
         globals.get_or_create_ns(ns);
         globals.refer_all(ns, "clojure.core");
     }
@@ -66,13 +73,16 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     yaml::register(&mut registry);
     csv::register(&mut registry);
     term::register(&mut registry);
+    hash::register(&mut registry);
     globals.mark_loaded("cljrsh.fs");
     globals.mark_loaded("cljrsh.json");
     globals.mark_loaded("cljrsh.io");
-    globals.mark_loaded("cljrsh.http");
+    // cljrsh.http is NOT marked loaded: the native request* is interned
+    // eagerly, and (require 'cljrsh.http) loads the rich layer source.
     globals.mark_loaded("cljrsh.yaml");
     globals.mark_loaded("cljrsh.csv");
     globals.mark_loaded("cljrsh.term");
+    globals.mark_loaded("cljrsh.hash");
 
     for (ns, src) in COMPAT_SOURCES {
         globals.register_builtin_source(ns, src);

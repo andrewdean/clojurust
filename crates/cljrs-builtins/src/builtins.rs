@@ -1507,7 +1507,17 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
         ("Thread/sleep", Arity::Fixed(1), builtin_sleep),
-        ("Long/parseLong", Arity::Fixed(1), crate::system::builtin_long_parse),
+        (
+            "System/currentTimeMillis",
+            Arity::Fixed(0),
+            crate::system::builtin_current_time_millis,
+        ),
+        (
+            "System/nanoTime",
+            Arity::Fixed(0),
+            crate::system::builtin_nano_time,
+        ),
+        ("Long/parseLong", Arity::Variadic { min: 1 }, crate::system::builtin_long_parse),
         ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
         (
             "Double/parseDouble",

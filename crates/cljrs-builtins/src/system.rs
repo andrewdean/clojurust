@@ -192,7 +192,17 @@ fn str_arg0<'a>(args: &'a [Value], who: &str) -> Result<&'a str, ValueError> {
 
 pub(crate) fn builtin_long_parse(args: &[Value]) -> ValueResult<Value> {
     let s = str_arg0(args, "Long/parseLong")?;
-    s.parse::<i64>()
+    // Optional radix arg, like Java's (Long/parseLong s radix).
+    let radix = match args.get(1) {
+        None => 10,
+        Some(Value::Long(r)) if (2..=36).contains(r) => *r as u32,
+        Some(other) => {
+            return Err(ValueError::Other(format!(
+                "Long/parseLong radix must be an integer in 2..36, got {other}"
+            )));
+        }
+    };
+    i64::from_str_radix(&s, radix)
         .map(Value::Long)
         .map_err(|e| ValueError::Other(format!("For input string: {s:?}: {e}")))
 }
@@ -240,4 +250,20 @@ pub(crate) fn builtin_char_is_letter(args: &[Value]) -> ValueResult<Value> {
 
 pub(crate) fn builtin_char_is_whitespace(args: &[Value]) -> ValueResult<Value> {
     char_pred(args, "Character/isWhitespace", char::is_whitespace)
+}
+
+pub(crate) fn builtin_current_time_millis(_args: &[Value]) -> ValueResult<Value> {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| ValueError::Other(e.to_string()))?
+        .as_millis() as i64;
+    Ok(Value::Long(ms))
+}
+
+pub(crate) fn builtin_nano_time(_args: &[Value]) -> ValueResult<Value> {
+    // Monotonic, like Java: relative to an arbitrary process-local origin.
+    use std::sync::OnceLock;
+    static ORIGIN: OnceLock<std::time::Instant> = OnceLock::new();
+    let origin = ORIGIN.get_or_init(std::time::Instant::now);
+    Ok(Value::Long(origin.elapsed().as_nanos() as i64))
 }

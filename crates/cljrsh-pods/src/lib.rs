@@ -224,15 +224,19 @@ impl Pod {
 
     fn shutdown(&self) {
         let _ = self.send(&Self::dict(vec![("op", Bencode::str("shutdown"))]));
-        *self.stdin.lock().unwrap() = None; // close the pipe → EOF for the pod
         let mut child = self.child.lock().unwrap();
-        for _ in 0..50 {
+        // Short grace for pods that exit on the shutdown op, then kill — like
+        // babashka, which destroys the process right after sending shutdown.
+        // Never close stdin while the pod lives: common Go pods panic (nil
+        // Message deref) in their read-error path on EOF, spraying stderr.
+        for _ in 0..20 {
             if let Ok(Some(_)) = child.try_wait() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -406,6 +410,12 @@ pub fn shutdown_all() {
 }
 
 /// Load a pod and register its namespaces. Returns the pod handle.
+/// Load a pod executable by path — the binary uses this for bb.edn `:pods`
+/// entries after registry resolution.
+pub fn load_registry_pod(globals: &Arc<GlobalEnv>, exe: &str) -> Result<Value, String> {
+    load_pod(globals, &[exe.to_string()])
+}
+
 fn load_pod(globals: &Arc<GlobalEnv>, argv: &[String]) -> Result<Value, String> {
     let pod = spawn_pod(argv).map_err(|e| match e {
         PodError::Io(m) => m,
@@ -580,9 +590,38 @@ pub fn init(globals: &Arc<GlobalEnv>) {
                             )),
                         })
                         .collect::<Result<_, _>>()?,
+                    // (load-pod 'org.babashka/foo "0.1.0"): resolve from the
+                    // babashka pod registry, downloading on first use.
+                    Value::Symbol(sym) => {
+                        let name = sym.get().to_string();
+                        let version = match args.get(1) {
+                            Some(Value::Str(s)) => s.get().to_string(),
+                            Some(Value::Map(m)) => match m
+                                .get(&Value::keyword(cljrs_value::Keyword::simple("version")))
+                            {
+                                Some(Value::Str(s)) => s.get().to_string(),
+                                _ => {
+                                    return Err(format!(
+                                        "load-pod {name}: opts map needs a :version string"
+                                    ));
+                                }
+                            },
+                            _ => {
+                                return Err(format!(
+                                    "load-pod {name}: registry pods need a version,                                      e.g. (load-pod '{name} \"0.1.0\")"
+                                ));
+                            }
+                        };
+                        let exe = cljrsh_project::pods::ensure_registry_pod(
+                            &name,
+                            &version,
+                            &cljrsh_project::pods::default_cache_dir(),
+                        )?;
+                        vec![exe.to_string_lossy().into_owned()]
+                    }
                     other => {
                         return Err(format!(
-                            "load-pod expects a path string or command vector, got {}",
+                            "load-pod expects a path string, command vector, or                              registry symbol, got {}",
                             other.type_name()
                         ));
                     }

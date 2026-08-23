@@ -177,6 +177,8 @@ fn run(opts: Opts) -> i32 {
             }
             match name.as_str() {
                 "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
+                "describe" => describe(),
+                "print-deps" => print_deps(&opts.args),
                 "tasks" => match &project {
                     Some(project) => tasks::list(project),
                     None => {
@@ -184,11 +186,21 @@ fn run(opts: Opts) -> i32 {
                         2
                     }
                 },
-                "run" => match (&project, opts.args.first()) {
+                "run" => {
+                    // bb compat: accept --parallel but run sequentially (the
+                    // interpreter is single-threaded by design).
+                    let mut run_args = opts.args.clone();
+                    if run_args.first().map(String::as_str) == Some("--parallel") {
+                        eprintln!(
+                            "cljrsh: warning: --parallel is not supported; running tasks sequentially"
+                        );
+                        run_args.remove(0);
+                    }
+                    match (&project, run_args.first()) {
                     (Some(project), Some(task)) => {
                         let task = task.clone();
                         // Remaining args become *command-line-args*.
-                        cljrs_builtins::system::set_command_line_args(&globals, &opts.args[1..]);
+                        cljrs_builtins::system::set_command_line_args(&globals, &run_args[1..]);
                         tasks::run(&globals, project, &task)
                     }
                     (None, _) => {
@@ -199,7 +211,7 @@ fn run(opts: Opts) -> i32 {
                         eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
                         2
                     }
-                },
+                }},
                 _ => {
                     if project.is_some() {
                         eprintln!(
@@ -217,6 +229,141 @@ fn run(opts: Opts) -> i32 {
     }
 }
 
+/// `cljrsh print-deps [--format edn|classpath]` — the project's dependency
+/// view, bb-compatible. `classpath` prints :paths plus every resolved dep
+/// source directory joined with ':' (what clojure-lsp runs to index a
+/// babashka-style project); `edn` (default, like bb) prints a deps map.
+fn print_deps(args: &[String]) -> i32 {
+    let format = match args {
+        [] => "edn",
+        [flag, value] if flag == "--format" => value.as_str(),
+        _ => {
+            eprintln!("usage: cljrsh print-deps [--format edn|classpath]");
+            return 2;
+        }
+    };
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("cljrsh: {e}");
+            return 1;
+        }
+    };
+    let project = cljrsh_project::find_project_file(&cwd)
+        .and_then(|f| cljrsh_project::load(&f).ok());
+
+    match format {
+        "classpath" => {
+            let mut entries: Vec<std::path::PathBuf> = Vec::new();
+            if let Some(project) = &project {
+                for p in &project.paths {
+                    entries.push(project.root.join(p));
+                }
+                if entries.is_empty() {
+                    // bb's implicit default source path.
+                    let src = project.root.join("src");
+                    if src.is_dir() {
+                        entries.push(src);
+                    }
+                }
+                if !project.deps.is_empty() {
+                    match cljrsh_project::resolve_deps(project, &tasks::dep_cache_dir()) {
+                        Ok(dirs) => entries.extend(dirs),
+                        Err(e) => {
+                            eprintln!("cljrsh: warning: dependency resolution failed: {e}");
+                        }
+                    }
+                }
+            }
+            let rendered: Vec<String> = entries
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            println!("{}", rendered.join(":"));
+            0
+        }
+        "edn" => {
+            // {:paths [...] :deps {lib coord ...} :pods {lib {:version v}}}
+            let paths = project
+                .as_ref()
+                .map(|p| p.paths.clone())
+                .unwrap_or_default();
+            print!("{{:paths [");
+            print!(
+                "{}",
+                paths
+                    .iter()
+                    .map(|p| format!("{p:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            print!("] :deps {{");
+            if let Some(project) = &project {
+                let mut first = true;
+                for (lib, coord) in &project.deps {
+                    if !first {
+                        print!(" ");
+                    }
+                    first = false;
+                    match coord {
+                        cljrsh_project::DepCoord::Local { root } => {
+                            print!("{lib} {{:local/root {root:?}}}");
+                        }
+                        cljrsh_project::DepCoord::Git { url, sha } => {
+                            print!("{lib} {{:git/url {url:?} :git/sha {sha:?}}}");
+                        }
+                        cljrsh_project::DepCoord::Maven { version } => {
+                            print!("{lib} {{:mvn/version {version:?}}}");
+                        }
+                    }
+                }
+            }
+            print!("}}");
+            if let Some(project) = &project
+                && !project.pods.is_empty()
+            {
+                print!(" :pods {{");
+                let rendered: Vec<String> = project
+                    .pods
+                    .iter()
+                    .map(|(lib, version)| format!("{lib} {{:version {version:?}}}"))
+                    .collect();
+                print!("{}", rendered.join(" "));
+                print!("}}");
+            }
+            println!("}}");
+            0
+        }
+        other => {
+            eprintln!("cljrsh: unknown print-deps format {other:?} (edn|classpath)");
+            2
+        }
+    }
+}
+
+/// `cljrsh describe` — machine-readable runtime info, bb-style EDN.
+fn describe() -> i32 {
+    println!(
+        "{{:cljrsh/version {:?}
+ :babashka/protocol-compat true
+ :feature/reader-conds [:bb :cljrsh :clj :rust]
+ :feature/nu {nu}
+ :feature/aws {aws}
+ :feature/k8s {k8s}
+ :feature/pods true
+ :feature/nrepl true
+ :os/name {:?}
+ :os/arch {:?}}}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        nu = cfg!(feature = "nu"),
+        aws = cfg!(feature = "aws"),
+        k8s = cfg!(feature = "k8s"),
+    );
+    0
+}
+
 /// `cljrsh nrepl-server [addr]` — addr as `PORT` or `HOST:PORT`; default
 /// 127.0.0.1:1667 (babashka's port). Writes `.nrepl-port`; serves forever,
 /// driving each form on the shared LocalSet so async code works in sessions.
@@ -226,10 +373,17 @@ fn nrepl(globals: &std::sync::Arc<cljrs_env::env::GlobalEnv>, addr: Option<&str>
         Some(a) if a.contains(':') => a.to_string(),
         Some(port) => format!("127.0.0.1:{port}"),
     };
-    let addr: std::net::SocketAddr = match addr.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("cljrsh: bad nREPL address {addr:?}: {e}");
+    // Resolve hostnames too — editors ask for "localhost:0" (CIDER's
+    // default babashka jack-in parameters). Prefer IPv4 (like babashka):
+    // clients dial 127.0.0.1.
+    use std::net::ToSocketAddrs as _;
+    let addr: std::net::SocketAddr = match addr.to_socket_addrs().ok().and_then(|resolved| {
+        let all: Vec<_> = resolved.collect();
+        all.iter().find(|a| a.is_ipv4()).copied().or_else(|| all.first().copied())
+    }) {
+        Some(a) => a,
+        None => {
+            eprintln!("cljrsh: bad nREPL address {addr:?}");
             return 2;
         }
     };

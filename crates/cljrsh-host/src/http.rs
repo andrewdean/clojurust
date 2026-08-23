@@ -172,8 +172,8 @@ fn execute(plan: Plan) -> Result<Exchange, String> {
 
 pub fn register(registry: &mut Registry) {
     registry.define(
-        "cljrsh.http/request",
-        wrap_fn1("cljrsh.http/request", |opts: Value| -> Result<Value, String> {
+        "cljrsh.http/request*",
+        wrap_fn1("cljrsh.http/request*", |opts: Value| -> Result<Value, String> {
             let plan = parse_plan(&opts)?;
             let url = plan.url.clone();
             let (status, header_pairs, body) = std::thread::Builder::new()

@@ -2462,7 +2462,16 @@ pub fn sync_star_ns(env: &mut Env) {
 }
 
 fn require_sym<'a>(args: &'a [Form], idx: usize, form_name: &str) -> EvalResult<&'a str> {
-    match args.get(idx).map(|f| &f.kind) {
+    // Peel `^meta` wrappers: (defonce ^:private x ...) names the symbol inside.
+    let mut form = args.get(idx);
+    while let Some(Form {
+        kind: FormKind::Meta(_, inner),
+        ..
+    }) = form
+    {
+        form = Some(inner);
+    }
+    match form.map(|f| &f.kind) {
         Some(FormKind::Symbol(s)) => Ok(s.as_str()),
         _ => Err(EvalError::Runtime(format!(
             "{form_name} requires a symbol at position {idx}"
