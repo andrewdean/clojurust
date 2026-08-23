@@ -148,3 +148,15 @@ cranelift-object   = "0.129.1"
 cranelift-jit      = "0.129.1"
 cranelift-native   = "0.129.1"
 target-lexicon     = "0.13"
+
+# Everyday release: fast rebuilds, debuginfo stripped (68MB → symbols kept
+# for panic backtraces). `--profile dist` is the distribution build: thin
+# LTO + fully stripped.
+[profile.release]
+strip = "debuginfo"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
