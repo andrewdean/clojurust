@@ -453,6 +453,23 @@ impl Lexer {
                 self.col += "return".len() as u32;
                 '\r'
             }
+            _ if rest.starts_with('o') && rest.len() >= 2 && rest.len() <= 4
+                && rest[1..].chars().all(|c| ('0'..='7').contains(&c)) =>
+            {
+                // Octal char literal \oN, \oNN, \oNNN (0-377), Clojure parity.
+                let code = u32::from_str_radix(&rest[1..], 8).unwrap();
+                if code > 0o377 {
+                    let span = self.span_from(start_pos, start_line, start_col);
+                    return Err(self.make_error(
+                        format!("octal char literal out of range: \\{rest}"),
+                        span,
+                    ));
+                }
+                let c = char::from_u32(code).unwrap();
+                self.pos += rest.len();
+                self.col += rest.len() as u32;
+                c
+            }
             _ if rest.starts_with('u') && rest.len() >= 5 => {
                 // Try \uXXXX
                 let hex_part = &rest[1..5];
