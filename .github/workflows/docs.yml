@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "docs/book/**"
+      - "docs/tutorials/**"
       - "crates/cljrs-wasm/**"
       - "crates/cljrs-interp/**"
       - "crates/cljrs-env/**"

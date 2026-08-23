@@ -2,6 +2,19 @@
 
 [Introduction](introduction.md)
 
+# Tutorials
+
+- [Tutorials](tutorials/README.md)
+  - [Getting started](tutorials/01-getting-started.md)
+  - [The REPL](tutorials/02-repl.md)
+  - [Scripting](tutorials/03-scripting.md)
+  - [Kubernetes](tutorials/04-kubernetes.md)
+  - [AWS](tutorials/05-aws.md)
+  - [Terraform](tutorials/06-terraform.md)
+  - [Schemas with malli](tutorials/07-schemas.md)
+  - [Layered configuration](tutorials/08-configuration.md)
+  - [Templating with data](tutorials/09-templates.md)
+
 # The CLI
 
 - [Command-line tool](cli/index.md)
