@@ -610,6 +610,13 @@
              (recur v kv (next more))))
          v)))))
 
+#?(:cljrsh
+(defn intersection
+  [s1 s2]
+  (if (< (count s2) (count s1))
+    (recur s2 s1)
+    (into #{} (filter #(contains? s2 %)) s1)))
+:clj
 (defn intersection
   [^IEditableCollection s1 ^IPersistentSet s2]
   (if (< (count s2) (count s1))
@@ -629,7 +636,7 @@
               (if (.contains s2 item)
                 (recur out)
                 (recur (.disjoin out item))))
-            out))))))
+            out)))))))
 
 (defn same-sign?
   [^long x ^long y]

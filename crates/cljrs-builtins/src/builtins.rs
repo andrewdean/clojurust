@@ -1721,6 +1721,41 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::javamap::builtin_hashmap_new,
         ),
         (
+            "HashSet.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hash_set_new,
+        ),
+        (
+            "java.util.HashSet.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hash_set_new,
+        ),
+        (
+            "ArrayList.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_list_new,
+        ),
+        (
+            "java.util.ArrayList.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_list_new,
+        ),
+        (
+            "FastList.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_list_new,
+        ),
+        (
+            "org.eclipse.collections.impl.list.mutable.FastList.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_array_list_new,
+        ),
+        (
+            "LongObjectHashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
             "StringBuilder.",
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_string_builder_new,
@@ -2027,7 +2062,15 @@ impl Iterator for ValueIter {
                     });
                     self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
                 }
-                _ => return None,
+                other => {
+                    // Java-shim mutable collections iterate as snapshots.
+                    if let Some(items) = crate::javamap::native_coll_items(other) {
+                        self.current =
+                            Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    } else {
+                        return None;
+                    }
+                }
             }
         }
     }
@@ -2062,10 +2105,15 @@ pub(crate) fn value_to_seq(v: &Value) -> ValueResult<Vec<Value>> {
             Ok(result)
         }
         Value::Nil => Ok(Vec::new()),
-        _ => Err(ValueError::WrongType {
-            expected: "seqable",
-            got: v.type_name().to_string(),
-        }),
+        _ => {
+            if let Some(items) = crate::javamap::native_coll_items(v) {
+                return Ok(items);
+            }
+            Err(ValueError::WrongType {
+                expected: "seqable",
+                got: v.type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -3483,10 +3531,15 @@ fn builtin_empty_q(args: &[Value]) -> ValueResult<Value> {
         Value::Cons(c) => matches!(c.get().head, Value::Nil),
         Value::Queue(q) => q.get().count() == 0,
         _ => {
-            return Err(ValueError::WrongType {
-                expected: "seqable",
-                got: args[0].type_name().to_string(),
-            });
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_empty_q(&fwd);
+            }
+                return Err(ValueError::WrongType {
+                    expected: "seqable",
+                    got: args[0].type_name().to_string(),
+                });
         }
     };
     Ok(Value::Bool(empty))
@@ -3838,6 +3891,11 @@ fn builtin_get(args: &[Value]) -> ValueResult<Value> {
     match args[0].unwrap_meta() {
         Value::Nil => Ok(default),
         Value::Map(m) => Ok(m.get(&args[1]).unwrap_or(default)),
+        Value::TransientMap(m) => Ok(m
+            .get()
+            .find(&args[1])
+            .map(|(_, v)| v)
+            .unwrap_or(default)),
         Value::TypeInstance(ti) => Ok(ti.get().fields.get(&args[1]).unwrap_or(default)),
         Value::Vector(v) => {
             if let Value::Long(idx) = &args[1] {
@@ -4014,10 +4072,14 @@ fn builtin_count(args: &[Value]) -> ValueResult<Value> {
         Value::TransientMap(m) => m.get().count(),
         Value::TransientSet(s) => s.get().count(),
         _ => {
-            return Err(ValueError::WrongType {
-                expected: "collection",
-                got: v.type_name().to_string(),
-            });
+            if let Some(n) = crate::javamap::native_coll_count(v) {
+                n
+            } else {
+                return Err(ValueError::WrongType {
+                    expected: "collection",
+                    got: v.type_name().to_string(),
+                });
+            }
         }
     };
     Ok(Value::Long(n as i64))
@@ -4067,6 +4129,14 @@ fn builtin_rseq(args: &[Value]) -> ValueResult<Value> {
             got: v.type_name().to_string(),
         }),
     }
+}
+
+/// A java-shim mutable collection snapshotted as a Vector value, so the
+/// seq family can treat the shims as ordinary collections.
+fn native_coll_as_vector(v: &Value) -> Option<Value> {
+    crate::javamap::native_coll_items(v).map(|items| {
+        Value::Vector(GcPtr::new(PersistentVector::from_iter(items)))
+    })
 }
 
 fn builtin_seq(args: &[Value]) -> ValueResult<Value> {
@@ -4206,10 +4276,17 @@ fn builtin_seq(args: &[Value]) -> ValueResult<Value> {
                 Ok(cons_from_iter(pairs))
             }
         }
-        v => Err(ValueError::WrongType {
-            expected: "seqable",
-            got: v.type_name().to_string(),
-        }),
+        v => {
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_seq(&fwd);
+            }
+            Err(ValueError::WrongType {
+                expected: "seqable",
+                got: v.type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -4249,10 +4326,17 @@ fn builtin_first(args: &[Value]) -> ValueResult<Value> {
                 Ok(Value::Nil)
             }
         }
-        _ => Err(ValueError::WrongType {
-            expected: "seqable",
-            got: args[0].type_name().to_string(),
-        }),
+        _ => {
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_first(&fwd);
+            }
+            Err(ValueError::WrongType {
+                expected: "seqable",
+                got: args[0].type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -4297,10 +4381,17 @@ fn builtin_rest(args: &[Value]) -> ValueResult<Value> {
             let items: Vec<Value> = s.get().chars().skip(1).map(Value::Char).collect();
             Ok(Value::List(GcPtr::new(PersistentList::from_iter(items))))
         }
-        _ => Err(ValueError::WrongType {
-            expected: "seqable",
-            got: args[0].type_name().to_string(),
-        }),
+        _ => {
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_rest(&fwd);
+            }
+            Err(ValueError::WrongType {
+                expected: "seqable",
+                got: args[0].type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -4407,10 +4498,17 @@ fn builtin_nth(args: &[Value]) -> ValueResult<Value> {
             .or(default)
             .unwrap_or(Value::Nil)),
         Value::Nil => Ok(default.unwrap_or(Value::Nil)),
-        v => Err(ValueError::WrongType {
-            expected: "sequential",
-            got: v.type_name().to_string(),
-        }),
+        v => {
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_nth(&fwd);
+            }
+            Err(ValueError::WrongType {
+                expected: "sequential",
+                got: v.type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -4918,10 +5016,17 @@ fn builtin_vec(args: &[Value]) -> ValueResult<Value> {
             })
         }
 
-        other => Err(ValueError::WrongType {
-            expected: "seq",
-            got: other.type_name().to_string(),
-        }),
+        other => {
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_vec(&fwd);
+            }
+            Err(ValueError::WrongType {
+                expected: "seq",
+                got: other.type_name().to_string(),
+            })
+        }
     }
 }
 
@@ -7744,10 +7849,15 @@ fn builtin_not_empty(args: &[Value]) -> ValueResult<Value> {
             empty
         }
         v => {
-            return Err(ValueError::WrongType {
-                expected: "seqable",
-                got: v.type_name().to_string(),
-            });
+            if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
+                let mut fwd: Vec<Value> = args.to_vec();
+                fwd[0] = vv;
+                return builtin_not_empty(&fwd);
+            }
+                return Err(ValueError::WrongType {
+                    expected: "seqable",
+                    got: v.type_name().to_string(),
+                });
         }
     };
     if is_empty {

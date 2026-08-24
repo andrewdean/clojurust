@@ -160,6 +160,12 @@ pub fn dispatch_any(
     if let Some(it) = obj.downcast_ref::<JavaIterator>() {
         return dispatch_iterator(it, method, args);
     }
+    if let Some(l) = obj.downcast_ref::<JavaArrayList>() {
+        return dispatch_array_list(l, method, args);
+    }
+    if let Some(s) = obj.downcast_ref::<JavaHashSet>() {
+        return dispatch_hash_set(s, method, args);
+    }
     if let Some(dq) = obj.downcast_ref::<JavaArrayDeque>() {
         return dispatch_deque(dq, method, args);
     }
@@ -168,6 +174,295 @@ pub fn dispatch_any(
     }
     if let Some(sb) = obj.downcast_ref::<JavaStringBuilder>() {
         return dispatch_string_builder(sb, method, args);
+    }
+    None
+}
+
+// ── java.util.ArrayList / FastList and java.util.HashSet ───────────────────
+// Mutable list and set shims so vendored JVM-flavored code (datalevin's
+// query engine in particular) runs its FastList/HashSet idioms unchanged.
+
+#[derive(Debug)]
+pub struct JavaArrayList {
+    pub items: Mutex<Vec<Value>>,
+}
+
+impl NativeObject for JavaArrayList {
+    fn type_tag(&self) -> &str {
+        "java.util.ArrayList"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaArrayList {
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        for v in self.items.lock().unwrap().iter() {
+            v.trace(visitor);
+        }
+    }
+}
+
+/// `(ArrayList.)` / `(FastList.)` — an int argument is a capacity hint
+/// (ignored); a collection argument copies its elements.
+pub fn builtin_array_list_new(args: &[Value]) -> ValueResult<Value> {
+    let items = match args.first().map(Value::unwrap_meta) {
+        None | Some(Value::Nil) | Some(Value::Long(_)) => Vec::new(),
+        Some(other) => crate::builtins::value_to_seq(other)?,
+    };
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaArrayList {
+            items: Mutex::new(items),
+        },
+    )))
+}
+
+fn index_arg(args: &[Value], what: &str) -> ValueResult<usize> {
+    match args.first().map(Value::unwrap_meta) {
+        Some(Value::Long(n)) if *n >= 0 => Ok(*n as usize),
+        _ => Err(cljrs_value::ValueError::Other(format!(
+            "{what} requires a non-negative index"
+        ))),
+    }
+}
+
+fn dispatch_array_list(
+    l: &JavaArrayList,
+    method: &str,
+    args: &[Value],
+) -> Option<ValueResult<Value>> {
+    let mut items = l.items.lock().unwrap();
+    Some(match method {
+        "add" => match (args.first(), args.get(1)) {
+            (Some(v), None) => {
+                items.push(v.clone());
+                Ok(Value::Bool(true))
+            }
+            (Some(Value::Long(i)), Some(v)) if *i >= 0 && (*i as usize) <= items.len() => {
+                items.insert(*i as usize, v.clone());
+                Ok(Value::Nil)
+            }
+            _ => Err(cljrs_value::ValueError::Other(
+                ".add requires (value) or (index value)".into(),
+            )),
+        },
+        "addAll" => {
+            let vals = match args.first() {
+                Some(v) => match crate::builtins::value_to_seq(v.unwrap_meta()) {
+                    Ok(vals) => vals,
+                    Err(e) => return Some(Err(e)),
+                },
+                None => {
+                    return Some(Err(cljrs_value::ValueError::Other(
+                        ".addAll requires a collection".into(),
+                    )));
+                }
+            };
+            let changed = !vals.is_empty();
+            items.extend(vals);
+            Ok(Value::Bool(changed))
+        }
+        "get" => {
+            let idx = match index_arg(args, ".get") {
+                Ok(i) => i,
+                Err(e) => return Some(Err(e)),
+            };
+            match items.get(idx) {
+                Some(v) => Ok(v.clone()),
+                None => Err(cljrs_value::ValueError::Other(format!(
+                    "IndexOutOfBoundsException: {idx} of {}",
+                    items.len()
+                ))),
+            }
+        }
+        "set" => {
+            let idx = match index_arg(args, ".set") {
+                Ok(i) => i,
+                Err(e) => return Some(Err(e)),
+            };
+            let Some(v) = args.get(1) else {
+                return Some(Err(cljrs_value::ValueError::Other(
+                    ".set requires index and value".into(),
+                )));
+            };
+            match items.get_mut(idx) {
+                Some(slot) => {
+                    let old = slot.clone();
+                    *slot = v.clone();
+                    Ok(old)
+                }
+                None => Err(cljrs_value::ValueError::Other(format!(
+                    "IndexOutOfBoundsException: {idx} of {}",
+                    items.len()
+                ))),
+            }
+        }
+        // Java overload semantics: an integer argument removes by index
+        // (returning the element), anything else removes by value.
+        "remove" => match args.first().map(Value::unwrap_meta) {
+            Some(Value::Long(i)) if *i >= 0 && (*i as usize) < items.len() => {
+                Ok(items.remove(*i as usize))
+            }
+            Some(v) => {
+                if let Some(pos) = items.iter().position(|x| x == v) {
+                    items.remove(pos);
+                    Ok(Value::Bool(true))
+                } else {
+                    Ok(Value::Bool(false))
+                }
+            }
+            None => Err(cljrs_value::ValueError::Other(
+                ".remove requires an argument".into(),
+            )),
+        },
+        "contains" => Ok(Value::Bool(
+            args.first().is_some_and(|v| items.contains(v)),
+        )),
+        "indexOf" => Ok(Value::Long(
+            args.first()
+                .and_then(|v| items.iter().position(|x| x == v))
+                .map_or(-1, |i| i as i64),
+        )),
+        "size" => Ok(Value::Long(items.len() as i64)),
+        "isEmpty" => Ok(Value::Bool(items.is_empty())),
+        "clear" => {
+            items.clear();
+            Ok(Value::Nil)
+        }
+        "toArray" => Ok(Value::ObjectArray(cljrs_gc::GcPtr::new(
+            cljrs_value::ObjectArray::new(items.clone()),
+        ))),
+        _ => return None,
+    })
+}
+
+#[derive(Debug)]
+pub struct JavaHashSet {
+    pub items: Mutex<std::collections::HashSet<Value>>,
+}
+
+impl NativeObject for JavaHashSet {
+    fn type_tag(&self) -> &str {
+        "java.util.HashSet"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaHashSet {
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        for v in self.items.lock().unwrap().iter() {
+            v.trace(visitor);
+        }
+    }
+}
+
+/// `(HashSet.)` — an int argument is a capacity hint (ignored); a
+/// collection argument copies its elements.
+pub fn builtin_hash_set_new(args: &[Value]) -> ValueResult<Value> {
+    let items: std::collections::HashSet<Value> =
+        match args.first().map(Value::unwrap_meta) {
+            None | Some(Value::Nil) | Some(Value::Long(_)) => Default::default(),
+            Some(other) => crate::builtins::value_to_seq(other)?.into_iter().collect(),
+        };
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaHashSet {
+            items: Mutex::new(items),
+        },
+    )))
+}
+
+fn dispatch_hash_set(
+    s: &JavaHashSet,
+    method: &str,
+    args: &[Value],
+) -> Option<ValueResult<Value>> {
+    let mut items = s.items.lock().unwrap();
+    Some(match method {
+        "add" => match args.first() {
+            Some(v) => Ok(Value::Bool(items.insert(v.clone()))),
+            None => Err(cljrs_value::ValueError::Other(
+                ".add requires an argument".into(),
+            )),
+        },
+        "addAll" => {
+            let vals = match args.first() {
+                Some(v) => match crate::builtins::value_to_seq(v.unwrap_meta()) {
+                    Ok(vals) => vals,
+                    Err(e) => return Some(Err(e)),
+                },
+                None => {
+                    return Some(Err(cljrs_value::ValueError::Other(
+                        ".addAll requires a collection".into(),
+                    )));
+                }
+            };
+            let mut changed = false;
+            for v in vals {
+                changed |= items.insert(v);
+            }
+            Ok(Value::Bool(changed))
+        }
+        "contains" => Ok(Value::Bool(args.first().is_some_and(|v| items.contains(v)))),
+        "remove" => Ok(Value::Bool(
+            args.first().is_some_and(|v| items.remove(v)),
+        )),
+        "size" => Ok(Value::Long(items.len() as i64)),
+        "isEmpty" => Ok(Value::Bool(items.is_empty())),
+        "clear" => {
+            items.clear();
+            Ok(Value::Nil)
+        }
+        "toArray" => Ok(Value::ObjectArray(cljrs_gc::GcPtr::new(
+            cljrs_value::ObjectArray::new(items.iter().cloned().collect()),
+        ))),
+        _ => return None,
+    })
+}
+
+/// Snapshot the elements of a java-shim mutable collection; None = not
+/// one. Maps iterate as [k v] entries. Lets seq/count/nth/vec treat the
+/// shims as ordinary collections.
+pub fn native_coll_items(v: &Value) -> Option<Vec<Value>> {
+    let Value::NativeObject(obj) = v else {
+        return None;
+    };
+    let o = obj.get();
+    if let Some(l) = o.downcast_ref::<JavaArrayList>() {
+        return Some(l.items.lock().unwrap().clone());
+    }
+    if let Some(s) = o.downcast_ref::<JavaHashSet>() {
+        return Some(s.items.lock().unwrap().iter().cloned().collect());
+    }
+    if let Some(m) = o.downcast_ref::<JavaHashMap>() {
+        return Some(
+            m.inner
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| Value::map_entry(k.clone(), v.clone()))
+                .collect(),
+        );
+    }
+    None
+}
+
+/// Element count of a java-shim mutable collection; None = not one.
+pub fn native_coll_count(v: &Value) -> Option<usize> {
+    let Value::NativeObject(obj) = v else {
+        return None;
+    };
+    let o = obj.get();
+    if let Some(l) = o.downcast_ref::<JavaArrayList>() {
+        return Some(l.items.lock().unwrap().len());
+    }
+    if let Some(s) = o.downcast_ref::<JavaHashSet>() {
+        return Some(s.items.lock().unwrap().len());
+    }
+    if let Some(m) = o.downcast_ref::<JavaHashMap>() {
+        return Some(m.inner.lock().unwrap().len());
     }
     None
 }
