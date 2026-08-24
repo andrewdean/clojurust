@@ -192,8 +192,24 @@ default, and it stays contained inside the store crate.
    forms ((clojure.core/or ...) etc.) fell through to nil-returning
    stub calls in all three dispatch paths (tree-walker, IR lowering,
    async driver); each now strips the clojure.core/ prefix before the
-   special-form check. Next rung: the optimizer tree
-   (query/plan/resolve/execute) against the store's IStore adapter.
+   special-form check. Relation-substrate rung done
+   2026-08-23: datalevin.timeout and datalevin.query.predicate vendored
+   verbatim; datalevin.query.tuple with the index/giant decode gated to
+   :clj (the cljrs store decodes giants natively, so [:g gt] doc-refs
+   never occur); datalevin.relation as a whole-file two-arm split — on
+   :cljrsh a relation's :tuples is a persistent vector of object-array
+   tuples (the FastList convention from datalevin.util), tuple identity
+   is the tuple's vec (replacing HashSet + ArrayWrapper), and mutable
+   seen-sets are volatiles of sets created with the additive
+   new-seen-set constructor (both arms define it; callers gate their
+   HashSet. allocations to it when vendored). Full algebra verified:
+   sum/sum-dedupe/difference/renumbering/prod/project-distinct/
+   many-tuples/seen-set iteration/timeout abort (conformance case 084).
+   Runtime gained System/arraycopy (all array families, overlap-safe),
+   so join-tuples/conj-tuple run upstream-original. Next rung: the
+   optimizer tree (query/plan/resolve/execute) against the store's
+   IStore adapter; aggregate and cache vendor alongside resolve (their
+   only blockers).
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

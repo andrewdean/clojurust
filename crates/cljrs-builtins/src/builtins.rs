@@ -1501,6 +1501,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("System/exit", Arity::Fixed(1), crate::system::builtin_exit),
         ("Thread/sleep", Arity::Fixed(1), builtin_sleep),
+        ("System/arraycopy", Arity::Fixed(5), builtin_arraycopy),
         (
             "System/currentTimeMillis",
             Arity::Fixed(0),
@@ -5069,6 +5070,78 @@ fn builtin_into_array(args: &[Value]) -> ValueResult<Value> {
             "second arg to into-array must be a keyword giving a primitive type".to_string(),
         )),
     }
+}
+
+/// `(System/arraycopy src srcPos dst dstPos length)` — copy a range
+/// between arrays of the same family. Handles overlapping self-copy.
+fn builtin_arraycopy(args: &[Value]) -> ValueResult<Value> {
+    fn idx(v: &Value, what: &str) -> ValueResult<usize> {
+        match v {
+            Value::Long(n) if *n >= 0 => Ok(*n as usize),
+            _ => Err(ValueError::Other(format!(
+                "System/arraycopy: {what} must be a non-negative integer"
+            ))),
+        }
+    }
+    let src_pos = idx(&args[1], "srcPos")?;
+    let dst_pos = idx(&args[3], "dstPos")?;
+    let len = idx(&args[4], "length")?;
+    macro_rules! copy {
+        ($src:expr, $dst:expr) => {{
+            let chunk: Vec<_> = {
+                let s = $src;
+                if src_pos + len > s.len() {
+                    return Err(ValueError::Other(
+                        "System/arraycopy: source range out of bounds".to_string(),
+                    ));
+                }
+                s[src_pos..src_pos + len].to_vec()
+            };
+            let mut d = $dst;
+            if dst_pos + len > d.len() {
+                return Err(ValueError::Other(
+                    "System/arraycopy: destination range out of bounds".to_string(),
+                ));
+            }
+            d[dst_pos..dst_pos + len].clone_from_slice(&chunk);
+        }};
+    }
+    match (&args[0], &args[2]) {
+        (Value::ObjectArray(s), Value::ObjectArray(d)) => {
+            copy!(s.get().0.lock().unwrap(), d.get().0.lock().unwrap())
+        }
+        (Value::IntArray(s), Value::IntArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::LongArray(s), Value::LongArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::ShortArray(s), Value::ShortArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::ByteArray(s), Value::ByteArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::FloatArray(s), Value::FloatArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::DoubleArray(s), Value::DoubleArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::BooleanArray(s), Value::BooleanArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        (Value::CharArray(s), Value::CharArray(d)) => {
+            copy!(s.get().lock().unwrap(), d.get().lock().unwrap())
+        }
+        _ => {
+            return Err(ValueError::Other(
+                "System/arraycopy: src and dst must be arrays of the same type"
+                    .to_string(),
+            ))
+        }
+    }
+    Ok(Value::Nil)
 }
 
 /// `(aclone arr)` — clone an array.

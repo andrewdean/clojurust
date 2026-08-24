@@ -1,0 +1,19 @@
+[[1 "Ivan"] [2 "Petr"] [2 "Petr"] [3 "Oleg"]]
+[[1 "Ivan"] [2 "Petr"] [3 "Oleg"]]
+[[1 "Ivan"]]
+[[1 "Ivan"] [2 "Petr"] [3 "Oleg"]]
+[[1 10] [2 10]]
+[["Ivan"] ["Petr"]]
+[[1 10] [2 10]]
+[[1 "Ivan"] [2 "Petr"]] [[3 "Oleg"]]
+[[2 "Petr"]]
+true true
+[1 2 3]
+:query/timeout
+[?e ?v] {?e 0, ?v 1} [0 2] 3 2
+nil
+[7 "Ivan"] [7 "Petr"]
+[7 :name "Ivan"]
+true false true
+true false true
+[true true]
