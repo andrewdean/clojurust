@@ -452,6 +452,29 @@ impl<'e> RoTxn<'e> {
         Ok(out)
     }
 
+    /// dlmdb: entries strictly below `key` in a counted database,
+    /// O(log n). This is the rank the first entry >= `key` would have,
+    /// whether or not `key` itself is present.
+    ///
+    /// Built from present-key operations (seek then rank) because
+    /// `mdb_count_range` bound handling for absent keys is subtle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the dlmdb code (including for non-counted DBIs).
+    pub fn count_below(&self, dbi: Dbi, key: &[u8]) -> Result<u64> {
+        let mut cursor = self.cursor(dbi)?;
+        match cursor.set_range(key)? {
+            None => self.count_all(dbi),
+            Some((found, _)) => {
+                let found = found.to_vec();
+                drop(cursor);
+                self.key_rank(dbi, &found)?
+                    .ok_or(Error(sys::MDB_NOTFOUND))
+            }
+        }
+    }
+
     /// dlmdb: the entry at `rank` (0-based, in key order) in a counted
     /// database, O(log n).
     ///

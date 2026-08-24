@@ -1374,6 +1374,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cljrs-datalog-store"
+version = "0.1.0"
+dependencies = [
+ "cljrs-lmdb",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "cljrs-deps"
 version = "0.1.0"
 dependencies = [

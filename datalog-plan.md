@@ -145,6 +145,14 @@ default, and it stays contained inside the store crate.
    for the optimizer. With dlmdb underneath, this shrinks toward
    serde, schema, and transaction logic; the dtlv C layer is the
    reference implementation of the iterator and sampler surface.
+   **Core done 2026-08-23.** crates/cljrs-datalog-store: eav/ave/vae
+   counted indexes with the order-preserving codec (randomized
+   byte-order-equals-value-order test), attr interning, cardinality
+   semantics, ref reverse index, content-addressed giants, O(log n)
+   count/cardinality via rank differences, and rank-strided sample_ave.
+   Ten tests. Remaining for phase 4 wiring: the exact IStore-shaped
+   surface the ported Clojure calls (thin adapter over this API) and
+   giant garbage collection.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

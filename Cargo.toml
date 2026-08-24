@@ -33,6 +33,7 @@ members = [
     "crates/cljrs-qt",
     "crates/cljrs-process",
     "crates/cljrs-lmdb",
+    "crates/cljrs-datalog-store",
     "crates/cljrsh",
     "crates/cljrsh-host",
     "crates/cljrsh-nu",

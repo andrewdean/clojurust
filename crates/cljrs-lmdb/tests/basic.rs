@@ -234,3 +234,23 @@ fn multiprocess_readers_share_the_environment() {
         .expect("child must run");
     assert!(status.success(), "child reader process failed");
 }
+
+#[test]
+fn count_below_ranks_absent_bounds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let env = open_env(dir.path());
+    let dbi = env
+        .open_dbi("below", DbiFlags::CREATE | DbiFlags::COUNTED)
+        .expect("dbi");
+    let mut txn = env.write_txn().expect("write txn");
+    for key in ["b", "d", "f"] {
+        txn.put(dbi, key.as_bytes(), b"x").expect("put");
+    }
+    txn.commit().expect("commit");
+    let ro = env.read_txn().expect("read txn");
+    assert_eq!(ro.count_below(dbi, b"a").expect("below"), 0);
+    assert_eq!(ro.count_below(dbi, b"b").expect("below"), 0);
+    assert_eq!(ro.count_below(dbi, b"c").expect("below"), 1);
+    assert_eq!(ro.count_below(dbi, b"e").expect("below"), 2);
+    assert_eq!(ro.count_below(dbi, b"z").expect("below"), 3);
+}
