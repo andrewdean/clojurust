@@ -1,14 +1,20 @@
 ;; cljrsh.datalog — Datomic-flavored Datalog for scripts.
 ;;
-;; Backed by the huahaiy/datalevin pod (fetched from the pod registry on
-;; first use, cached under ~/.cache/cljrsh). Two modes:
+;; Three tiers:
 ;;
-;;   - `q` over plain collections: query any in-memory relations
-;;     (vectors of tuples, or maps via `facts`) — no database needed.
-;;   - `conn`/`transact!`/`db`: a durable LMDB store when facts should
-;;     outlive the process.
+;;   - `q` over plain collections (vectors of tuples, maps via `facts`)
+;;     runs on the NATIVE engine (vendored datascript on cljrs): no pod,
+;;     no network, nothing fetched.
+;;   - `q` and `pull` over a durable `cljrs.dstore` db run natively too;
+;;     open one with cljrs.dstore/open.
+;;   - `conn`/`transact!`/`db`: the datalevin pod's durable store, kept
+;;     for scripts already using it (fetched from the pod registry on
+;;     first use, cached under ~/.cache/cljrsh). `q` falls back to the
+;;     pod only when an input is a pod database value.
 (ns cljrsh.datalog
-  (:require [cljrsh.pods]))
+  (:require [cljrsh.pods]
+            [datascript.db]
+            [datascript.query]))
 
 (def ^:private pod-version "1.0.2")
 
@@ -27,11 +33,30 @@
   (or (resolve (symbol "pod.huahaiy.datalevin" name*))
       (throw (ex-info (str "datalevin pod does not expose " name*) {:fn name*}))))
 
+(defn- native-input?
+  "True when the native engine can consume X directly: plain data, a
+  collection of tuples, or anything satisfying the db protocols. Pod
+  database values are opaque handles and fail all of these."
+  [x]
+  (or (nil? x)
+      (coll? x)
+      (string? x)
+      (number? x)
+      (keyword? x)
+      (symbol? x)
+      (boolean? x)
+      (datascript.db/db? x)))
+
 (defn q
-  "Run a Datomic-style query. Inputs may be database values or plain
-  collections of tuples: (q '[:find ?n :where [?e :name ?n]] [[1 :name \"x\"]])."
+  "Run a Datomic-style query. Inputs may be plain collections of tuples,
+  durable cljrs.dstore dbs, or datalevin pod database values:
+    (q '[:find ?n :where [?e :name ?n]] [[1 :name \"x\"]])
+  Collection and dstore inputs run on the native engine; a pod database
+  value routes the query to the pod."
   [query & inputs]
-  (apply @(pod-fn "q") query inputs))
+  (if (every? native-input? inputs)
+    (apply datascript.query/q query inputs)
+    (apply @(pod-fn "q") query inputs)))
 
 (defn facts
   "Turn maps into [entity attr value] triples with generated entity ids,
@@ -46,8 +71,9 @@
                maps)))
 
 (defn conn
-  "Open (creating if needed) a durable connection at dir, with an optional
-  datalevin schema map."
+  "Open (creating if needed) a durable pod connection at dir, with an
+  optional datalevin schema map. For a native durable db see
+  cljrs.dstore/open."
   ([dir] (@(pod-fn "get-conn") dir))
   ([dir schema] (@(pod-fn "get-conn") dir schema)))
 
