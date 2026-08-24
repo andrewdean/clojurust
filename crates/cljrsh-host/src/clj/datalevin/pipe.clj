@@ -57,7 +57,10 @@
       (if (< i (count tuples))
         (let [t (nth tuples i)]
           (vswap! state clojure.core/assoc :i (inc i))
-          t)
+          (if (identical? :datalevin/end-scan t)
+            (do (vswap! state clojure.core/assoc :finished true)
+                nil)
+            t))
         (when-not finished
           (u/raise "Producing from an unfinished pipe in single-threaded mode"
                    {})))))
@@ -77,10 +80,15 @@
     (let [{:keys [tuples i finished]} @state]
       (if (< i (count tuples))
         (let [t (nth tuples i)]
-          (vswap! state #(-> %
-                             (clojure.core/assoc :i (inc i))
-                             (clojure.core/update :total inc)))
-          t)
+          (if (identical? :datalevin/end-scan t)
+            (do (vswap! state #(-> %
+                                   (clojure.core/assoc :i (inc i))
+                                   (clojure.core/assoc :finished true)))
+                nil)
+            (do (vswap! state #(-> %
+                                   (clojure.core/assoc :i (inc i))
+                                   (clojure.core/update :total inc)))
+                t)))
         (when-not finished
           (u/raise "Producing from an unfinished pipe in single-threaded mode"
                    {})))))

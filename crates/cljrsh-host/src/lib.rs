@@ -133,6 +133,10 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         include_str!("clj/datalevin/interface.clj"),
     ),
     (
+        "datalevin.storage",
+        include_str!("clj/datalevin/storage.clj"),
+    ),
+    (
         "datalevin.timeout",
         include_str!("clj/datalevin/timeout.clj"),
     ),
