@@ -270,9 +270,22 @@ default, and it stays contained inside the store crate.
    Runtime feature: interop method calls on deftype/defrecord
    dispatch to protocol methods ((.-field x) stays field access);
    CompletableFuture/ConcurrentHashMap/putIfAbsent shims; pipes
-   answer .add/.addAll. Conformance case 088. Final rung: execute
-   (2.8k lines) + access/ave + access/function + query.cache ->
-   the datalevin.query facade, then wire cljrsh.datalog to it.
+   answer .add/.addAll. Conformance case 088. Engine COMPLETE
+   2026-08-23 (ca864edc): execute, access.ave, access.function,
+   cache, pull-parser, pull-api, and the datalevin.query facade all
+   vendor; (q '[:find ...] db) runs the complete pipeline — parse,
+   cost-based planning, step execution — natively against the Rust
+   LMDB store. Twenty-one query shapes verified (conformance 089):
+   joins, predicates, :in, scalar/coll/tuple finds, aggregates,
+   not/or/not-join, recursive rules, fn bindings, :order-by/:limit/
+   :offset, pull attr-lists/nested-refs/wildcard/find-specs,
+   collection sources. Load-bearing: the storage adapter now uses
+   NATIVE aids (attrs_with_aids) so schema aid order matches eav
+   iteration order — pull's merge join depends on it. Deferred:
+   fulltext/vector/idoc access (:clj-gated), result caching (needs
+   db invalidation hooks), remote paths. Next: swap the
+   cljrsh.datalog veneer to the native engine (phase 6) and port the
+   datalevin test suite as the conformance gate (phase 5).
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
