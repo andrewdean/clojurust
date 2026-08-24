@@ -30,9 +30,11 @@
     :eof     — value returned on empty input (default: throw)"
   ([s] (read-string {} s))
   ([opts s]
-   (let [v (edn-read-string* s)]
-     (if (= v :cljrs.edn/eof)
-       (if (contains? opts :eof)
-         (:eof opts)
-         (throw (ex-info "EOF while reading" {})))
-       (resolve-tags opts v)))))
+   ;; As in Clojure: nil input reads as nil (no EOF handling applies).
+   (when (some? s)
+     (let [v (edn-read-string* s)]
+       (if (= v :cljrs.edn/eof)
+         (if (contains? opts :eof)
+           (:eof opts)
+           (throw (ex-info "EOF while reading" {})))
+         (resolve-tags opts v))))))

@@ -437,13 +437,15 @@
   with binding-form bound to the value of test, otherwise else."
   ([bindings then] (list 'if-let bindings then nil))
   ([bindings then else]
-   (let [form (nth bindings 0)
-         tst  (nth bindings 1)
-         temp (gensym "if_let__")]
-     (list 'let (vector temp tst)
-           (list 'if temp
-                 (list 'let (vector form temp) then)
-                 else)))))
+   (if (= 2 (count bindings))
+     (let [form (nth bindings 0)
+           tst  (nth bindings 1)
+           temp (gensym "if_let__")]
+       (list 'let (vector temp tst)
+             (list 'if temp
+                   (list 'let (vector form temp) then)
+                   else)))
+     (throw (ex-info "if-let requires exactly 2 forms in binding vector" {})))))
 
 (defmacro when-let
   "bindings => binding-form test. If test is logical true, evaluates body
@@ -1576,13 +1578,15 @@
   binding-form bound to the value of test, otherwise else."
   ([bindings then] (list 'if-some bindings then nil))
   ([bindings then else]
-   (let [form (nth bindings 0)
-         tst  (nth bindings 1)
-         temp (gensym "if_some__")]
-     (list 'let (vector temp tst)
-           (list 'if (list 'nil? temp)
-                 else
-                 (list 'let (vector form temp) then))))))
+   (if (= 2 (count bindings))
+     (let [form (nth bindings 0)
+           tst  (nth bindings 1)
+           temp (gensym "if_some__")]
+       (list 'let (vector temp tst)
+             (list 'if (list 'nil? temp)
+                   else
+                   (list 'let (vector form temp) then))))
+     (throw (ex-info "if-some requires exactly 2 forms in binding vector" {})))))
 
 (defmacro when-some
   "bindings => binding-form test. If test is not nil, evaluates body with
