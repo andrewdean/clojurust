@@ -14,7 +14,7 @@ cljrs-value   = { workspace = true }
 cljrs-process = { workspace = true }
 cljrs-builtins = { workspace = true }
 cljrs-reader  = { workspace = true }
-cljrs-datalog-store = { path = "../cljrs-datalog-store" }
+cljrs-datalog-store = { path = "../cljrs-datalog-store", version = "0.1.0" }
 serde_json = "1"
 walkdir    = "2"
 globset    = "0.4"

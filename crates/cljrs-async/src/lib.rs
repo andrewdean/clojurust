@@ -1,4 +1,6 @@
 #![allow(clippy::type_complexity)]
+// EvalResult by value everywhere, as in cljrs-interp and the other eval crates.
+#![allow(clippy::result_large_err)]
 //! Async runtime for clojurust — `clojure.core.async` via Tokio.
 //!
 //! # Usage

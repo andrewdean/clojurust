@@ -1,3 +1,5 @@
+// EvalResult by value everywhere, as in cljrs-interp and the other eval crates.
+#![allow(clippy::result_large_err)]
 //! Networking for clojurust — TCP, Unix, UDP, TLS over core.async channels.
 //!
 //! # Usage
