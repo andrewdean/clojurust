@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "clap",
  "cljrs-async",
@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-async"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-builtins",
  "cljrs-env",
@@ -1278,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-base64"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "base64 0.22.1",
  "cljrs-env",
@@ -1292,14 +1292,14 @@ dependencies = [
 
 [[package]]
 name = "cljrs-bencode"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "cljrs-blake3"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "blake3",
  "cljrs-env",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-builtins"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "bigdecimal",
  "cljrs-env",
@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-charset"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-env",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-compiler"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-base64",
@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-datalog-store"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-lmdb",
  "sha2 0.10.9",
@@ -1384,7 +1384,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-deps"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-gc",
  "cljrs-reader",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-dom"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-env",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-dylib"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-deps",
  "cljrs-env",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-env"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-deps",
  "cljrs-gc",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-eval"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-builtins",
  "cljrs-env",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-export-macro"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1467,7 +1467,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-gc"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "bigdecimal",
  "cljrs-logging",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-interop"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-env",
  "cljrs-export-macro",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-interp"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-builtins",
  "cljrs-env",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-io"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-env",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-ir"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-reader",
  "cljrs-types",
@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-ir-prebuild"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "clap",
  "cljrs-env",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-ir-viz"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-compiler",
  "cljrs-ir",
@@ -1558,7 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-jit"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-compiler",
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-lmdb"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cc",
  "tempfile",
@@ -1590,11 +1590,11 @@ dependencies = [
 
 [[package]]
 name = "cljrs-logging"
-version = "0.1.0"
+version = "0.2.17"
 
 [[package]]
 name = "cljrs-lsp"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-reader",
  "cljrs-types",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-net"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "bytes",
  "cljrs-async",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-nrepl"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-bencode",
  "cljrs-builtins",
@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-process"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-env",
  "cljrs-gc",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-qt"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-bencode",
  "cljrs-eval",
@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-reader"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-types",
  "miette 7.6.0",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-runtime"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-eval",
  "cljrs-gc",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-stdlib"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-builtins",
  "cljrs-env",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-tx"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-env",
  "cljrs-gc",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-types"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "miette 7.6.0",
  "serde",
@@ -1732,7 +1732,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-value"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "arc-swap",
  "bigdecimal",
@@ -1751,7 +1751,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-vcs"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "gix",
  "pgp",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "cljrs-wasm"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-builtins",
@@ -1787,7 +1787,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-async",
  "cljrs-base64",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-aws"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
@@ -1840,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-host"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-builtins",
  "cljrs-datalog-store",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-k8s"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-env",
  "cljrs-gc",
@@ -1890,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-nu"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "chrono",
  "cljrs-env",
@@ -1910,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-pods"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-bencode",
  "cljrs-builtins",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "cljrsh-project"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-reader",
  "cljrs-types",
@@ -8608,7 +8608,7 @@ dependencies = [
 
 [[package]]
 name = "rust-interop-example"
-version = "0.1.0"
+version = "0.2.17"
 dependencies = [
  "cljrs-eval",
  "cljrs-gc",
