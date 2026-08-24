@@ -198,7 +198,10 @@ pub async fn eval_async(form: &Form, env: &mut Env) -> EvalResult {
     };
 
     if let FormKind::Symbol(s) = &forms[0].kind {
-        match s.as_str() {
+        // A clojure.core-qualified head is the same special form:
+        // (clojure.core/or ...) must not fall through to a call of the
+        // nil-returning `or` stub.
+        match s.strip_prefix("clojure.core/").unwrap_or(s.as_str()) {
             "await" => return eval_await_async(&forms[1..], env).await,
             // 1-arity deref of a future/promise yields cooperatively; other
             // deref targets (and the 3-arity timeout form) take the sync path.

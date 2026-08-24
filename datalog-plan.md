@@ -182,8 +182,18 @@ default, and it stays contained inside the store crate.
    the contiguous fulltext/vector/idoc block (lines ~210-770) and its
    query-fns entries gated to :clj until the db/storage adapters exist;
    its ns requires on db/storage/idoc/embedding gate the same way.
-   Then the optimizer tree (query/plan/resolve/execute) against the
-   store's IStore adapter.
+   Built-ins rung done 2026-08-23: datalevin.built-ins loads with 84
+   query-fns; like/not-like (SQL LIKE with escape chars, portable
+   regex compiler + atom caches), in/not-in, and the predicate and
+   aggregate registry all verified; the storage-dependent block
+   (fulltext/vector/idoc, ~580 lines) stubs with raise until the
+   db/storage adapters land (conformance case 083). Surfaced and
+   fixed an evaluator-family bug: clojure.core-qualified special
+   forms ((clojure.core/or ...) etc.) fell through to nil-returning
+   stub calls in all three dispatch paths (tree-walker, IR lowering,
+   async driver); each now strips the clojure.core/ prefix before the
+   special-form check. Next rung: the optimizer tree
+   (query/plan/resolve/execute) against the store's IStore adapter.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

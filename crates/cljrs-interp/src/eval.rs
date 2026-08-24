@@ -220,11 +220,14 @@ fn eval_list(forms: &[Form], env: &mut Env) -> EvalResult {
         forms
     };
 
-    // Check for special form.
-    if let FormKind::Symbol(s) = &forms[0].kind
-        && is_special_form(s)
-    {
-        return eval_special(s, &forms[1..], env);
+    // Check for special form. A clojure.core-qualified reference is the
+    // same special form: (clojure.core/or ...) must not fall through to
+    // function-call evaluation.
+    if let FormKind::Symbol(s) = &forms[0].kind {
+        let bare = s.strip_prefix("clojure.core/").unwrap_or(s);
+        if is_special_form(bare) {
+            return eval_special(bare, &forms[1..], env);
+        }
     }
 
     eval_call(&forms[0], &forms[1..], env)

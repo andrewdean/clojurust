@@ -1420,6 +1420,10 @@ fn eval_or(args: &[Form], env: &mut Env) -> EvalResult {
 fn eval_require(args: &[Form], env: &mut Env) -> EvalResult {
     for arg in args {
         let val = eval(arg, env)?;
+        // A nil spec is a conditionally elided require (#?(:cljrsh nil ...)).
+        if matches!(val, Value::Nil) {
+            continue;
+        }
         let spec = parse_require_spec_val(val).map_err(EvalError::Runtime)?;
         load_ns(env.globals.clone(), &spec, &env.current_ns)?;
     }
@@ -1704,6 +1708,10 @@ fn eval_ns(args: &[Form], env: &mut Env) -> EvalResult {
                     // Expand reader conditionals among require specs
                     let expanded = expand_reader_conds(&items[1..]);
                     for spec_form in &expanded {
+                        // Nil specs are conditionally elided requires.
+                        if matches!(spec_form.kind, FormKind::Nil) {
+                            continue;
+                        }
                         let spec =
                             parse_require_spec_form(spec_form).map_err(EvalError::Runtime)?;
                         load_ns(env.globals.clone(), &spec, &name)?;

@@ -379,7 +379,11 @@ fn lower_list(ctx: &mut LowerCtx, parts: &[Form]) -> R {
         return lower_call(ctx, head, args);
     };
 
-    match sym.as_str() {
+    // A clojure.core-qualified reference is the same special form:
+    // (clojure.core/or ...) must not lower to a call of the `or` stub.
+    let sym = sym.strip_prefix("clojure.core/").unwrap_or(sym.as_str());
+
+    match sym {
         "if" => lower_if(ctx, args),
         "do" => lower_body(ctx, args),
         "let" | "let*" => lower_let(ctx, args),
@@ -451,7 +455,7 @@ fn lower_list(ctx: &mut LowerCtx, parts: &[Form]) -> R {
             }
             let arg_vars: Result<Vec<VarId>, _> = args.iter().map(|a| lower_form(ctx, a)).collect();
             let dst = ctx.fresh_var();
-            ctx.emit(Inst::CallDirect(dst, Arc::from(sym.as_str()), arg_vars?));
+            ctx.emit(Inst::CallDirect(dst, Arc::from(sym), arg_vars?));
             Ok(dst)
         }
         // Protocol/record forms and other constructs fall through to a

@@ -132,6 +132,10 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "datalevin.interface",
         include_str!("clj/datalevin/interface.clj"),
     ),
+    (
+        "datalevin.built-ins",
+        include_str!("clj/datalevin/built_ins.clj"),
+    ),
 ];
 
 /// Register every native namespace and compat source into `globals`.
