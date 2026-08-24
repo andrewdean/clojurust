@@ -14,7 +14,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  BASE_VERSION: "0.1"
+  # The run counter reset when this workflow was recreated, so 0.1.<run>
+  # collides with versions published under the old counter (crates.io is at
+  # 0.1.247). 0.2.<run> stays clear of that whole range.
+  BASE_VERSION: "0.2"
 
 jobs:
   ci:
