@@ -11,8 +11,9 @@
 ;;     store (cost-based planner included).
 ;;
 ;; The native durable format is cljrs-datalog-store's own; databases
-;; created by the retired datalevin pod are a different on-disk format
-;; and need a re-import (q the old data out, transact! it in).
+;; created by the retired datalevin pod are a different on-disk format.
+;; `migrate-pod-db!` imports one (it loads the pod one last time to read
+;; the old data out, then writes it natively).
 (ns cljrsh.datalog
   (:require [datalevin.db :as ddb]
             [datalevin.datom :as dd]
@@ -178,6 +179,40 @@
     (pull (db conn) [:name {:friend [:name]}] 1)"
   [db pattern eid]
   (dpa/pull db pattern eid))
+
+;; ── pod-era migration ────────────────────────────────────────────────
+
+(def ^:private pod-version "1.0.2")
+
+(defn migrate-pod-db!
+  "One-time import of a database created by the retired datalevin pod
+  into the native durable format:
+    (migrate-pod-db! \"/old/pod-db\" \"/new/native-db\")
+  Loads the pod (cached under ~/.cache/cljrsh, fetched once if absent),
+  reads the old db's schema and datoms, and writes them to NEW-DIR with
+  entity ids preserved. Returns {:datoms n :schema {..}}; query NEW-DIR
+  afterwards with (conn new-dir)."
+  [old-dir new-dir]
+  (when (= (str old-dir) (str new-dir))
+    (raise "Migration needs a fresh directory; the formats cannot share one"
+           {:old-dir (str old-dir) :new-dir (str new-dir)}))
+  (require 'babashka.pods)
+  ((resolve 'babashka.pods/load-pod) 'huahaiy/datalevin pod-version)
+  ((resolve 'babashka.pods/add-transit-read-handler!) "datalevin/Datom" vec)
+  (require 'pod.huahaiy.datalevin)
+  (let [pod-fn   #(or (resolve (symbol "pod.huahaiy.datalevin" %))
+                      (raise "datalevin pod does not expose " % {:fn %}))
+        pod-conn (@(pod-fn "get-conn") (str old-dir))
+        schema   (into {}
+                       (remove (fn [[a _]] (= "db" (namespace a))))
+                       (@(pod-fn "schema") pod-conn))
+        eavs     (mapv vec (@(pod-fn "datoms") (@(pod-fn "db") pod-conn) :eav))]
+    (@(pod-fn "close") pod-conn)
+    (let [d1 (ddb/empty-db (str new-dir) schema)]
+      (dst/load-datoms (:store d1)
+                       (map (fn [[e a v]] (dd/datom e a v)) eavs))
+      (dst/close (:store d1))
+      {:datoms (count eavs) :schema schema})))
 
 (defn entity
   "Pull a whole entity map by id."
