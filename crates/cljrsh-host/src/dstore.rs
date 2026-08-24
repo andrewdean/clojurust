@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use cljrs_datalog_store::{AttrProps, Datom, Op, Store, StoreValue};
+use cljrs_datalog_store::{AttrProps, Datom, Op, Store, StoreValue, Bound, Index};
 use cljrs_gc::{GcPtr, MarkVisitor, Trace};
 use cljrs_interop::{Registry, wrap_fn_variadic, wrap_fn1, wrap_fn2};
 use cljrs_value::value::MapValue;
@@ -170,6 +170,79 @@ fn props_from_map(v: &Value) -> Result<AttrProps, String> {
     Ok(props)
 }
 
+fn index_arg(v: &Value) -> Result<Index, String> {
+    match v.unwrap_meta() {
+        Value::Keyword(k) => match k.get().full_name().as_str() {
+            "eav" => Ok(Index::Eav),
+            "ave" => Ok(Index::Ave),
+            "vae" => Ok(Index::Vae),
+            other => Err(format!("unknown index: :{other}")),
+        },
+        other => Err(format!("index must be a keyword, got {}", other.type_name())),
+    }
+}
+
+/// A bound crosses as `[e a v]` or `[e a v closed?]` with nil wildcards;
+/// nil (or an absent arg) is the unbounded bound.
+fn bound_parts(
+    store: &Store,
+    index: Index,
+    v: Option<&Value>,
+) -> Result<(Option<u64>, Option<String>, Option<StoreValue>, bool), String> {
+    let val = match v.map(Value::unwrap_meta) {
+        None | Some(Value::Nil) => return Ok((None, None, None, true)),
+        Some(val) => val,
+    };
+    let Value::Vector(parts) = val else {
+        return Err("bound must be a vector [e a v] or [e a v closed?]".into());
+    };
+    let parts: Vec<Value> = parts.get().iter().cloned().collect();
+    let e = opt_eid(parts.first())?;
+    let a = opt_attr(parts.get(1))?;
+    let sv = match parts.get(2).map(Value::unwrap_meta) {
+        None | Some(Value::Nil) => None,
+        // The vae index keys refs; a bare integer there is a ref target.
+        Some(Value::Long(n)) if index == Index::Vae && *n >= 0 => {
+            Some(StoreValue::Ref(*n as u64))
+        }
+        Some(val) => Some(to_store_value(store, a.as_deref(), val)?),
+    };
+    let closed = !matches!(parts.get(3).map(Value::unwrap_meta), Some(Value::Bool(false)));
+    Ok((e, a, sv, closed))
+}
+
+fn slice_impl(store: &Store, args: &[Value], reverse: bool) -> Result<Value, String> {
+    let index = index_arg(&args[1])?;
+    let (le, la, lv, lc) = bound_parts(store, index, args.get(2))?;
+    let (he, ha, hv, hc) = bound_parts(store, index, args.get(3))?;
+    let low = Bound {
+        e: le,
+        a: la.as_deref(),
+        v: lv.as_ref(),
+        closed: lc,
+    };
+    let high = Bound {
+        e: he,
+        a: ha.as_deref(),
+        v: hv.as_ref(),
+        closed: hc,
+    };
+    let limit = match args.get(4).map(Value::unwrap_meta) {
+        None | Some(Value::Nil) => None,
+        Some(Value::Long(n)) if *n >= 0 => Some(*n as usize),
+        Some(other) => {
+            return Err(format!(
+                "limit must be a non-negative integer, got {}",
+                other.type_name()
+            ));
+        }
+    };
+    let ds = store
+        .slice(index, &low, &high, limit, reverse)
+        .map_err(|e| e.to_string())?;
+    Ok(datoms_value(&ds))
+}
+
 fn search_impl(store: &Store, args: &[Value]) -> Result<Value, String> {
     let e = opt_eid(args.get(1))?;
     let a = opt_attr(args.get(2))?;
@@ -327,6 +400,56 @@ pub fn register(registry: &mut Registry) {
                     let n = eid_arg(args[2].unwrap_meta(), "sample size")?;
                     let ds = store.sample_ave(&a, n).map_err(|err| err.to_string())?;
                     Ok(datoms_value(&ds))
+                })
+            },
+        ),
+    );
+    registry.define(
+        &format!("{NS}/slice"),
+        wrap_fn_variadic(
+            format!("{NS}/slice"),
+            4,
+            |args: &[Value]| -> Result<Value, String> {
+                with_store(&args[0], |store| slice_impl(store, args, false))
+            },
+        ),
+    );
+    registry.define(
+        &format!("{NS}/rslice"),
+        wrap_fn_variadic(
+            format!("{NS}/rslice"),
+            4,
+            |args: &[Value]| -> Result<Value, String> {
+                with_store(&args[0], |store| slice_impl(store, args, true))
+            },
+        ),
+    );
+    registry.define(
+        &format!("{NS}/count-range"),
+        wrap_fn_variadic(
+            format!("{NS}/count-range"),
+            4,
+            |args: &[Value]| -> Result<Value, String> {
+                with_store(&args[0], |store| {
+                    let index = index_arg(&args[1])?;
+                    let (le, la, lv, lc) = bound_parts(store, index, args.get(2))?;
+                    let (he, ha, hv, hc) = bound_parts(store, index, args.get(3))?;
+                    let low = Bound {
+                        e: le,
+                        a: la.as_deref(),
+                        v: lv.as_ref(),
+                        closed: lc,
+                    };
+                    let high = Bound {
+                        e: he,
+                        a: ha.as_deref(),
+                        v: hv.as_ref(),
+                        closed: hc,
+                    };
+                    let n = store
+                        .count_range(index, &low, &high)
+                        .map_err(|e| e.to_string())?;
+                    Ok(Value::Long(n as i64))
                 })
             },
         ),

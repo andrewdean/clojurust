@@ -765,6 +765,316 @@ impl Store {
         }
         Ok(out)
     }
+
+    fn index_dbi(&self, index: Index) -> Dbi {
+        match index {
+            Index::Eav => self.eav,
+            Index::Ave => self.ave,
+            Index::Vae => self.vae,
+        }
+    }
+
+    /// Encode a bound's provided components (contiguous from the index's
+    /// most-significant position) into a key prefix. `Ok(None)` means the
+    /// bound names an unknown attribute, so the range is empty.
+    fn bound_prefix(
+        &self,
+        ro: &RoTxn<'_>,
+        index: Index,
+        b: &Bound<'_>,
+    ) -> Result<Option<Vec<u8>>> {
+        let mut key = Vec::new();
+        match index {
+            Index::Eav => {
+                if let Some(e) = b.e {
+                    key.extend_from_slice(&e.to_be_bytes());
+                    if let Some(name) = b.a {
+                        let Some(aid) = self.lookup_aid(name) else {
+                            return Ok(None);
+                        };
+                        key.extend_from_slice(&aid.to_be_bytes());
+                        if let Some(v) = b.v {
+                            key.extend_from_slice(&self.encode_value_readonly(ro, v)?);
+                        }
+                    } else if b.v.is_some() {
+                        return Err(StoreError::Codec("eav bound has v without a"));
+                    }
+                } else if b.a.is_some() || b.v.is_some() {
+                    return Err(StoreError::Codec("eav bound has a/v without e"));
+                }
+            }
+            Index::Ave => {
+                if let Some(name) = b.a {
+                    let Some(aid) = self.lookup_aid(name) else {
+                        return Ok(None);
+                    };
+                    key.extend_from_slice(&aid.to_be_bytes());
+                    if let Some(v) = b.v {
+                        key.extend_from_slice(&self.encode_value_readonly(ro, v)?);
+                        if let Some(e) = b.e {
+                            key.extend_from_slice(&e.to_be_bytes());
+                        }
+                    } else if b.e.is_some() {
+                        return Err(StoreError::Codec("ave bound has e without v"));
+                    }
+                } else if b.v.is_some() || b.e.is_some() {
+                    return Err(StoreError::Codec("ave bound has v/e without a"));
+                }
+            }
+            Index::Vae => match b.v {
+                Some(StoreValue::Ref(target)) => {
+                    key.extend_from_slice(&target.to_be_bytes());
+                    if let Some(name) = b.a {
+                        let Some(aid) = self.lookup_aid(name) else {
+                            return Ok(None);
+                        };
+                        key.extend_from_slice(&aid.to_be_bytes());
+                        if let Some(e) = b.e {
+                            key.extend_from_slice(&e.to_be_bytes());
+                        }
+                    } else if b.e.is_some() {
+                        return Err(StoreError::Codec("vae bound has e without a"));
+                    }
+                }
+                Some(_) => return Err(StoreError::Codec("vae bound v must be a ref")),
+                None => {
+                    if b.a.is_some() || b.e.is_some() {
+                        return Err(StoreError::Codec("vae bound has a/e without v"));
+                    }
+                }
+            },
+        }
+        Ok(Some(key))
+    }
+
+    fn decode_index_entry(&self, ro: &RoTxn<'_>, index: Index, k: &[u8]) -> Result<Datom> {
+        match index {
+            Index::Eav => {
+                let e = u64::from_be_bytes(
+                    k.get(..8)
+                        .ok_or(StoreError::Codec("short eav key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                let aid = u32::from_be_bytes(
+                    k.get(8..12)
+                        .ok_or(StoreError::Codec("short eav key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                let (v, _) = self.decode_value(ro, &k[12..])?;
+                Ok(Datom {
+                    e,
+                    a: self.attr_name(aid)?,
+                    v,
+                })
+            }
+            Index::Ave => {
+                let aid = u32::from_be_bytes(
+                    k.get(..4)
+                        .ok_or(StoreError::Codec("short ave key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                let (v, used) = self.decode_value(ro, &k[4..])?;
+                let e = u64::from_be_bytes(
+                    k.get(4 + used..4 + used + 8)
+                        .ok_or(StoreError::Codec("short ave key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                Ok(Datom {
+                    e,
+                    a: self.attr_name(aid)?,
+                    v,
+                })
+            }
+            Index::Vae => {
+                let target = u64::from_be_bytes(
+                    k.get(..8)
+                        .ok_or(StoreError::Codec("short vae key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                let aid = u32::from_be_bytes(
+                    k.get(8..12)
+                        .ok_or(StoreError::Codec("short vae key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                let e = u64::from_be_bytes(
+                    k.get(12..20)
+                        .ok_or(StoreError::Codec("short vae key"))?
+                        .try_into()
+                        .expect("length checked"),
+                );
+                Ok(Datom {
+                    e,
+                    a: self.attr_name(aid)?,
+                    v: StoreValue::Ref(target),
+                })
+            }
+        }
+    }
+
+    /// Resolve a bound pair into the effective [lo_key, hi_exclusive)
+    /// byte range. `Ok(None)` means the range is provably empty.
+    #[allow(clippy::type_complexity)]
+    fn resolve_range(
+        &self,
+        ro: &RoTxn<'_>,
+        index: Index,
+        low: &Bound<'_>,
+        high: &Bound<'_>,
+    ) -> Result<Option<(Vec<u8>, Option<Vec<u8>>)>> {
+        let Some(lo_prefix) = self.bound_prefix(ro, index, low)? else {
+            return Ok(None);
+        };
+        let Some(hi_prefix) = self.bound_prefix(ro, index, high)? else {
+            return Ok(None);
+        };
+        let lo_key = if low.closed || lo_prefix.is_empty() {
+            lo_prefix
+        } else {
+            match prefix_successor(&lo_prefix) {
+                Some(s) => s,
+                None => return Ok(None),
+            }
+        };
+        let hi_excl = if hi_prefix.is_empty() {
+            None
+        } else if high.closed {
+            prefix_successor(&hi_prefix)
+        } else {
+            Some(hi_prefix)
+        };
+        if let Some(hi) = &hi_excl
+            && lo_key.as_slice() >= hi.as_slice()
+        {
+            return Ok(None);
+        }
+        Ok(Some((lo_key, hi_excl)))
+    }
+
+    /// Ordered datoms within an index range given by partial-datom bounds
+    /// (inclusive unless a bound is open). Missing bound components mean
+    /// +/- infinity. `reverse` walks high-to-low; `limit` caps the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying storage or codec error, or a codec error
+    /// for non-contiguous bound components.
+    pub fn slice(
+        &self,
+        index: Index,
+        low: &Bound<'_>,
+        high: &Bound<'_>,
+        limit: Option<usize>,
+        reverse: bool,
+    ) -> Result<Vec<Datom>> {
+        if limit == Some(0) {
+            return Ok(Vec::new());
+        }
+        let ro = self.env.read_txn()?;
+        let dbi = self.index_dbi(index);
+        let Some((lo_key, hi_excl)) = self.resolve_range(&ro, index, low, high)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        if reverse {
+            let mut cur = ro.cursor(dbi)?;
+            let mut entry = match &hi_excl {
+                None => cur.last()?,
+                Some(hi) => match cur.set_range(hi)? {
+                    Some(_) => cur.prev()?,
+                    None => cur.last()?,
+                },
+            };
+            while let Some((k, _)) = entry {
+                if k < lo_key.as_slice() {
+                    break;
+                }
+                out.push(self.decode_index_entry(&ro, index, k)?);
+                if limit.is_some_and(|n| out.len() >= n) {
+                    break;
+                }
+                entry = cur.prev()?;
+            }
+        } else {
+            let start = if lo_key.is_empty() {
+                None
+            } else {
+                Some(lo_key.as_slice())
+            };
+            for entry in ro.range(dbi, start, None)? {
+                let (k, _) = entry?;
+                if let Some(hi) = &hi_excl
+                    && k >= hi.as_slice()
+                {
+                    break;
+                }
+                out.push(self.decode_index_entry(&ro, index, k)?);
+                if limit.is_some_and(|n| out.len() >= n) {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// O(log n) count of datoms within an index range given by
+    /// partial-datom bounds, via rank differences.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying storage or codec error, or a codec error
+    /// for non-contiguous bound components.
+    pub fn count_range(&self, index: Index, low: &Bound<'_>, high: &Bound<'_>) -> Result<u64> {
+        let ro = self.env.read_txn()?;
+        let dbi = self.index_dbi(index);
+        let Some((lo_key, hi_excl)) = self.resolve_range(&ro, index, low, high)? else {
+            return Ok(0);
+        };
+        let start = if lo_key.is_empty() {
+            0
+        } else {
+            ro.count_below(dbi, &lo_key)?
+        };
+        let end = match &hi_excl {
+            Some(hi) => ro.count_below(dbi, hi)?,
+            None => ro.count_all(dbi)?,
+        };
+        Ok(end.saturating_sub(start))
+    }
+}
+
+/// Index selector for range scans.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Index {
+    Eav,
+    Ave,
+    Vae,
+}
+
+/// A partial-datom range bound. Components must be contiguous from the
+/// index's most-significant position; a missing tail means +/- infinity.
+/// `closed` marks the bound inclusive (the default shape).
+pub struct Bound<'a> {
+    pub e: Option<u64>,
+    pub a: Option<&'a str>,
+    pub v: Option<&'a StoreValue>,
+    pub closed: bool,
+}
+
+impl Default for Bound<'_> {
+    fn default() -> Self {
+        Bound {
+            e: None,
+            a: None,
+            v: None,
+            closed: true,
+        }
+    }
 }
 
 fn eav_key(e: u64, aid: u32, venc: &[u8]) -> Vec<u8> {

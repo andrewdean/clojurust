@@ -340,3 +340,107 @@ fn ref_typed_attrs_and_next_eid() {
     assert_eq!(store.next_eid(4).expect("next"), Some(7));
     assert_eq!(store.next_eid(8).expect("next"), None);
 }
+
+#[test]
+fn slice_and_count_range() {
+    use cljrs_datalog_store::{Bound, Index};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path()).expect("open");
+    store
+        .transact(&[
+            add(1, "age", StoreValue::Long(20)),
+            add(2, "age", StoreValue::Long(30)),
+            add(3, "age", StoreValue::Long(40)),
+            add(4, "age", StoreValue::Long(50)),
+            add(1, "name", s("Ivan")),
+            add(2, "name", s("Petr")),
+        ])
+        .expect("tx");
+
+    let all = Bound::default();
+    // Full eav slice in entity order.
+    let eav = store
+        .slice(Index::Eav, &all, &all, None, false)
+        .expect("slice");
+    assert_eq!(eav.len(), 6);
+    assert_eq!(eav[0].e, 1);
+
+    // ave value range [30, 50] inclusive.
+    let v30 = StoreValue::Long(30);
+    let v50 = StoreValue::Long(50);
+    let lo = Bound {
+        a: Some("age"),
+        v: Some(&v30),
+        ..Bound::default()
+    };
+    let hi = Bound {
+        a: Some("age"),
+        v: Some(&v50),
+        ..Bound::default()
+    };
+    let mid = store
+        .slice(Index::Ave, &lo, &hi, None, false)
+        .expect("slice");
+    let vals: Vec<_> = mid.iter().map(|d| d.e).collect();
+    assert_eq!(vals, [2, 3, 4]);
+    assert_eq!(store.count_range(Index::Ave, &lo, &hi).expect("count"), 3);
+
+    // Open lower bound excludes 30; open upper excludes 50.
+    let lo_open = Bound {
+        closed: false,
+        ..lo
+    };
+    let hi_open = Bound {
+        closed: false,
+        ..hi
+    };
+    let open = store
+        .slice(Index::Ave, &lo_open, &hi_open, None, false)
+        .expect("slice");
+    assert_eq!(open.iter().map(|d| d.e).collect::<Vec<_>>(), [3]);
+    assert_eq!(
+        store
+            .count_range(Index::Ave, &lo_open, &hi_open)
+            .expect("count"),
+        1
+    );
+
+    // Reverse with limit.
+    let rev = store
+        .slice(Index::Ave, &lo, &hi, Some(2), true)
+        .expect("slice");
+    assert_eq!(rev.iter().map(|d| d.e).collect::<Vec<_>>(), [4, 3]);
+
+    // Attr-only bounds cover the attribute extent.
+    let age_only = Bound {
+        a: Some("age"),
+        ..Bound::default()
+    };
+    assert_eq!(
+        store
+            .count_range(Index::Ave, &age_only, &age_only)
+            .expect("count"),
+        4
+    );
+
+    // Unknown attribute means an empty range, not an error.
+    let ghost = Bound {
+        a: Some("ghost"),
+        ..Bound::default()
+    };
+    assert!(store
+        .slice(Index::Ave, &ghost, &ghost, None, false)
+        .expect("slice")
+        .is_empty());
+
+    // eav slice bounded to one entity.
+    let e2 = Bound {
+        e: Some(2),
+        ..Bound::default()
+    };
+    let two = store
+        .slice(Index::Eav, &e2, &e2, None, false)
+        .expect("slice");
+    assert_eq!(two.len(), 2);
+    assert!(two.iter().all(|d| d.e == 2));
+}
