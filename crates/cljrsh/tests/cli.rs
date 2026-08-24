@@ -1107,3 +1107,64 @@ fn kustomize_build_when_kubectl_available() {
         r.stderr
     );
 }
+
+#[test]
+fn file_var_is_script_path_and_lib_path_during_load() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    std::fs::write(
+        dir.path().join("sub/libf.clj"),
+        "(ns libf)\n(def seen *file*)\n",
+    )
+    .unwrap();
+    let script = dir.path().join("main.clj");
+    std::fs::write(
+        &script,
+        "(require 'libf)\n(println *file*)\n(println libf/seen)\n\
+         (println (System/getProperty \"babashka.file\"))\n(println *file*)\n",
+    )
+    .unwrap();
+    let cp = dir.path().join("sub");
+    let r = run(
+        &[
+            "--classpath",
+            cp.to_str().unwrap(),
+            script.to_str().unwrap(),
+        ],
+        None,
+        &[],
+    );
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    let script_abs = std::fs::canonicalize(&script).unwrap();
+    let lib_abs = std::fs::canonicalize(dir.path().join("sub/libf.clj")).unwrap();
+    let lines: Vec<&str> = r.stdout.lines().collect();
+    assert_eq!(lines[0], script_abs.to_str().unwrap());
+    assert_eq!(lines[1], lib_abs.to_str().unwrap());
+    assert_eq!(lines[2], script_abs.to_str().unwrap());
+    // restored after the require finished
+    assert_eq!(lines[3], script_abs.to_str().unwrap());
+}
+
+#[test]
+fn file_var_is_nil_for_eval_mode() {
+    let r = run(&["-e", "(pr *file*)"], None, &[]);
+    assert_eq!(r.stdout, "nil");
+}
+
+#[test]
+fn fs_delete_removes_symlink_to_directory_not_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("realdir");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.path().join("lnk");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let expr = format!(
+        "(require '[cljrsh.fs :as fs]) (fs/delete \"{}\") (pr (fs/exists? \"{}\"))",
+        link.display(),
+        real.display()
+    );
+    let r = run(&["-e", &expr], None, &[]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert_eq!(r.stdout, "true", "the target dir must survive");
+    assert!(!link.exists() && link.symlink_metadata().is_err());
+}

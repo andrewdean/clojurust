@@ -275,7 +275,14 @@ pub fn register(registry: &mut Registry) {
     });
     def1(registry, "delete", |p| {
         let path = Path::new(p);
-        let r = if path.is_dir() {
+        // lstat, not stat: a symlink is deleted itself, never followed —
+        // is_dir() on a symlink-to-directory would route to remove_dir and
+        // fail with ENOTDIR (and following it would be the wrong target).
+        let is_real_dir = path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_dir())
+            .unwrap_or(false);
+        let r = if is_real_dir {
             std::fs::remove_dir(path)
         } else {
             std::fs::remove_file(path)

@@ -213,6 +213,12 @@ fn run(opts: Opts) -> i32 {
                     .unwrap()
                     .push(parent.to_path_buf());
             }
+            // *file* / (System/getProperty "babashka.file"): the script's
+            // absolute path, so scripts can locate themselves.
+            let abs = std::fs::canonicalize(&path)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| path.clone());
+            cljrs_builtins::system::set_file(&globals, &abs);
             exec::run_program(&globals, &src, &path, modes(false))
         }
         Program::Stdin => {

@@ -69,6 +69,21 @@ pub(crate) fn builtin_exit(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
+/// Bind `clojure.core/*file*` to the running script's path and expose it as
+/// the `babashka.file` system property (babashka compat). Called by the
+/// hosting binary for file-backed programs; `-e`/stdin programs leave it nil.
+/// The loader rebinds `*file*` around each source file it loads, so code in
+/// required namespaces sees its own path, as in Clojure.
+pub fn set_file(globals: &Arc<GlobalEnv>, path: &str) {
+    if let Some(var) = globals.lookup_var("clojure.core", "*file*") {
+        var.get().bind(Value::string(path.to_string()));
+    }
+    property_overrides()
+        .lock()
+        .unwrap()
+        .insert("babashka.file".to_string(), path.to_string());
+}
+
 /// Mutable overlay written by `System/setProperty`, checked before the
 /// computed defaults by `System/getProperty`.
 fn property_overrides() -> &'static Mutex<HashMap<String, String>> {

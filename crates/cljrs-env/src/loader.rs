@@ -178,11 +178,24 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
     }
 
     // Evaluate the file in a new Env rooted at the namespace being loaded.
-    // Save and restore *ns* so the caller's namespace is not disturbed.
+    // Save and restore *ns* so the caller's namespace is not disturbed, and
+    // bind *file* to the loading file so code sees its own path (as in
+    // Clojure); builtin sources bind their "<builtin:ns>" marker.
     let saved_ns = globals
         .lookup_var("clojure.core", "*ns*")
         .and_then(|v| crate::dynamics::deref_var(&v));
-    {
+    let saved_file = globals
+        .lookup_var("clojure.core", "*file*")
+        .and_then(|v| crate::dynamics::deref_var(&v));
+    if let Some(var) = globals.lookup_var("clojure.core", "*file*") {
+        // Absolute when the file resolves (relative source paths otherwise
+        // leak into *file*); builtin markers pass through unchanged.
+        let bound = std::fs::canonicalize(&file_path)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| file_path.clone());
+        var.get().bind(cljrs_value::Value::string(bound));
+    }
+    let eval_result = (|| -> EvalResult<()> {
         let mut env = Env::new(globals.clone(), ns_name);
         let mut parser = cljrs_reader::Parser::new(src, file_path);
         let forms = parser.parse_all().map_err(EvalError::Read)?;
@@ -195,13 +208,19 @@ fn do_load(globals: &Arc<GlobalEnv>, ns_name: &Arc<str>) -> EvalResult<()> {
                 .eval(&form, &mut env)
                 .map_err(|e| annotate(e, ns_name))?;
         }
-    }
-    // Restore *ns* to the caller's namespace.
+        Ok(())
+    })();
+    // Restore *ns* and *file* to the caller's values even on error.
     if let Some(saved) = saved_ns
         && let Some(var) = globals.lookup_var("clojure.core", "*ns*")
     {
         var.get().bind(saved);
     }
+    if let Some(var) = globals.lookup_var("clojure.core", "*file*") {
+        var.get()
+            .bind(saved_file.unwrap_or(cljrs_value::Value::Nil));
+    }
+    eval_result?;
 
     Ok(())
 }

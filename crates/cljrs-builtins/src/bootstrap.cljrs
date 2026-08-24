@@ -1284,6 +1284,7 @@
 (def ^:dynamic *print-length* nil)
 (def ^:dynamic *print-level* nil)
 (def ^:dynamic *command-line-args* nil)
+(def ^:dynamic *file* nil)
 (def ^:dynamic *warn-on-reflection* false)
 (def ^:dynamic *unchecked-math* false)
 (def ^:dynamic *unchecked-math* false)

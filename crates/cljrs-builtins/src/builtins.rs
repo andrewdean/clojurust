@@ -1608,6 +1608,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("Math/floor", Arity::Fixed(1), builtin_floor),
         ("Math/ceil", Arity::Fixed(1), builtin_ceil),
         ("Math/addExact", Arity::Fixed(2), builtin_math_add_exact),
+        ("UUID/randomUUID", Arity::Fixed(0), builtin_random_uuid),
         (
             "Math/multiplyExact",
             Arity::Fixed(2),
