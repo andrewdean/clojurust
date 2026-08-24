@@ -283,9 +283,17 @@ default, and it stays contained inside the store crate.
    NATIVE aids (attrs_with_aids) so schema aid order matches eav
    iteration order — pull's merge join depends on it. Deferred:
    fulltext/vector/idoc access (:clj-gated), result caching (needs
-   db invalidation hooks), remote paths. Next: swap the
-   cljrsh.datalog veneer to the native engine (phase 6) and port the
-   datalevin test suite as the conformance gate (phase 5).
+   db invalidation hooks), remote paths. Phase 6 done
+   2026-08-24 (49bccc30): cljrsh.datalog runs everything natively —
+   collections/dstore on datascript, durable conn/db/transact!/q/pull
+   on the datalevin engine; transact! translates Datomic tx-data with
+   two-pass tempid resolution (entity + ref-value positions); the pod
+   is retired (pod-era databases need re-import; noted in ns doc).
+   Conformance case 090. Remaining: phase 5 (port the datalevin test
+   suite as the conformance gate) and the deferred features (result
+   caching with invalidation hooks, the datalevin tx pipeline with
+   uniqueness/component semantics, fulltext/vector/idoc, entity
+   facade, giant GC, perf promotion of hot scan loops into Rust).
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
