@@ -234,8 +234,20 @@ default, and it stays contained inside the store crate.
    extend-protocol); record field injection reaches clause bodies.
    Conformance case 085. Not ported: datalevin tx pipeline (writes go
    through storage/load-datoms), pending-tx caches, result caches,
-   remote, UDF. Next rungs: join/rules -> resolve (+ aggregate/cache)
-   -> graph/range/plan -> execute/access -> the query facade.
+   remote, UDF. Join rung done
+   2026-08-23 (59b08dc2): datalevin.join with a persistent-map
+   :cljrsh arm (vec join keys, vector buckets, pipe/add-one sinks);
+   u/intersection gained a portable arm; the runtime gained mutable
+   java.util collection shims — JavaArrayList (ArrayList./FastList.),
+   JavaHashSet, LongObjectHashMap. alias — integrated with the seq
+   family and ValueIter, plus a fix for (get transient-map k)
+   returning nil. Rules rung done 2026-08-23 (d1e736d7):
+   datalevin.rules vendors near-verbatim on the shims (only imports
+   gated + portable fill-rule-output-and-hash); parse/SCC/dependency/
+   stratification verified, solve-stratified awaits the resolve
+   rung's query context; runtime gained locking, while, (Object.).
+   Conformance case 086. Next rungs: resolve (+ aggregate/cache) ->
+   graph/range/plan -> execute/access -> the query facade.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
