@@ -113,6 +113,16 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "datascript.query",
         include_str!("clj/datascript/query.cljc"),
     ),
+    // Vendored from datalevin 78b199e8 (EPL-2.0, github.com/juji-io/datalevin;
+    // this repo is EPL-1.0 — both Eclipse licenses, version noted) with
+    // :cljrsh reader branches replacing JVM interop. The engine port lands
+    // namespace by namespace; storage-side code stays behind natives.
+    ("datalevin.util", include_str!("clj/datalevin/util.clj")),
+    (
+        "datalevin.constants",
+        include_str!("clj/datalevin/constants.clj"),
+    ),
+    ("datalevin.datom", include_str!("clj/datalevin/datom.clj")),
 ];
 
 /// Register every native namespace and compat source into `globals`.

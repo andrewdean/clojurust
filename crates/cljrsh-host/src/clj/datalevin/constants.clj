@@ -1,0 +1,996 @@
+;;
+;; Copyright (c) Huahai Yang. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://opensource.org/license/epl-2-0)
+;; which can be found in the file LICENSE at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+;;
+(ns datalevin.constants
+  "System vars. Some can be dynamically rebound to change system behavior."
+  (:refer-clojure :exclude [meta])
+  (:require
+   [clojure.string :as s]
+   [datalevin.util :as u])
+  (:import
+   [java.io File]
+   [java.util UUID Arrays HashSet]
+   [java.math BigInteger BigDecimal]))
+
+(def version
+  "Version number of Datalevin"
+  "1.0.2")
+
+(def version-file-name
+  "Name of the file that stores version on disk"
+  "VERSION")
+
+(def version-regex #"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
+
+(defn parse-version
+  [s]
+  (when-let [[_ major minor patch] (re-matches version-regex (s/trim s))]
+    {:major (parse-long major)
+     :minor (some-> minor parse-long)
+     :patch (some-> patch parse-long)}))
+
+(defn ^:no-doc compare-storage-versions
+  "Compare parsed versions by the major/minor components that define storage
+  compatibility. Patch versions are non-breaking."
+  [{lmajor :major lminor :minor} {rmajor :major rminor :minor}]
+  (compare [(long lmajor) (long (or lminor 0))]
+           [(long rmajor) (long (or rminor 0))]))
+
+(def require-migration?
+  "if this version of Datalevin calls for migrating db"
+  true)
+
+(def rule-unbound-pattern-penalty
+  "Multiplier for the cost of unbound EAV scans during rule evaluation."
+  3)
+
+(def rule-delta-index-threshold
+  "Maximum distinct delta values per rule-call argument for index probes.
+   When a delta column has more distinct values than this, normal joins are
+   preferred for that argument."
+  10000)
+
+(def magic-explosion-factor
+  "Factor by which magic seed can grow before falling back to non-magic.
+   If total magic rule tuples exceed initial-seed-size * this factor,
+   magic is considered ineffective and evaluation restarts without it."
+  10)
+
+(def data-file-name
+  "Name of the file that stores data on disk"
+  "data.mdb")
+
+(def keycode-file-name
+  "Name of the file that stores key compression codes on disk"
+  "keycode.bin")
+
+(def valcode-file-name
+  "Name of the file that stores value compression codes on disk"
+  "valcode.bin")
+
+;;---------------------------------------------
+;; system constants, fixed
+;;---------------------------------------------
+
+;; datom
+
+(def ^:no-doc ^:const e0    0)
+(def ^:no-doc ^:const emax  0x7FFFFFFFFFFFFFFF)
+(def ^:no-doc ^:const tx0   1)
+(def ^:no-doc ^:const txmax 0x7FFFFFFFFFFFFFFF)
+(def ^:no-doc ^:const g0    1)
+(def ^:no-doc ^:const gmax  0x7FFFFFFFFFFFFFFF)
+(def ^:no-doc ^:const a0    0)
+(def ^:no-doc ^:const amax  0x7FFFFFFF)
+(def ^:no-doc v0    :db.value/sysMin)
+(def ^:no-doc vmax  :db.value/sysMax)
+
+;; schema
+
+(def ^:no-doc implicit-schema
+  {:db/ident      {:db/unique    :db.unique/identity
+                   :db/valueType :db.type/keyword
+                   :db/aid       0}
+   :db/created-at {:db/valueType   :db.type/long
+                   :db/cardinality :db.cardinality/one
+                   :db/aid         1}
+   :db/updated-at {:db/valueType   :db.type/long
+                   :db/cardinality :db.cardinality/one
+                   :db/aid         2}
+   :db/fn         {:db/aid         3}
+   :db/udf        {:db/aid         4}})
+
+(def ^:no-doc entity-time-schema
+  {:db/created-at {:db/valueType   :db.type/long
+                   :db/cardinality :db.cardinality/one}
+   :db/updated-at {:db/valueType   :db.type/long
+                   :db/cardinality :db.cardinality/one}})
+
+;; lmdb
+
+(def default-env-flags
+  "Default LMDB env flags are `#{:nordahead :notls}`. See
+  [[datalevin.core/set-env-flags]] for a full list of flags.
+
+  Passed as `:flags` option value to `open-kv` function."
+  #{:nordahead :notls})
+
+(def default-dbi-flags
+  "Default DBI flags is `#{:create :counted :prefix-compression}`. See http://www.lmdb.tech/doc/group__mdb__dbi__open.html for a list of flags for stock LMDB, and https://github.com/huahaiy/dlmdb for additional flags."
+  #{:create :counted :prefix-compression})
+
+(def default-put-flags
+  "Default LMDB put flag is `#{}`. See http://www.lmdb.tech/doc/group__mdb__put.html for full list of flags"
+  #{})
+
+(def ^:const +max-key-size+
+  "Maximum LMDB key size is 511 bytes"
+  511)
+
+(def ^:no-doc ^:const +buffer-grow-factor+ 10)
+
+;; # of times db can be auto enlarged in a tx
+(def ^:no-doc ^:const +in-tx-overflow-times+ 5)
+
+;; tmp lmdb
+
+(def ^:const default-spill-threshold
+  "Default percentage of heap memory (Xmx) is 95, over which spill-to-disk
+  will be triggered"
+  95)
+
+(def default-spill-root
+  "Default root directory of spilled files is platform dependent. the same as
+  the value of Java property `java.io.tmpdir`"
+  (u/tmp-dir))
+
+(def ^:const tmp-dbi
+  "Default dbi name of the spilled db is `t`"
+  "t")
+
+;; index storage
+
+(def ^:no-doc ^:const +val-bytes-wo-hdr+ 497)  ; - hdr - g - a - g?
+(def ^:no-doc ^:const +val-bytes-trunc+  496)  ; - tr
+
+(def ^:no-doc ^:const +id-bytes+ 8)
+(def ^:no-doc ^:const +short-id-bytes+ 4)
+
+;; value headers
+(def ^:no-doc ^:const type-long-neg   (unchecked-byte 0xC0))
+(def ^:no-doc ^:const type-long-pos   (unchecked-byte 0xC1))
+(def ^:no-doc ^:const type-bigint     (unchecked-byte 0xF1))
+(def ^:no-doc ^:const type-bigdec     (unchecked-byte 0xF2))
+(def ^:no-doc ^:const type-homo-tuple (unchecked-byte 0xF3))
+(def ^:no-doc ^:const type-hete-tuple (unchecked-byte 0xF4))
+(def ^:no-doc ^:const type-float      (unchecked-byte 0xF5))
+(def ^:no-doc ^:const type-double     (unchecked-byte 0xF6))
+(def ^:no-doc ^:const type-instant    (unchecked-byte 0xF7))
+(def ^:no-doc ^:const type-ref        (unchecked-byte 0xF8))
+(def ^:no-doc ^:const type-uuid       (unchecked-byte 0xF9))
+(def ^:no-doc ^:const type-string     (unchecked-byte 0xFA))
+(def ^:no-doc ^:const type-keyword    (unchecked-byte 0xFB))
+(def ^:no-doc ^:const type-symbol     (unchecked-byte 0xFC))
+(def ^:no-doc ^:const type-boolean    (unchecked-byte 0xFD))
+(def ^:no-doc ^:const type-bytes      (unchecked-byte 0xFE))
+(def ^:no-doc ^:const type-nil
+  "Tuple component marker that sorts before every non-nil component value."
+  (unchecked-byte 0x00))
+
+(def ^:no-doc ^:const false-value     (unchecked-byte 0x01))
+(def ^:no-doc ^:const true-value      (unchecked-byte 0x02))
+
+(def ^:no-doc ^:const separator       (unchecked-byte 0x00))
+(def ^:no-doc ^:const truncator       (unchecked-byte 0xFF))
+(def ^:no-doc ^:const slash           (unchecked-byte 0x2F))
+
+(def ^:no-doc separator-ba (byte-array [(unchecked-byte 0x00)]))
+
+#?(:cljrsh (def ^:no-doc max-uuid #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff")
+   :clj (def ^:no-doc max-uuid (UUID. -1 -1)))
+#?(:cljrsh (def ^:no-doc min-uuid #uuid "00000000-0000-0000-0000-000000000000")
+   :clj (def ^:no-doc min-uuid (UUID. 0 0)))
+
+(def ^:no-doc max-bytes (byte-array (repeat +val-bytes-wo-hdr+ -1)))
+(def ^:no-doc min-bytes (byte-array [0x00]))
+
+(def ^:const +tuple-max+
+  "Maximum length of a tuple is 255 bytes"
+  255)
+
+(def ^:no-doc tuple-max-bytes (byte-array (repeat +tuple-max+ -1)))
+
+(defn- max-bigint-bs
+  ^bytes []
+  (let [^bytes bs (byte-array 127)]
+    (aset bs 0 (unchecked-byte 0x7f))
+    (dotimes [i 126] (aset bs (inc i) (unchecked-byte 0xff)))
+    bs))
+
+(def max-bigint
+  "Maximum big integer is `2^1015-1`"
+  #?(:cljrsh (dec (reduce (fn [acc _] (*' acc 2)) 1N (range 1015)))
+     :clj (BigInteger. (max-bigint-bs))))
+
+(defn- min-bigint-bs
+  ^bytes []
+  (let [bs (byte-array 127)]
+    (aset bs 0 (unchecked-byte 0x80))
+    (dotimes [i 126] (aset bs (inc i) (unchecked-byte 0x00)))
+    bs))
+
+(def min-bigint
+  "Minimum big integer is `-2^1015`"
+  #?(:cljrsh (- (reduce (fn [acc _] (*' acc 2)) 1N (range 1015)))
+     :clj (BigInteger. (min-bigint-bs))))
+
+(def max-bigdec
+  "Maximum big decimal has value of `(2^1015-1) x 10^2147483648`"
+  ;; cljrsh: the storage range sentinel is unused off the JVM; the bigint
+  ;; value stands in (divergence noted in the port log).
+  #?(:cljrsh max-bigint
+     :clj (BigDecimal. ^BigInteger max-bigint Integer/MIN_VALUE)))
+
+(def min-bigdec
+  "Minimum big decimal has value of `-2^1015 x 10^2147483648`"
+  #?(:cljrsh min-bigint
+     :clj (BigDecimal. ^BigInteger min-bigint Integer/MIN_VALUE)))
+
+(def ^:no-doc ^:const normal 0)  ; non-giant datom
+
+;; dbi-names
+
+;; kv
+(def ^:const kv-info
+  "dbi name for kv store system information is `datalevin/kv-info`"
+  "datalevin/kv-info")
+
+;; dl
+(def ^:const eav
+  "dbi name for Datalog EAV index is `datalevin/eav`"
+  "datalevin/eav")
+(def ^:const ave
+  "dbi name for Datalog AVE index is `datalevin/ave`"
+  "datalevin/ave")
+(def ^:const giants
+  "dbi name for Datalog large datoms is `datalevin/giants`"
+  "datalevin/giants")
+(def ^:const schema
+  "dbi name for Datalog schema is `datalevin/schema`"
+  "datalevin/schema")
+(def ^:const meta
+  "dbi name for Datalog runtime meta information is `datalevin/meta`"
+  "datalevin/meta")
+(def ^:const opts
+  "dbi name for Datalog options is `datalevin/opts`"
+  "datalevin/opts")
+(def ^:const ha-client-ops
+  "dbi name for persisted HA client write replay records is `datalevin/ha-client-ops`"
+  "datalevin/ha-client-ops")
+
+(def ^:const secondary-index-jobs
+  "dbi name for durable async secondary index jobs is `datalevin/secondary-index-jobs`"
+  "datalevin/secondary-index-jobs")
+
+;; compression
+
+(def ^:no-doc ^:const +key-compress-num-symbols+ 65536)
+
+(def ^:no-doc ^:const +value-compress-dict-size+ 32) ;; in KB
+
+
+;; search
+
+(def ^:const default-domain "datalevin")
+
+(def default-display
+  "default `search` function `:display` option value is `:refs`"
+  :refs)
+
+(def ^:const default-top
+  "default `search` function `:top` option value is `10`"
+  10)
+
+(def ^:const default-search-paging-cache-pages
+  "default `search` function `:paging-cache-pages` option value is `10`"
+  10)
+
+(def ^:const default-proximity-expansion
+  "default `search` function `:proximity-expansion` option value is `2`"
+  2)
+
+(def ^:const default-proximity-max-dist
+  "default `search` function `:proximity-max-dist` option value is `45`"
+  45)
+
+(def default-doc-filter (constantly true))
+
+(def ^:const terms
+  "dbi name suffix for search engine terms index is `terms`"
+  "terms")
+
+(def ^:const docs
+  "dbi name suffix for search engine documents index is `docs`"
+  "docs")
+
+(def ^:const positions
+  "dbi name suffix for search engine positions index is `positions`"
+  "positions")
+
+(def ^:const rawtext
+  "dbi name suffix for search engine raw text is `rawtext`"
+  "rawtext")
+
+(def ^:const vec-refs
+  "dbi name suffix for vec-ref -> vec-id map is `vec-refs`"
+  "vec-refs")
+
+(def ^:const vec-index-dbi
+  "dbi name for vector index blob chunks is `datalevin/vec-index`"
+  "datalevin/vec-index")
+
+(def ^:const vec-meta-dbi
+  "dbi name for vector index metadata is `datalevin/vec-meta`"
+  "datalevin/vec-meta")
+
+;; idoc
+
+(def ^:const idoc-doc-ref
+  "dbi name suffix for idoc doc-ref map is `doc-ref`"
+  "doc-ref")
+
+(def ^:const idoc-doc-index
+  "dbi name suffix for idoc inverted index is `doc-index`"
+  "doc-index")
+
+(def ^:const idoc-path-dict
+  "dbi name suffix for idoc path dictionary is `path-dict`"
+  "path-dict")
+
+(def ^:const +max-term-length+
+  "The full text search engine ignores exceedingly long strings. The maximal
+  allowed term length is 128 characters"
+  128)
+
+;; data types
+
+(def ^:no-doc datalog-value-types
+  #{:db.type/keyword :db.type/symbol :db.type/string :db.type/boolean
+    :db.type/long :db.type/double :db.type/float :db.type/ref
+    :db.type/bigint :db.type/bigdec :db.type/instant :db.type/uuid
+    :db.type/bytes :db.type/tuple :db.type/vec :db.type/idoc})
+
+(def ^:no-doc tuple-value-types
+  "Scalar value types supported as tuple components."
+  (disj datalog-value-types
+        :db.type/bytes :db.type/tuple :db.type/vec :db.type/idoc))
+
+(def ^:no-doc kv-value-types
+  #{:keyword :symbol :string :boolean :long :double :float :instant :uuid
+    :bytes :bigint :bigdec :data :id})
+
+;; server / client
+
+(def ^:no-doc ^:const +buffer-size+ 65536)
+
+(def ^:no-doc ^:const +wire-datom-batch-size+ 1000)
+
+(def ^:const default-port
+  "The server default port number is 8898"
+  (int 8898))
+
+(def ^:const default-idle-timeout
+  "The server session default idle timeout is 172800000ms (48 hours)"
+  172800000)
+
+(def ^:const default-connection-pool-size
+  "The default client connection pool size is 3"
+  3)
+
+(def ^:const default-connection-timeout
+  "The default connection timeout is 60000ms (1 minute)"
+  60000)
+
+(def ^:no-doc ^:const system-dir "system")
+
+(def ^:const default-username
+  "The server default username is `datalevin`"
+  "datalevin")
+
+(def ^:const default-password
+  "The server default password is `datalevin`"
+  "datalevin")
+
+(def ^:no-doc ^:const db-store-datalog "datalog")
+(def ^:no-doc ^:const db-store-kv "kv")
+
+(def ^:no-doc dl-type :datalog)
+(def ^:no-doc kv-type :key-value)
+
+(def ^:no-doc ^:const message-header-size 5) ; bytes, 1 type + 4 length
+
+(def ^:no-doc ^:const message-format-transit (unchecked-byte 0x01))
+(def ^:no-doc ^:const message-format-nippy (unchecked-byte 0x02))
+(def ^:no-doc ^:const message-format-mask 0x0F)
+(def ^:no-doc ^:const message-flag-zstd 0x10)
+
+(def ^:const vector-index-suffix
+  "Legacy file name suffix for vector index is `.vid`"
+  ".vid")
+
+(def ^:const default-metric-type
+  "Default vector index metric type is :euclidean"
+  :euclidean)
+
+(def ^:const default-quantization
+  "Default vector index quantization is :float"
+  :float)
+
+(def ^:const default-connectivity
+  "Default vector index connectivity is 16"
+  16)
+
+(def ^:const default-expansion-add
+  "Default vector index expansion-add is 128"
+  128)
+
+(def ^:const default-expansion-search
+  "Default vector index expansion-search is 64"
+  64)
+
+(def ^:const default-multi?
+  "Default vector index multi? flag is false"
+  false)
+
+(def ^{:dynamic true
+       :doc     "Maximum serialized vector blob bytes to use in-memory buffer mode before file-spool mode"}
+  *vec-max-buffer-bytes* (* 128 1024 1024))
+
+(def ^{:dynamic true
+       :doc     "Chunk size in bytes for vector blobs stored in LMDB"}
+  *vec-chunk-bytes* (* 512 1024 1024))
+
+;;-------------------------------------------------------------
+;; user configurable
+;;-------------------------------------------------------------
+
+;; serialization
+
+(def ^{:dynamic true
+       :doc     "set of additional serializable classes, e.g.
+                  `#{\"my.package.*\"}`"}
+  *data-serializable-classes* #{})
+
+(def ^{:dynamic true :no-doc true
+       :doc     "Minimum serialized wire message bytes before trying zstd
+                 compression for client/server protocol messages."}
+  *wire-compression-threshold* 8192)
+
+(def ^{:dynamic true :no-doc true
+       :doc     "Zstd compression level for client/server protocol messages."}
+  *wire-compression-level* 3)
+
+;; lmdb
+
+(def ^{:dynamic true
+       :doc     "Maximum number of sub-databases allowed in a db file"}
+  *max-dbs* 128)
+
+(def ^{:dynamic true
+       :doc     "Default number of concurrent readers allowed for a DB file is 1024. Can be set as `:max-readers` option when opening the DB."}
+  *max-readers* 1024)
+
+(def ^{:dynamic true
+       :doc     "Initial db file size is 1000 MiB, automatically grown"}
+  *init-db-size* 1000)
+
+(def ^{:dynamic true
+       :doc     "Initial maximal value size is 16384 bytes, automatically grown"}
+  *init-val-size* 16384)
+
+(defn ^:no-doc pick-mapsize
+  "pick a map size from the growing factor schedule that is larger than or
+  equal to the current size"
+  [^File db-file]
+  (let [cur-size (.length db-file)]
+    (some #(when (<= cur-size (* ^long % 1024 1024)) %)
+          (iterate #(* ^long +buffer-grow-factor+ ^long %)
+                   *init-db-size*))))
+
+(def ^{:dynamic true
+       :doc     "The number of samples considered when build the key compression dictionary is 65536"}
+  *compress-sample-size* 65536)
+
+(def ^{:dynamic true :no-doc true
+       :doc     "Minimum serialized giant-datom bytes before trying zstd
+                 compression for `datalevin/giants` values."}
+  *giants-zstd-threshold* 1024)
+
+(def ^{:dynamic true :no-doc true
+       :doc     "Zstd compression level for `datalevin/giants` values."}
+  *giants-zstd-level* 3)
+
+(def ^{:dynamic true
+       :doc     "Time interval between automatic LMDB sync to disk, in seconds, default is 300"}
+  lmdb-sync-interval 300)
+
+;; wal
+
+(def ^{:dynamic true
+       :doc     "Enable WAL mode. Experimental."}
+  *wal?* false)
+
+(def ^{:dynamic true
+       :doc     "WAL rollout mode. `:active` uses WAL write path; `:rollback` bypasses WAL writes and falls back to legacy LMDB write path while keeping WAL APIs available in degraded mode."}
+  *wal-rollout-mode* :active)
+
+(def ^{:dynamic true
+       :doc     "Rollback switch. When true and `:wal?` is enabled, write path bypasses WAL and uses legacy LMDB writes."}
+  *wal-rollback?* false)
+
+(def ^{:dynamic true
+       :doc     "WAL durability profile. `:relaxed` enables batched durability. `:strict` waits for durable log ack per txn using fsync semantics. `:extra` is stricter (SQLite-style extra durability, e.g. fullsync on macOS)."}
+  *wal-durability-profile* :relaxed)
+
+(def ^{:dynamic true
+       :doc     "Enable LMDB dual-slot commit marker in WAL mode."}
+  *wal-commit-marker?* true)
+
+(def ^{:dynamic true
+       :doc     "Commit marker binary format major version."}
+  *wal-commit-marker-version* 1)
+
+(def ^{:dynamic true
+       :doc     "WAL force mode for segment sync operations: `:fdatasync`, `:fsync`, `:extra`, or `:none`."}
+  *wal-sync-mode* :fdatasync)
+
+(def ^{:dynamic true
+       :doc     "WAL group-commit threshold by number of records (primarily affects `:relaxed` durability profile)."}
+  *wal-group-commit* 128)
+
+(def ^{:dynamic true
+       :doc     "WAL group-commit threshold by milliseconds (primarily affects `:relaxed` durability profile)."}
+  *wal-group-commit-ms* 10)
+
+(def ^{:dynamic true
+       :doc     "WAL metadata publish threshold by number of durable commits."}
+  *wal-meta-flush-max-txs* 1024)
+
+(def ^{:dynamic true
+       :doc     "WAL metadata publish threshold by milliseconds."}
+  *wal-meta-flush-max-ms* 1000)
+
+(def ^{:dynamic true
+       :doc     "Maximum commit wait for durable LSN in milliseconds."}
+  *wal-commit-wait-ms* 5000)
+
+(def ^{:dynamic true
+       :doc     "Enable adaptive sync scheduling for batched sync cadence."}
+  *wal-sync-adaptive?* true)
+
+(def ^{:dynamic true
+       :doc     "Enable multi-process WAL directory reconciliation. Keep false for normal single-process stores to avoid per-commit directory/meta probes."}
+  *wal-shared?* false)
+
+(def ^{:dynamic true
+       :doc     "WAL segment size cap in bytes before roll."}
+  *wal-segment-max-bytes* (* 256 1024 1024))
+
+(def ^{:dynamic true
+       :doc     "WAL segment age cap in milliseconds before roll."}
+  *wal-segment-max-ms* 300000)
+
+(def ^{:dynamic true
+       :doc     "Enable background preallocation for next WAL segment."}
+  *wal-segment-prealloc?* true)
+
+(def ^{:dynamic true
+       :doc     "WAL segment preallocation mode. :native uses file preallocation, :none disables preallocation."}
+  *wal-segment-prealloc-mode* :native)
+
+(def ^{:dynamic true
+       :doc     "WAL preallocated segment size in bytes."}
+  *wal-segment-prealloc-bytes* *wal-segment-max-bytes*)
+
+(def ^{:dynamic true
+       :doc     "WAL retention cap in bytes."}
+  *wal-retention-bytes* (* 8 1024 1024 1024))
+
+(def ^{:dynamic true
+       :doc     "WAL retention cap in milliseconds."}
+  *wal-retention-ms* (* 7 24 60 60 1000))
+
+(def ^{:dynamic true
+       :doc     "Maximum number of WAL segment record-index entries kept in memory for open tx-log serving."}
+  *wal-records-cache-segments* 64)
+
+(def ^{:dynamic true
+       :doc     "Replica heartbeat TTL in milliseconds for WAL retention floor computation."}
+  *wal-replica-floor-ttl-ms* 30000)
+
+(def ^{:dynamic true
+       :doc     "Grace window before retention-pressure pin backpressure starts rejecting writes."}
+  *wal-retention-pin-backpressure-threshold-ms* 300000)
+
+(def ^{:dynamic true
+       :doc     "Vector checkpoint cadence target in milliseconds for WAL mode."}
+  *wal-vec-checkpoint-interval-ms* 300000)
+
+(def ^{:dynamic true
+       :doc     "Vector replay lag threshold in LSNs before checkpointing is recommended."}
+  *wal-vec-max-lsn-delta* 100000)
+
+(def ^{:dynamic true
+       :doc     "Maximum serialized vector blob bytes to use in-memory buffer mode in WAL workflows."}
+  *wal-vec-max-buffer-bytes* *vec-max-buffer-bytes*)
+
+(def ^{:dynamic true
+       :doc     "Chunk size in bytes for vector blobs persisted to LMDB in WAL workflows."}
+  *wal-vec-chunk-bytes* *vec-chunk-bytes*)
+
+(def ^:const wal-marker-a
+  "kv-info key for WAL commit marker slot A."
+  :wal/marker-a)
+
+(def ^:const wal-marker-b
+  "kv-info key for WAL commit marker slot B."
+  :wal/marker-b)
+
+(def ^:const wal-snapshot-current-lsn
+  "kv-info key for snapshot current LSN used by WAL retention floor computation."
+  :wal/snapshot-current-lsn)
+
+(def ^:const wal-snapshot-previous-lsn
+  "kv-info key for snapshot previous LSN used by WAL retention floor computation."
+  :wal/snapshot-previous-lsn)
+
+(def ^:const ha-local-applied-lsn
+  "kv-info key for persisted HA follower applied LSN."
+  :ha/local-applied-lsn)
+
+(def ^:const wal-local-payload-lsn
+  "kv-info key for the exact WAL-applied LSN visible in the local LMDB payload."
+  :wal/local-payload-lsn)
+
+(def ^:const wal-replica-floors
+  "kv-info key for replica floor heartbeat map used by WAL retention floor computation."
+  :wal/replica-floors)
+
+(def ^:const wal-backup-pins
+  "kv-info key for backup/snapshot pin map used by WAL retention floor computation."
+  :wal/backup-pins)
+
+(defn ^:no-doc wal-option-key?
+  [k]
+  (and (keyword? k)
+       (let [n (name k)]
+         (or (= n "wal?")
+             (s/starts-with? n "wal-")))))
+
+(defn ^:no-doc legacy-txn-log-option-key?
+  [k]
+  (and (keyword? k)
+       (let [n (name k)]
+         (or (= n "txn-log?")
+             (s/starts-with? n "txn-log-")))))
+
+(defn ^:no-doc canonical-wal-option-key
+  [k]
+  (if (legacy-txn-log-option-key? k)
+    (u/raise "Legacy txn-log option key is no longer supported. Use WAL option keys (for example :wal? and :wal-durability-profile)."
+             {:option k})
+    k))
+
+(defn ^:no-doc canonicalize-wal-opts
+  [opts]
+  (reduce-kv
+   (fn [m k v]
+     (assoc m (canonical-wal-option-key k) v))
+   {}
+   (or opts {})))
+
+;; datalog db
+
+(def ^{:dynamic true
+       :doc     "Default WAL mode for new Datalog stores. This does not affect direct KV-only `open-kv` usage."}
+  *datalog-wal?* false)
+
+(def ^{:dynamic true
+       :doc     "Default WAL durability profile for Datalog stores when WAL is enabled explicitly."}
+  *datalog-wal-durability-profile* :relaxed)
+
+(def ^{:dynamic true :no-doc true
+       :doc     "When true, use the prepare/apply transaction path"}
+  *use-prepare-path* false)
+
+(def ^{:dynamic true
+       :doc     "Batch size (# of datoms) when filling Datalog DB"}
+  *fill-db-batch-size* 2097152)
+
+(def ^{:dynamic true :no-doc true}
+  *ordered-datom-writes?* false)
+
+(def ^{:dynamic true
+       :doc     "Datalog DB starts background sampling or not"}
+  *db-background-sampling?* true)
+
+(def ^{:dynamic true
+       :doc     "Maximum async secondary index jobs processed by each in-process worker run"}
+  *async-secondary-index-worker-max-jobs* 100)
+
+(def ^{:dynamic true
+       :doc     "Lease duration for claimed async secondary index jobs in milliseconds"}
+  *async-secondary-index-worker-lease-ms* 300000)
+
+(def ^{:dynamic true
+       :doc     "Base retry delay for failed async secondary index jobs in milliseconds"}
+  *async-secondary-index-retry-base-ms* 1000)
+
+(def ^{:dynamic true
+       :doc     "Maximum retry delay for failed async secondary index jobs in milliseconds"}
+  *async-secondary-index-retry-max-ms* 60000)
+
+(def ^{:dynamic true
+       :doc     "Minimum interval between remote DB freshness checks in `db?`.
+When positive, repeated `db?` calls within this window reuse the previous
+freshness check and skip the remote `last-modified` round trip.
+Set to 0 for strict check-on-every-call behavior."}
+  *remote-db-last-modified-check-interval-ms* 0)
+
+;; HA control plane (consensus lease)
+
+(def ^{:dynamic true
+       :doc     "Default HA mode. Nil keeps HA disabled unless explicitly configured."}
+  *ha-mode* nil)
+
+(def ^{:dynamic true
+       :doc     "Default leader lease renew interval in milliseconds for consensus-lease HA."}
+  *ha-lease-renew-ms* 5000)
+
+(def ^{:dynamic true
+       :doc     "Default leader lease timeout in milliseconds for consensus-lease HA."}
+  *ha-lease-timeout-ms* 15000)
+
+(def ^{:dynamic true
+       :doc     "Default safety margin in milliseconds subtracted from the local lease deadline during HA write admission."}
+  *ha-write-admission-lease-margin-ms* 100)
+
+(def ^{:dynamic true
+       :doc     "Default base delay in milliseconds before candidate promotion attempt."}
+  *ha-promotion-base-delay-ms* 300)
+
+(def ^{:dynamic true
+       :doc     "Default per-rank delay in milliseconds for deterministic candidate staggering."}
+  *ha-promotion-rank-delay-ms* 700)
+
+(def ^{:dynamic true
+       :doc     "Default maximum LSN lag allowed for automatic promotion."}
+  *ha-max-promotion-lag-lsn* 0)
+
+(def ^{:dynamic true
+       :doc     "Default grace period in milliseconds for a demoting leader to drain admitted writes before becoming a follower."}
+  *ha-demotion-drain-ms* 1000)
+
+(def ^{:dynamic true
+       :doc     "Default maximum tolerated clock skew in milliseconds before auto-failover pauses."}
+  *ha-clock-skew-budget-ms* 100)
+
+(def ^{:dynamic true
+       :doc     "Default maximum number of txlog records a follower may fetch per replication batch."}
+  *ha-follower-max-batch-records* 4096)
+
+(def ^{:dynamic true
+       :doc     "Default approximate serialized-byte target for adaptive follower replication batches."}
+  *ha-follower-target-batch-bytes* 1048576)
+
+(def ^{:dynamic true
+       :doc     "Default minimum number of follower replication batches between persisted local-applied-LSN writes."}
+  *ha-follower-persist-every-batches* 32)
+
+(def ^{:dynamic true
+       :doc     "Default maximum interval in milliseconds between persisted local-applied-LSN writes during follower catch-up."}
+  *ha-follower-persist-interval-ms* 1000)
+
+(def ^{:dynamic true
+       :doc     "Default consensus control-plane config map. Nil requires explicit configuration when HA is enabled."}
+  *ha-control-plane* nil)
+
+;; datalog query engine
+
+(def ^{:dynamic true
+       :doc     "Limit of the number of items hold in global query result cache"}
+  query-result-cache-size 1024)
+
+(def ^{:dynamic true
+       :doc     "Limit of the number of items hold in global query plan cache"}
+  query-plan-cache-size 1024)
+
+(def ^{:dynamic true
+       :doc     "Limit of the number of wildcard path patterns held in each idoc index cache"}
+  idoc-pattern-cache-size 1024)
+
+(def ^{:dynamic true
+       :doc     "Limit of the number of range scans held in each idoc index cache"}
+  idoc-range-cache-size 1024)
+
+(def ^{:dynamic true
+       :doc     "Size below which the initial plan will execute during planning,
+above which, the same number of items will be sampled instead"}
+  init-exec-size-threshold 1000)
+
+(def ^{:dynamic true
+       :doc     "Upper bound on the plan search space. When the number of plans
+considered exceeds this cap, the planner switches from exhaustive to greedy. Default
+is Integer/MAX_VALUE, i.e. no cap."}
+  plan-search-max Integer/MAX_VALUE)
+
+(def ^{:dynamic true
+       :doc     "Default ratio for merge scan size change estimate"}
+  magic-scan-ratio (double (/ 1 ^long init-exec-size-threshold)))
+
+(def ^{:dynamic true
+       :doc     "Default ratio for link size change estimate"}
+  magic-link-ratio 1.0)
+
+(def ^{:dynamic true
+       :doc     "Default expansion ratio for or-join size estimate"}
+  magic-or-join-ratio 10.0)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with running a predicate during scan"}
+  magic-cost-pred 3.5)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with adding a variable during scan"}
+  magic-cost-var 5.5)
+
+(def ^{:dynamic true
+       :doc     "Marginal cost of each additional output variable in one fused
+EAV scan, relative to the first variable. Prefix encoding and scan setup are
+shared by all attributes in the fused operator."}
+  magic-cost-fused-var-marginal 0.15)
+
+(def ^{:dynamic true
+       :doc     "Minimum complete-plan cost fraction that movable EAV groups
+must be capable of saving before the planner expands their placement states."}
+  deferred-eav-min-cost-improvement 0.05)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with running a filter during scan"}
+  magic-cost-fidx 1.4)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with scanning e based on a"}
+  magic-cost-init-scan-e 2.0)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with merge-scan join"}
+  magic-cost-merge-scan-v 5.5)
+
+(def ^{:dynamic true
+       :doc     "Cost per index probe in indexed nested loop join"}
+  magic-cost-link-probe 2.5)
+
+(def ^{:dynamic true
+       :doc     "Cost per tuple retrieved from index in indexed nested loop join"}
+  magic-cost-link-retrieval 1.2)
+
+(def ^{:dynamic true
+       :doc     "Cost associated with hash join"}
+  magic-cost-hash-join
+  ;; cljrsh: single-threaded runtime, so the parallelism barrier factor
+  ;; is the core count 1.
+  #?(:cljrsh 5.0
+     :clj (* 5.0
+             ;; for hash join is a barrier to parallelism
+             (.availableProcessors (Runtime/getRuntime)))))
+
+(def ^{:dynamic true
+       :doc     "Cost per output tuple materialized by a hash join"}
+  magic-cost-hash-join-output-tuple 4.0)
+
+(def ^{:dynamic true
+       :doc     "Cost per output cell copied by a hash join"}
+  magic-cost-hash-join-output-cell 1.0)
+
+(def ^{:dynamic true
+       :doc     "Minimum input size before considering hash join"}
+  hash-join-min-input-size 20000)
+
+(def ^{:dynamic true
+       :doc     "Maximum size of a small runtime SIP domain. In a hash join,
+                 domains at or below this threshold become single-value ranges
+                 instead of a bitmap predicate."}
+  sip-range-threshold 1000)
+
+(def ^{:dynamic true
+       :doc     "Ratio threshold for SIP optimization. SIP is applied when the
+                 consumer size is at least the domain size times this ratio."}
+  sip-ratio-threshold 5)
+
+(def ^{:dynamic true
+       :doc     "Time interval between sample processing, in seconds "}
+  sample-processing-interval 10)
+
+(def ^{:dynamic true
+       :doc     "Change ratio of an attribute's values, beyond which re-sampling will be done"}
+  sample-change-ratio 0.05)
+
+
+(def ^{:dynamic true
+       :doc     "Max milliseconds to wait for a tuple before failing. nil to wait forever."}
+  query-pipe-timeout 3000000)
+
+(def ^{:dynamic true
+       :doc     "Maximum queue size for a tuple pipe. Producers block when full, providing back-pressure."}
+  query-pipe-capacity 10000000)
+
+(def ^{:dynamic true
+       :doc     "Batch size for pipelined scans. Tuples are buffered, sorted, then scanned in batch for sequential seeks. Set to 0 to disable batching."}
+  query-pipe-batch-size 12384)
+
+(def ^{:dynamic true
+       :doc     "Enable single-layer partition execution for eligible linear query-plan segments."}
+  query-partitioned-execution? true)
+
+(def ^{:dynamic true
+       :doc     "Minimum materialized input size before partition execution is considered."}
+  query-partition-min-input-size 8000)
+
+(def ^{:dynamic true
+       :doc     "Target tuple count for each query execution partition."}
+  query-partition-target-size 2000)
+
+(def ^{:dynamic true
+       :doc     "Minimum number of contiguous safe index steps required for partition execution."}
+  query-partition-min-step-count 3)
+
+
+;; search engine
+
+(def ^{:dynamic true
+       :doc     "The set of English stop words, a Java HashSet, contains
+the same words as that of Lucene. Used in English analyzer."}
+  *en-stop-words-set*
+  #?(:cljrsh
+     #{"a" "an" "and" "are" "as" "at" "be" "but" "by" "for" "if" "in"
+       "into" "is" "it" "no" "not" "of" "on" "or" "such" "that" "the"
+       "their" "then" "there" "these" "they" "this" "to" "was" "will"
+       "with"}
+     :clj
+     (let [s (HashSet.)]
+       (doseq [w ["a",    "an",   "and",   "are",  "as",    "at",   "be",
+                  "but",  "by",   "for",   "if",   "in",    "into", "is",
+                  "it",   "no",   "not",   "of",   "on",    "or",   "such",
+                  "that", "the",  "their", "then", "there", "these",
+                  "they", "this", "to",    "was",  "will",  "with"]]
+         (.add s w))
+       s)))
+
+(def ^{:dynamic true
+       :doc     "The set of English punctuation characters, a Java HashSet.
+Used in English analyzer."}
+  *en-punctuations-set*
+  #?(:cljrsh
+     #{\: \/ \. \; \, \! \= \? \" \' \( \) \[ \] \{ \}
+       \| \< \> \& \@ \# \^ \* \\ \~ \`}
+     :clj
+     (let [s (HashSet.)]
+       (doseq [c [\: \/ \. \; \, \! \= \? \" \' \( \) \[ \] \{ \}
+                  \| \< \> \& \@ \# \^ \* \\ \~ \`]]
+         (.add s c))
+       s)))
+
+(def ^{:dynamic true
+       :doc     "batch size when using search index writer and `:index-position?` is `false`"}
+  *index-writer-batch-size* 500)
+
+(def ^{:dynamic true
+       :doc     "batch size  when using search index writer and `:index-position?` is `true`"}
+  *index-writer-batch-size-pos* 200000)

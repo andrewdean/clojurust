@@ -1075,6 +1075,9 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             builtin_unchecked_multiply,
         ),
         ("unchecked-inc", Arity::Fixed(1), builtin_unchecked_inc),
+        ("unchecked-byte", Arity::Fixed(1), builtin_unchecked_byte),
+        ("unchecked-short", Arity::Fixed(1), builtin_unchecked_short),
+        ("unchecked-int", Arity::Fixed(1), builtin_unchecked_int),
         ("unchecked-inc-int", Arity::Fixed(1), builtin_unchecked_inc),
         ("unchecked-dec", Arity::Fixed(1), builtin_unchecked_dec),
         ("unchecked-dec-int", Arity::Fixed(1), builtin_unchecked_dec),
@@ -1462,9 +1465,9 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("num", Arity::Fixed(1), builtin_num),
         ("short", Arity::Fixed(1), builtin_short),
         ("byte", Arity::Fixed(1), builtin_byte),
-        ("bit-and", Arity::Fixed(2), builtin_bit_and),
-        ("bit-or", Arity::Fixed(2), builtin_bit_or),
-        ("bit-xor", Arity::Fixed(2), builtin_bit_xor),
+        ("bit-and", Arity::Variadic { min: 2 }, builtin_bit_and),
+        ("bit-or", Arity::Variadic { min: 2 }, builtin_bit_or),
+        ("bit-xor", Arity::Variadic { min: 2 }, builtin_bit_xor),
         ("bit-not", Arity::Fixed(1), builtin_bit_not),
         ("bit-shift-left", Arity::Fixed(2), builtin_bit_shl),
         ("bit-shift-right", Arity::Fixed(2), builtin_bit_shr),
@@ -2818,6 +2821,39 @@ fn builtin_unchecked_multiply(args: &[Value]) -> ValueResult<Value> {
             let y = numeric_as_f64(&args[1])?;
             Ok(Value::Double(x * y))
         }
+    }
+}
+
+fn builtin_unchecked_byte(args: &[Value]) -> ValueResult<Value> {
+    match args[0].unwrap_meta() {
+        Value::Long(n) => Ok(Value::Long(i64::from(*n as i8))),
+        Value::Double(f) => Ok(Value::Long(i64::from(*f as i64 as i8))),
+        v => Err(ValueError::WrongType {
+            expected: "number",
+            got: v.type_name().to_string(),
+        }),
+    }
+}
+
+fn builtin_unchecked_short(args: &[Value]) -> ValueResult<Value> {
+    match args[0].unwrap_meta() {
+        Value::Long(n) => Ok(Value::Long(i64::from(*n as i16))),
+        Value::Double(f) => Ok(Value::Long(i64::from(*f as i64 as i16))),
+        v => Err(ValueError::WrongType {
+            expected: "number",
+            got: v.type_name().to_string(),
+        }),
+    }
+}
+
+fn builtin_unchecked_int(args: &[Value]) -> ValueResult<Value> {
+    match args[0].unwrap_meta() {
+        Value::Long(n) => Ok(Value::Long(i64::from(*n as i32))),
+        Value::Double(f) => Ok(Value::Long(i64::from(*f as i64 as i32))),
+        v => Err(ValueError::WrongType {
+            expected: "number",
+            got: v.type_name().to_string(),
+        }),
     }
 }
 
@@ -7662,19 +7698,25 @@ fn builtin_take_nth(args: &[Value]) -> ValueResult<Value> {
 
 // Bit operations
 fn builtin_bit_and(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Long(
-        numeric_as_i64(&args[0])? & numeric_as_i64(&args[1])?,
-    ))
+    let mut acc = numeric_as_i64(&args[0])?;
+    for v in &args[1..] {
+        acc &= numeric_as_i64(v)?;
+    }
+    Ok(Value::Long(acc))
 }
 fn builtin_bit_or(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Long(
-        numeric_as_i64(&args[0])? | numeric_as_i64(&args[1])?,
-    ))
+    let mut acc = numeric_as_i64(&args[0])?;
+    for v in &args[1..] {
+        acc |= numeric_as_i64(v)?;
+    }
+    Ok(Value::Long(acc))
 }
 fn builtin_bit_xor(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Long(
-        numeric_as_i64(&args[0])? ^ numeric_as_i64(&args[1])?,
-    ))
+    let mut acc = numeric_as_i64(&args[0])?;
+    for v in &args[1..] {
+        acc ^= numeric_as_i64(v)?;
+    }
+    Ok(Value::Long(acc))
 }
 fn builtin_bit_not(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Long(!numeric_as_i64(&args[0])?))

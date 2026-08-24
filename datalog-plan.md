@@ -164,6 +164,18 @@ default, and it stays contained inside the store crate.
    already in cljrsh's tree via heed. The datalevin optimizer port now
    proceeds against a live durable target; -rseek/-index-range and the
    entity facade remain unsupported on DurableDB until then.
+   **Foundations rung done 2026-08-23**: datalevin.util,
+   datalevin.constants, and datalevin.datom (from the pinned 78b199e8)
+   load and work on cljrs — Datom construction and both comparators,
+   distinct-by, seeded reservoir sampling (portable xorshift replacing
+   java.util.Random; atom-map cache replacing LRUCache), byte/bigint
+   sentinels made portable, FastList and defcomp/defrecord-updatable
+   given :cljrsh arms (conformance case 082). Runtime gained
+   unchecked-byte/short/int and variadic bit-and/or/xor. Reminder: the
+   feature set includes :clj, so vendored gates must lead with a
+   :cljrsh arm; bare #?(:clj ...) still fires. Next rungs: parser.clj
+   (near-pure), then interface.clj/built-ins, then the optimizer tree
+   (query/plan/resolve/execute) against the store's IStore adapter.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
