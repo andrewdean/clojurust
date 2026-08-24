@@ -41,6 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,10 +61,12 @@ jobs:
         run: rustup toolchain install nightly --profile minimal --no-self-update
 
       - name: Set crate versions
+        id: version
         run: |
           VERSION="${BASE_VERSION}.${{ github.run_number }}"
           echo "Publishing version: $VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           cargo release version "$VERSION" --execute --no-confirm
           echo "--- Workspace Cargo.toml ---"
           cat Cargo.toml
@@ -113,3 +117,12 @@ jobs:
             --config 'publish.timeout=600' \
             --no-verify \
             "${EXCLUDE[@]}"
+
+  release:
+    name: Release binaries
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}

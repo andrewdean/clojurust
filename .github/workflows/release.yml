@@ -1,0 +1,127 @@
+name: Release
+
+# Builds cljrsh distribution binaries for a tag and attaches them to a
+# GitHub Release. Tags are pushed by the Publish workflow with the
+# workflow's own GITHUB_TOKEN, and such pushes never trigger other
+# workflows — so Publish *calls* this workflow after a successful
+# crates.io publish. workflow_dispatch covers manual runs and backfills;
+# with no tag given it releases the newest v* tag.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to release (default: newest)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          fi
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "no such tag: $TAG" >&2
+            exit 1
+          fi
+          echo "Releasing $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: dist-${{ matrix.target }}
+
+      - name: Build (dist profile)
+        run: cargo build --profile dist -p cljrsh --target ${{ matrix.target }}
+
+      - name: Smoke test
+        run: |
+          BIN=target/${{ matrix.target }}/dist/cljrsh
+          "$BIN" --version
+          test "$("$BIN" -e '(+ 1 2)')" = "3"
+
+      # Version-free asset names keep releases/latest/download/ URLs stable.
+      - name: Package
+        run: |
+          STAGE=cljrsh-${{ matrix.target }}
+          mkdir "$STAGE"
+          cp target/${{ matrix.target }}/dist/cljrsh crates/cljrsh/README.md "$STAGE"/
+          tar czf "$STAGE.tar.gz" "$STAGE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cljrsh-${{ matrix.target }}
+          path: cljrsh-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd assets && sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${{ needs.resolve.outputs.tag }}
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "cljrsh $TAG" \
+              --generate-notes
+          fi
+          gh release upload "$TAG" assets/* --clobber
