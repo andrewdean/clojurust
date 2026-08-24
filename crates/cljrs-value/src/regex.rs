@@ -67,14 +67,18 @@ impl Matcher {
         match state.phase {
             // fancy-regex surfaces backtracking-limit errors at match time;
             // treat them as no-match (only pathological patterns hit it).
-            MatchPhase::New => match self.pattern.get().captures(self.haystack.get()).ok().flatten() {
+            MatchPhase::New => match self
+                .pattern
+                .get()
+                .captures(self.haystack.get())
+                .ok()
+                .flatten()
+            {
                 Some(cap) => {
                     // re-matches semantics: the whole haystack must match.
                     // (`cap.len()` is the capture-group count, not a length.)
                     let m = cap.get(0).expect("group 0 always participates");
-                    if !self.match_all
-                        || (m.start() == 0 && m.end() == self.haystack.get().len())
-                    {
+                    if !self.match_all || (m.start() == 0 && m.end() == self.haystack.get().len()) {
                         let end = cap.get(0).expect("group 0").end();
                         *state = MatcherState {
                             phase: MatchPhase::Matching(end),

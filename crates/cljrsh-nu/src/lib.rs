@@ -59,7 +59,8 @@ impl NativeObject for NuSession {
 /// handler can flip it to stop a running pipeline.
 pub fn default_interrupt_flag() -> Arc<AtomicBool> {
     static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
-    FLAG.get_or_init(|| Arc::new(AtomicBool::new(false))).clone()
+    FLAG.get_or_init(|| Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
 fn build_engine(cwd: Option<&str>, env: &[(String, String)]) -> NuSession {

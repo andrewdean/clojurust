@@ -91,7 +91,7 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             } else {
                 forms
             };
-            if forms.len() % 2 != 0 {
+            if !forms.len().is_multiple_of(2) {
                 return Err(EvalError::Runtime(
                     "map literal must have an even number of forms".into(),
                 ));
@@ -342,7 +342,8 @@ pub fn is_jvm_class_name(s: &str) -> bool {
     if let Some((_, last)) = s.rsplit_once('.')
         && !last.is_empty()
         && last.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
     {
         return true;
     }
@@ -380,7 +381,6 @@ pub fn is_jvm_class_name(s: &str) -> bool {
                 | "PersistentVector"
         )
 }
-
 
 // ── is_special_form ───────────────────────────────────────────────────────────
 

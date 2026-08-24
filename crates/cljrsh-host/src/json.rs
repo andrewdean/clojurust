@@ -42,10 +42,7 @@ pub fn register(registry: &mut Registry) {
             "cljrsh.json/generate-string",
             1,
             |args: &[Value]| -> Result<Value, String> {
-                let pretty = args
-                    .get(1)
-                    .map(pretty_opt)
-                    .unwrap_or(false);
+                let pretty = args.get(1).map(pretty_opt).unwrap_or(false);
                 let json = value_to_json(&args[0])?;
                 let out = if pretty {
                     serde_json::to_string_pretty(&json)
@@ -81,9 +78,9 @@ pub fn json_to_value(json: &serde_json::Value, keywordize: bool) -> Value {
             }
         }
         serde_json::Value::String(s) => Value::string(s.clone()),
-        serde_json::Value::Array(items) => Value::Vector(GcPtr::new(
-            PersistentVector::from_iter(items.iter().map(|i| json_to_value(i, keywordize))),
-        )),
+        serde_json::Value::Array(items) => Value::Vector(GcPtr::new(PersistentVector::from_iter(
+            items.iter().map(|i| json_to_value(i, keywordize)),
+        ))),
         serde_json::Value::Object(entries) => {
             let mut m = MapValue::empty();
             for (k, v) in entries {
@@ -113,14 +110,12 @@ pub fn value_to_json(v: &Value) -> Result<serde_json::Value, String> {
         }
         Value::Str(s) => serde_json::Value::String(s.get().to_string()),
         Value::Char(c) => serde_json::Value::String(c.to_string()),
-        Value::Keyword(k) => serde_json::Value::String(qualified_name(
-            k.get().namespace.as_deref(),
-            &k.get().name,
-        )),
-        Value::Symbol(s) => serde_json::Value::String(qualified_name(
-            s.get().namespace.as_deref(),
-            &s.get().name,
-        )),
+        Value::Keyword(k) => {
+            serde_json::Value::String(qualified_name(k.get().namespace.as_deref(), &k.get().name))
+        }
+        Value::Symbol(s) => {
+            serde_json::Value::String(qualified_name(s.get().namespace.as_deref(), &s.get().name))
+        }
         Value::Uuid(u) => serde_json::Value::String(uuid::Uuid::from_u128(*u).to_string()),
         Value::Vector(items) => serde_json::Value::Array(
             items
@@ -136,11 +131,9 @@ pub fn value_to_json(v: &Value) -> Result<serde_json::Value, String> {
                 .map(value_to_json)
                 .collect::<Result<_, _>>()?,
         ),
-        Value::Set(set) => serde_json::Value::Array(
-            set.iter()
-                .map(value_to_json)
-                .collect::<Result<_, _>>()?,
-        ),
+        Value::Set(set) => {
+            serde_json::Value::Array(set.iter().map(value_to_json).collect::<Result<_, _>>()?)
+        }
         Value::Map(m) => {
             let mut obj = serde_json::Map::new();
             for (k, val) in m.iter() {
@@ -149,9 +142,7 @@ pub fn value_to_json(v: &Value) -> Result<serde_json::Value, String> {
                     Value::Keyword(kw) => {
                         qualified_name(kw.get().namespace.as_deref(), &kw.get().name)
                     }
-                    Value::Symbol(s) => {
-                        qualified_name(s.get().namespace.as_deref(), &s.get().name)
-                    }
+                    Value::Symbol(s) => qualified_name(s.get().namespace.as_deref(), &s.get().name),
                     Value::Long(n) => n.to_string(),
                     other => {
                         return Err(format!(
@@ -165,10 +156,7 @@ pub fn value_to_json(v: &Value) -> Result<serde_json::Value, String> {
             serde_json::Value::Object(obj)
         }
         other => {
-            return Err(format!(
-                "cannot encode {} as JSON",
-                other.type_name()
-            ));
+            return Err(format!("cannot encode {} as JSON", other.type_name()));
         }
     })
 }

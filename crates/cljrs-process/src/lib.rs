@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use cljrs_env::env::GlobalEnv;
 use cljrs_gc::{GcPtr, MarkVisitor, Trace};
-use cljrs_interop::{Registry, wrap_fn1, wrap_fn_variadic};
+use cljrs_interop::{Registry, wrap_fn_variadic, wrap_fn1};
 use cljrs_value::value::MapValue;
 use cljrs_value::{Keyword, NativeObject, Value, gc_native_object};
 
@@ -72,7 +72,10 @@ fn result_map(exit: i32, out: Option<String>, err: Option<String>) -> Value {
 fn as_str(v: &Value, what: &str) -> Result<String, String> {
     match v {
         Value::Str(s) => Ok(s.get().to_string()),
-        other => Err(format!("{what} must be a string, got {}", other.type_name())),
+        other => Err(format!(
+            "{what} must be a string, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -133,7 +136,10 @@ fn parse_opts_map(v: &Value) -> Result<SpawnOpts, String> {
     let mut opts = SpawnOpts::default();
     for (k, val) in m.iter() {
         let Some(name) = keyword_name(k) else {
-            return Err(format!("option keys must be keywords, got {}", k.type_name()));
+            return Err(format!(
+                "option keys must be keywords, got {}",
+                k.type_name()
+            ));
         };
         match name.as_str() {
             "dir" => opts.dir = Some(as_str(val, ":dir")?),
@@ -244,7 +250,10 @@ fn wait_for(handle: &ChildProcess) -> Result<WaitResult, String> {
 fn handle_of(v: &Value) -> Result<GcPtr<cljrs_value::NativeObjectBox>, String> {
     match v {
         Value::NativeObject(obj) if obj.get().type_tag() == "ChildProcess" => Ok(obj.clone()),
-        other => Err(format!("expected a ChildProcess, got {}", other.type_name())),
+        other => Err(format!(
+            "expected a ChildProcess, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -276,55 +285,59 @@ pub fn init(globals: &Arc<GlobalEnv>) {
 pub fn register(registry: &mut Registry) {
     registry.define(
         "cljrs.process/sh",
-        wrap_fn_variadic("cljrs.process/sh", 1, |args: &[Value]| -> Result<Value, String> {
-            // clojure.java.shell/sh: leading strings, then keyword options.
-            let mut argv = Vec::new();
-            let mut i = 0;
-            while i < args.len() {
-                match &args[i] {
-                    Value::Str(s) => {
-                        argv.push(s.get().to_string());
-                        i += 1;
+        wrap_fn_variadic(
+            "cljrs.process/sh",
+            1,
+            |args: &[Value]| -> Result<Value, String> {
+                // clojure.java.shell/sh: leading strings, then keyword options.
+                let mut argv = Vec::new();
+                let mut i = 0;
+                while i < args.len() {
+                    match &args[i] {
+                        Value::Str(s) => {
+                            argv.push(s.get().to_string());
+                            i += 1;
+                        }
+                        _ => break,
                     }
-                    _ => break,
                 }
-            }
-            if argv.is_empty() {
-                return Err("sh needs at least one command string".to_string());
-            }
-            let mut opts = SpawnOpts::default();
-            let mut kwargs: HashMap<String, Value> = HashMap::new();
-            while i < args.len() {
-                let Some(name) = keyword_name(&args[i]) else {
-                    return Err(format!(
-                        "sh options must be keyword/value pairs, got {}",
-                        args[i].type_name()
-                    ));
-                };
-                let Some(val) = args.get(i + 1) else {
-                    return Err(format!("sh option :{name} is missing a value"));
-                };
-                kwargs.insert(name, val.clone());
-                i += 2;
-            }
-            for (name, val) in &kwargs {
-                match name.as_str() {
-                    "in" => opts.stdin = StdinSpec::Pipe(as_str(val, ":in")?),
-                    "dir" => opts.dir = Some(as_str(val, ":dir")?),
-                    "env" => opts.env = Some(env_pairs(val, ":env")?),
-                    "extra-env" => opts.extra_env = env_pairs(val, ":extra-env")?,
-                    other => return Err(format!("unknown sh option :{other}")),
+                if argv.is_empty() {
+                    return Err("sh needs at least one command string".to_string());
                 }
-            }
-            let child = spawn_child(&argv, &opts)?;
-            let handle = ChildProcess {
-                cmd: argv.join(" "),
-                child: Mutex::new(Some(child)),
-                result: Mutex::new(None),
-            };
-            let (exit, out, err) = wait_for(&handle)?;
-            Ok(result_map(exit, out, err))
-        }),
+                let mut opts = SpawnOpts::default();
+                let mut kwargs: HashMap<String, Value> = HashMap::new();
+                while i < args.len() {
+                    let Some(name) = keyword_name(&args[i]) else {
+                        return Err(format!(
+                            "sh options must be keyword/value pairs, got {}",
+                            args[i].type_name()
+                        ));
+                    };
+                    let Some(val) = args.get(i + 1) else {
+                        return Err(format!("sh option :{name} is missing a value"));
+                    };
+                    kwargs.insert(name, val.clone());
+                    i += 2;
+                }
+                for (name, val) in &kwargs {
+                    match name.as_str() {
+                        "in" => opts.stdin = StdinSpec::Pipe(as_str(val, ":in")?),
+                        "dir" => opts.dir = Some(as_str(val, ":dir")?),
+                        "env" => opts.env = Some(env_pairs(val, ":env")?),
+                        "extra-env" => opts.extra_env = env_pairs(val, ":extra-env")?,
+                        other => return Err(format!("unknown sh option :{other}")),
+                    }
+                }
+                let child = spawn_child(&argv, &opts)?;
+                let handle = ChildProcess {
+                    cmd: argv.join(" "),
+                    child: Mutex::new(Some(child)),
+                    result: Mutex::new(None),
+                };
+                let (exit, out, err) = wait_for(&handle)?;
+                Ok(result_map(exit, out, err))
+            },
+        ),
     );
 
     registry.define(
@@ -374,19 +387,22 @@ pub fn register(registry: &mut Registry) {
 
     registry.define(
         "cljrs.process/alive?",
-        wrap_fn1("cljrs.process/alive?", |v: Value| -> Result<Value, String> {
-            with_child_process(&v, |proc| {
-                let mut guard = proc.child.lock().unwrap();
-                match guard.as_mut() {
-                    None => Ok(Value::Bool(false)),
-                    Some(child) => match child.try_wait() {
-                        Ok(None) => Ok(Value::Bool(true)),
-                        Ok(Some(_)) => Ok(Value::Bool(false)),
-                        Err(e) => Err(format!("try_wait failed: {e}")),
-                    },
-                }
-            })
-        }),
+        wrap_fn1(
+            "cljrs.process/alive?",
+            |v: Value| -> Result<Value, String> {
+                with_child_process(&v, |proc| {
+                    let mut guard = proc.child.lock().unwrap();
+                    match guard.as_mut() {
+                        None => Ok(Value::Bool(false)),
+                        Some(child) => match child.try_wait() {
+                            Ok(None) => Ok(Value::Bool(true)),
+                            Ok(Some(_)) => Ok(Value::Bool(false)),
+                            Err(e) => Err(format!("try_wait failed: {e}")),
+                        },
+                    }
+                })
+            },
+        ),
     );
 
     registry.define(
@@ -402,9 +418,7 @@ pub fn register(registry: &mut Registry) {
                     match guard.as_mut() {
                         None => Ok(Value::Nil),
                         Some(child) => match child.try_wait() {
-                            Ok(Some(status)) => {
-                                Ok(Value::Long(status.code().unwrap_or(-1) as i64))
-                            }
+                            Ok(Some(status)) => Ok(Value::Long(status.code().unwrap_or(-1) as i64)),
                             Ok(None) => Ok(Value::Nil),
                             Err(e) => Err(format!("try_wait failed: {e}")),
                         },

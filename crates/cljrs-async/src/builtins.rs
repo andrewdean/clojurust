@@ -267,9 +267,9 @@ fn builtin_future_call(args: &[Value]) -> ValueResult<Value> {
     let thunk = args.first().cloned().unwrap_or(Value::Nil);
     let (globals, ns) = cljrs_env::callback::capture_eval_context()
         .ok_or_else(|| ValueError::Other("future-call called outside an eval context".into()))?;
-    let rt = globals.async_runtime().ok_or_else(|| {
-        ValueError::Other("future-call requires the async runtime".into())
-    })?;
+    let rt = globals
+        .async_runtime()
+        .ok_or_else(|| ValueError::Other("future-call requires the async runtime".into()))?;
     let future = GcPtr::new(cljrs_value::CljxFuture::new_with_thunk(thunk));
     let fut_val = Value::Future(future.clone());
     // Outside a Tokio context (a plain sync embedding) there is no executor

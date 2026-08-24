@@ -69,17 +69,14 @@ pub fn dispatch_tags_for_class(class_sym: &str) -> Vec<Arc<str>> {
         "Float" => &["Double"],
         "Number" => &["Long", "Double", "BigInt", "BigDecimal", "Ratio"],
         "BigInteger" => &["BigInt"],
-        "IPersistentVector" | "PersistentVector" | "APersistentVector" | "MapEntry" => {
-            &["Vector"]
-        }
+        "IPersistentVector" | "PersistentVector" | "APersistentVector" | "MapEntry" => &["Vector"],
         "IPersistentMap" | "PersistentArrayMap" | "PersistentHashMap" | "APersistentMap" => {
             &["Map"]
         }
-        "IPersistentSet" | "PersistentHashSet" | "PersistentTreeSet" | "APersistentSet" => {
-            &["Set"]
+        "IPersistentSet" | "PersistentHashSet" | "PersistentTreeSet" | "APersistentSet" => &["Set"],
+        "IPersistentList" | "PersistentList" | "ISeq" | "ASeq" | "LazySeq" | "Cons" | "Seqable" => {
+            &["List"]
         }
-        "IPersistentList" | "PersistentList" | "ISeq" | "ASeq" | "LazySeq" | "Cons"
-        | "Seqable" => &["List"],
         "IPersistentCollection" => &["List", "Vector", "Map", "Set"],
         "IFn" | "AFunction" => &["Fn"],
         other => return vec![Arc::from(other)],
@@ -297,14 +294,12 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
         },
         // (vector idx) → nth (IFn on vectors).
         Value::Vector(v) => match args.first().map(|a| a.unwrap_meta()) {
-            Some(Value::Long(i)) if *i >= 0 => {
-                v.get().nth(*i as usize).cloned().ok_or_else(|| {
-                    EvalError::Runtime(format!(
-                        "vector index {i} out of bounds for length {}",
-                        v.get().count()
-                    ))
-                })
-            }
+            Some(Value::Long(i)) if *i >= 0 => v.get().nth(*i as usize).cloned().ok_or_else(|| {
+                EvalError::Runtime(format!(
+                    "vector index {i} out of bounds for length {}",
+                    v.get().count()
+                ))
+            }),
             Some(other) => Err(EvalError::Runtime(format!(
                 "vectors expect an integer index, got {}",
                 other.type_name()

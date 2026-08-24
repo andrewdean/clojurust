@@ -219,7 +219,10 @@ fn qualify_symbol(
     // never qualify (a qualified `&` in a binding vector would stop
     // parsing as the rest-args marker).
     if SPECIAL_FORMS.contains(&s)
-        || matches!(s, "&" | "catch" | "finally" | "Exception" | "Throwable" | "Error")
+        || matches!(
+            s,
+            "&" | "catch" | "finally" | "Exception" | "Throwable" | "Error"
+        )
     {
         return s.to_string();
     }

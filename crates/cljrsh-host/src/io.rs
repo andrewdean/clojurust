@@ -3,7 +3,7 @@
 
 use cljrs_builtins::form::form_to_value;
 use cljrs_gc::GcPtr;
-use cljrs_interop::{Registry, wrap_fn1, wrap_fn_variadic};
+use cljrs_interop::{Registry, wrap_fn_variadic, wrap_fn1};
 use cljrs_value::{PersistentVector, Value};
 
 /// Read one line from stdin (newline stripped); `None` at EOF.
@@ -36,7 +36,9 @@ pub fn read_all() -> std::io::Result<String> {
 /// Parse every form in `src` as data (no evaluation) into values.
 pub fn read_edn_all(src: &str, origin: &str) -> Result<Vec<Value>, String> {
     let mut parser = cljrs_reader::Parser::new(src.to_string(), origin.to_string());
-    let forms = parser.parse_all().map_err(|e| format!("EDN parse error: {e}"))?;
+    let forms = parser
+        .parse_all()
+        .map_err(|e| format!("EDN parse error: {e}"))?;
     Ok(forms.iter().map(form_to_value).collect())
 }
 
@@ -92,7 +94,9 @@ pub fn register(registry: &mut Registry) {
                     return Err(format!("expected a string, got {}", v.type_name()));
                 };
                 let values = read_edn_all(s.get(), "<edn>")?;
-                Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(values))))
+                Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(
+                    values,
+                ))))
             },
         ),
     );

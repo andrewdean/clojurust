@@ -117,7 +117,10 @@ fn task_map(task: &cljrsh_project::TaskDef) -> cljrs_value::Value {
         ));
     }
     if task.private {
-        pairs.push((Value::keyword(Keyword::simple("private")), Value::Bool(true)));
+        pairs.push((
+            Value::keyword(Keyword::simple("private")),
+            Value::Bool(true),
+        ));
     }
     Value::Map(MapValue::from_pairs(pairs))
 }
@@ -145,10 +148,7 @@ fn eval_requires(specs: &[Form], env: &mut Env) -> Result<(), ExecError> {
     Ok(())
 }
 
-fn eval_form_checked(
-    form: &Form,
-    env: &mut Env,
-) -> Result<cljrs_value::Value, ExecError> {
+fn eval_form_checked(form: &Form, env: &mut Env) -> Result<cljrs_value::Value, ExecError> {
     let _alloc_frame = cljrs_gc::push_alloc_frame();
     crate::exec::eval_form(form, env).map_err(ExecError::Eval)
 }
@@ -157,9 +157,7 @@ fn eval_form_checked(
 pub(crate) fn dep_cache_dir() -> std::path::PathBuf {
     std::env::var("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|_| {
-            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".cache"))
-        })
+        .or_else(|_| std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
         .unwrap_or_else(|_| std::path::PathBuf::from(".cljrsh-cache"))
         .join("cljrsh")
 }
@@ -199,17 +197,11 @@ pub fn load_project(globals: &Arc<GlobalEnv>) -> Option<Project> {
             // :pods — registry pods, resolved (downloading on first use) and
             // loaded before any evaluation so their namespaces are requirable.
             for (name, version) in &project.pods {
-                let loaded = cljrsh_project::pods::ensure_registry_pod(
-                    name,
-                    version,
-                    &dep_cache_dir(),
-                )
-                .and_then(|exe| {
-                    cljrsh_pods::load_registry_pod(
-                        globals,
-                        &exe.to_string_lossy(),
-                    )
-                });
+                let loaded =
+                    cljrsh_project::pods::ensure_registry_pod(name, version, &dep_cache_dir())
+                        .and_then(|exe| {
+                            cljrsh_pods::load_registry_pod(globals, &exe.to_string_lossy())
+                        });
                 if let Err(e) = loaded {
                     eprintln!("cljrsh: warning: pod {name} {version}: {e}");
                 }

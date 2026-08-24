@@ -605,7 +605,10 @@ const BUILTIN_DOCS: &[(&str, &str)] = &[
     ("flush", "Flushes *out*."),
     ("read-string", "Reads one object from the given string."),
     ("slurp", "Reads the contents of a file into a string."),
-    ("read-line", "Reads the next line from stdin; nil at end of input."),
+    (
+        "read-line",
+        "Reads the next line from stdin; nil at end of input.",
+    ),
     (
         "spit",
         "Writes content to a file, creating or overwriting it.",
@@ -1382,8 +1385,16 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("sorted-set", Arity::Variadic { min: 0 }, builtin_sorted_set),
         ("sorted-set?", Arity::Fixed(1), builtin_sorted_set_q),
         ("sorted-map", Arity::Variadic { min: 0 }, builtin_sorted_map),
-        ("sorted-map-by", Arity::Variadic { min: 1 }, builtin_sorted_map_by),
-        ("sorted-set-by", Arity::Variadic { min: 1 }, builtin_sorted_set_by),
+        (
+            "sorted-map-by",
+            Arity::Variadic { min: 1 },
+            builtin_sorted_map_by,
+        ),
+        (
+            "sorted-set-by",
+            Arity::Variadic { min: 1 },
+            builtin_sorted_set_by,
+        ),
         ("sorted-map?", Arity::Fixed(1), builtin_sorted_map_q),
         ("walk", Arity::Fixed(3), builtin_walk_stub),
         ("postwalk", Arity::Fixed(2), builtin_postwalk_stub),
@@ -1513,8 +1524,16 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             Arity::Fixed(0),
             crate::system::builtin_nano_time,
         ),
-        ("Long/parseLong", Arity::Variadic { min: 1 }, crate::system::builtin_long_parse),
-        ("Integer/parseInt", Arity::Fixed(1), crate::system::builtin_long_parse),
+        (
+            "Long/parseLong",
+            Arity::Variadic { min: 1 },
+            crate::system::builtin_long_parse,
+        ),
+        (
+            "Integer/parseInt",
+            Arity::Fixed(1),
+            crate::system::builtin_long_parse,
+        ),
         (
             "Double/parseDouble",
             Arity::Fixed(1),
@@ -1550,12 +1569,24 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             Arity::Fixed(1),
             crate::system::builtin_char_is_whitespace,
         ),
-        ("instant-now", Arity::Fixed(0), crate::time::builtin_instant_now),
+        (
+            "instant-now",
+            Arity::Fixed(0),
+            crate::time::builtin_instant_now,
+        ),
         ("instant", Arity::Fixed(1), crate::time::builtin_instant),
-        ("instant-ms", Arity::Fixed(1), crate::time::builtin_instant_ms),
+        (
+            "instant-ms",
+            Arity::Fixed(1),
+            crate::time::builtin_instant_ms,
+        ),
         ("instant?", Arity::Fixed(1), crate::time::builtin_instant_q),
         ("future-done?", Arity::Fixed(1), builtin_future_done_q),
-        ("future-cancelled?", Arity::Fixed(1), builtin_future_cancelled_q),
+        (
+            "future-cancelled?",
+            Arity::Fixed(1),
+            builtin_future_cancelled_q,
+        ),
         ("future-cancel", Arity::Fixed(1), builtin_future_cancel),
         ("future?", Arity::Fixed(1), builtin_future_q),
         (
@@ -1577,7 +1608,11 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("Math/floor", Arity::Fixed(1), builtin_floor),
         ("Math/ceil", Arity::Fixed(1), builtin_ceil),
         ("Math/addExact", Arity::Fixed(2), builtin_math_add_exact),
-        ("Math/multiplyExact", Arity::Fixed(2), builtin_math_multiply_exact),
+        (
+            "Math/multiplyExact",
+            Arity::Fixed(2),
+            builtin_math_multiply_exact,
+        ),
         ("Math/round", Arity::Fixed(1), builtin_round),
         ("Math/sqrt", Arity::Fixed(1), builtin_sqrt),
         ("Math/pow", Arity::Fixed(2), builtin_pow),
@@ -1913,10 +1948,22 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("Integer/SIZE", Value::Long(32)),
         // Locale constants: opaque keywords — locale-parameterized string
         // methods ignore them (Rust's Unicode case mapping is unconditional).
-        ("java.util.Locale/US", Value::keyword(Keyword::parse("cljrs.locale/US"))),
-        ("Locale/US", Value::keyword(Keyword::parse("cljrs.locale/US"))),
-        ("java.util.Locale/ROOT", Value::keyword(Keyword::parse("cljrs.locale/ROOT"))),
-        ("Locale/ROOT", Value::keyword(Keyword::parse("cljrs.locale/ROOT"))),
+        (
+            "java.util.Locale/US",
+            Value::keyword(Keyword::parse("cljrs.locale/US")),
+        ),
+        (
+            "Locale/US",
+            Value::keyword(Keyword::parse("cljrs.locale/US")),
+        ),
+        (
+            "java.util.Locale/ROOT",
+            Value::keyword(Keyword::parse("cljrs.locale/ROOT")),
+        ),
+        (
+            "Locale/ROOT",
+            Value::keyword(Keyword::parse("cljrs.locale/ROOT")),
+        ),
         ("Long/MIN_VALUE", Value::Long(i64::MIN)),
         ("Integer/MAX_VALUE", Value::Long(i32::MAX as i64)),
         ("Integer/MIN_VALUE", Value::Long(i32::MIN as i64)),
@@ -2110,12 +2157,8 @@ impl Iterator for ValueIter {
                 }
                 other => {
                     // Java-shim mutable collections iterate as snapshots.
-                    if let Some(items) = crate::javamap::native_coll_items(other) {
-                        self.current =
-                            Value::List(GcPtr::new(PersistentList::from_iter(items)));
-                    } else {
-                        return None;
-                    }
+                    let items = crate::javamap::native_coll_items(other)?;
+                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
             }
         }
@@ -3582,10 +3625,10 @@ fn builtin_empty_q(args: &[Value]) -> ValueResult<Value> {
                 fwd[0] = vv;
                 return builtin_empty_q(&fwd);
             }
-                return Err(ValueError::WrongType {
-                    expected: "seqable",
-                    got: args[0].type_name().to_string(),
-                });
+            return Err(ValueError::WrongType {
+                expected: "seqable",
+                got: args[0].type_name().to_string(),
+            });
         }
     };
     Ok(Value::Bool(empty))
@@ -3937,11 +3980,7 @@ fn builtin_get(args: &[Value]) -> ValueResult<Value> {
     match args[0].unwrap_meta() {
         Value::Nil => Ok(default),
         Value::Map(m) => Ok(m.get(&args[1]).unwrap_or(default)),
-        Value::TransientMap(m) => Ok(m
-            .get()
-            .find(&args[1])
-            .map(|(_, v)| v)
-            .unwrap_or(default)),
+        Value::TransientMap(m) => Ok(m.get().find(&args[1]).map(|(_, v)| v).unwrap_or(default)),
         Value::TypeInstance(ti) => Ok(ti.get().fields.get(&args[1]).unwrap_or(default)),
         Value::Vector(v) => {
             if let Value::Long(idx) = &args[1] {
@@ -4180,9 +4219,8 @@ fn builtin_rseq(args: &[Value]) -> ValueResult<Value> {
 /// A java-shim mutable collection snapshotted as a Vector value, so the
 /// seq family can treat the shims as ordinary collections.
 fn native_coll_as_vector(v: &Value) -> Option<Value> {
-    crate::javamap::native_coll_items(v).map(|items| {
-        Value::Vector(GcPtr::new(PersistentVector::from_iter(items)))
-    })
+    crate::javamap::native_coll_items(v)
+        .map(|items| Value::Vector(GcPtr::new(PersistentVector::from_iter(items))))
 }
 
 fn builtin_seq(args: &[Value]) -> ValueResult<Value> {
@@ -5322,9 +5360,8 @@ fn builtin_arraycopy(args: &[Value]) -> ValueResult<Value> {
         }
         _ => {
             return Err(ValueError::Other(
-                "System/arraycopy: src and dst must be arrays of the same type"
-                    .to_string(),
-            ))
+                "System/arraycopy: src and dst must be arrays of the same type".to_string(),
+            ));
         }
     }
     Ok(Value::Nil)
@@ -6020,9 +6057,7 @@ fn assoc_in_impl(m: Value, keys: &[Value], val: Value) -> ValueResult<Value> {
         Value::Map(map) => map.get(k).unwrap_or(Value::Nil),
         Value::TypeInstance(ti) => ti.get().fields.get(k).unwrap_or(Value::Nil),
         Value::Vector(v) => match k {
-            Value::Long(i) if *i >= 0 => {
-                v.get().nth(*i as usize).cloned().unwrap_or(Value::Nil)
-            }
+            Value::Long(i) if *i >= 0 => v.get().nth(*i as usize).cloned().unwrap_or(Value::Nil),
             _ => Value::Nil,
         },
         _ => Value::Nil,
@@ -6856,7 +6891,9 @@ fn parse_io_opts(name: &str, opts: &[Value]) -> ValueResult<IoOpts> {
                 }
             }
             other => {
-                return Err(ValueError::Other(format!("{name}: unknown option :{other}")));
+                return Err(ValueError::Other(format!(
+                    "{name}: unknown option :{other}"
+                )));
             }
         }
     }
@@ -6909,7 +6946,13 @@ fn builtin_slurp(args: &[Value]) -> ValueResult<Value> {
     // Byte arrays decode directly (UTF-8) — the pod convention for stream
     // payloads (S3 :Body and friends).
     if let Value::ByteArray(bytes) = &args[0] {
-        let raw: Vec<u8> = bytes.get().lock().unwrap().iter().map(|&b| b as u8).collect();
+        let raw: Vec<u8> = bytes
+            .get()
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|&b| b as u8)
+            .collect();
         return Ok(Value::string(String::from_utf8_lossy(&raw).into_owned()));
     }
     let path = match &args[0] {
@@ -7821,9 +7864,7 @@ fn builtin_newline(_args: &[Value]) -> ValueResult<Value> {
 /// method maps are keyword → fn.
 fn builtin_extend(args: &[Value]) -> ValueResult<Value> {
     let type_tags: Vec<std::sync::Arc<str>> = match &args[0] {
-        Value::Symbol(sym) => {
-            cljrs_env::apply::dispatch_tags_for_class(sym.get().name.as_ref())
-        }
+        Value::Symbol(sym) => cljrs_env::apply::dispatch_tags_for_class(sym.get().name.as_ref()),
         Value::Nil => vec![std::sync::Arc::from("nil")],
         v => {
             return Err(ValueError::WrongType {
@@ -8012,10 +8053,10 @@ fn builtin_not_empty(args: &[Value]) -> ValueResult<Value> {
                 fwd[0] = vv;
                 return builtin_not_empty(&fwd);
             }
-                return Err(ValueError::WrongType {
-                    expected: "seqable",
-                    got: v.type_name().to_string(),
-                });
+            return Err(ValueError::WrongType {
+                expected: "seqable",
+                got: v.type_name().to_string(),
+            });
         }
     };
     if is_empty {

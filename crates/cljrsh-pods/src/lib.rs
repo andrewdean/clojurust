@@ -94,7 +94,9 @@ fn decode_msg(msg: &Bencode) -> Option<Msg> {
         _ => Vec::new(),
     };
     Some(Msg::Reply {
-        value: get(msg, "value").and_then(|v| v.as_str()).map(str::to_string),
+        value: get(msg, "value")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         out: get(msg, "out").and_then(|v| v.as_str()).map(str::to_string),
         err: get(msg, "err").and_then(|v| v.as_str()).map(str::to_string),
         ex_message: get(msg, "ex-message")
@@ -390,8 +392,7 @@ fn invoke_to_value(pod: &Pod, var: &str, args: &[Value]) -> Result<Value, ValueE
 /// Every live pod, so the hosting binary can shut them down cleanly at
 /// process exit (Drop alone is skipped by std::process::exit).
 fn live_pods() -> &'static Mutex<Vec<std::sync::Weak<Pod>>> {
-    static PODS: std::sync::OnceLock<Mutex<Vec<std::sync::Weak<Pod>>>> =
-        std::sync::OnceLock::new();
+    static PODS: std::sync::OnceLock<Mutex<Vec<std::sync::Weak<Pod>>>> = std::sync::OnceLock::new();
     PODS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
@@ -447,7 +448,12 @@ fn load_pod(globals: &Arc<GlobalEnv>, argv: &[String]) -> Result<Value, String> 
         "json" => PayloadFormat::Json,
         "edn" => PayloadFormat::Edn,
         "transit+json" => PayloadFormat::TransitJson,
-        other => return Err(format!("pod {} uses unsupported format {other:?}", pod.name)),
+        other => {
+            return Err(format!(
+                "pod {} uses unsupported format {other:?}",
+                pod.name
+            ));
+        }
     };
 
     for (ns_name, vars) in &namespaces {
@@ -487,9 +493,8 @@ fn load_pod(globals: &Arc<GlobalEnv>, argv: &[String]) -> Result<Value, String> 
                 .map_err(|e| format!("pod {} code var {}: {e}", pod.name, var.name))?;
             for form in forms {
                 let _frame = cljrs_gc::push_alloc_frame();
-                cljrs_interp::eval::eval(&form, &mut env).map_err(|e| {
-                    format!("pod {} code var {}: {e}", pod.name, var.name)
-                })?;
+                cljrs_interp::eval::eval(&form, &mut env)
+                    .map_err(|e| format!("pod {} code var {}: {e}", pod.name, var.name))?;
             }
         }
         globals.mark_loaded(ns_name);

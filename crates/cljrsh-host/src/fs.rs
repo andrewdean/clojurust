@@ -5,13 +5,16 @@
 use std::path::{Path, PathBuf};
 
 use cljrs_gc::GcPtr;
-use cljrs_interop::{Registry, wrap_fn1, wrap_fn2, wrap_fn_variadic};
+use cljrs_interop::{Registry, wrap_fn_variadic, wrap_fn1, wrap_fn2};
 use cljrs_value::{PersistentVector, Value};
 
 fn str_arg(v: &Value, what: &str) -> Result<String, String> {
     match v {
         Value::Str(s) => Ok(s.get().to_string()),
-        other => Err(format!("{what} must be a string, got {}", other.type_name())),
+        other => Err(format!(
+            "{what} must be a string, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -47,15 +50,14 @@ pub fn run_exit_deletes() {
 
 pub fn register(registry: &mut Registry) {
     let ns = "cljrsh.fs";
-    let def1 = |registry: &mut Registry,
-                name: &str,
-                f: fn(&str) -> Result<Value, String>| {
+    let def1 = |registry: &mut Registry, name: &str, f: fn(&str) -> Result<Value, String>| {
         let qualified = format!("{ns}/{name}");
         registry.define(
             &qualified,
-            wrap_fn1(qualified.clone(), move |v: Value| -> Result<Value, String> {
-                f(&str_arg(&v, "path")?)
-            }),
+            wrap_fn1(
+                qualified.clone(),
+                move |v: Value| -> Result<Value, String> { f(&str_arg(&v, "path")?) },
+            ),
         );
     };
 
@@ -151,12 +153,16 @@ pub fn register(registry: &mut Registry) {
     });
     def1(registry, "creation-time-millis", |p| {
         let md = std::fs::metadata(p).map_err(|e| io_err("creation-time-millis", p, e))?;
-        Ok(match md.created().ok().and_then(|t| {
-            t.duration_since(std::time::UNIX_EPOCH).ok()
-        }) {
-            Some(d) => Value::Long(d.as_millis() as i64),
-            None => Value::Nil,
-        })
+        Ok(
+            match md
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            {
+                Some(d) => Value::Long(d.as_millis() as i64),
+                None => Value::Nil,
+            },
+        )
     });
     def1(registry, "normalize", |p| {
         // Lexical normalization (no IO): resolve `.` and non-leading `..`.
@@ -197,8 +203,7 @@ pub fn register(registry: &mut Registry) {
             |link: Value, target: Value| -> Result<Value, String> {
                 let link = str_arg(&link, "link path")?;
                 let target = str_arg(&target, "target path")?;
-                std::fs::hard_link(&target, &link)
-                    .map_err(|e| io_err("create-link", &link, e))?;
+                std::fs::hard_link(&target, &link).map_err(|e| io_err("create-link", &link, e))?;
                 Ok(Value::string(link))
             },
         ),
@@ -254,9 +259,7 @@ pub fn register(registry: &mut Registry) {
                     .prefix("cljrsh-")
                     .tempfile()
                     .map_err(|e| format!("create-temp-file: {e}"))?;
-                let (_, path) = file
-                    .keep()
-                    .map_err(|e| format!("create-temp-file: {e}"))?;
+                let (_, path) = file.keep().map_err(|e| format!("create-temp-file: {e}"))?;
                 Ok(Value::string(path.display().to_string()))
             },
         ),
@@ -387,20 +390,28 @@ pub fn register(registry: &mut Registry) {
     );
     registry.define(
         "cljrsh.fs/cwd",
-        wrap_fn_variadic("cljrsh.fs/cwd", 0, |_args: &[Value]| -> Result<Value, String> {
-            std::env::current_dir()
-                .map(|p| Value::string(p.display().to_string()))
-                .map_err(|e| format!("cwd: {e}"))
-        }),
+        wrap_fn_variadic(
+            "cljrsh.fs/cwd",
+            0,
+            |_args: &[Value]| -> Result<Value, String> {
+                std::env::current_dir()
+                    .map(|p| Value::string(p.display().to_string()))
+                    .map_err(|e| format!("cwd: {e}"))
+            },
+        ),
     );
     registry.define(
         "cljrsh.fs/home",
-        wrap_fn_variadic("cljrsh.fs/home", 0, |_args: &[Value]| -> Result<Value, String> {
-            Ok(std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .map(Value::string)
-                .unwrap_or(Value::Nil))
-        }),
+        wrap_fn_variadic(
+            "cljrsh.fs/home",
+            0,
+            |_args: &[Value]| -> Result<Value, String> {
+                Ok(std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .map(Value::string)
+                    .unwrap_or(Value::Nil))
+            },
+        ),
     );
 
     // (glob root pattern) — relative glob under root, returns matching paths
@@ -423,10 +434,7 @@ pub fn register(registry: &mut Registry) {
                     .into_iter()
                     .filter_map(Result::ok)
                 {
-                    let rel = entry
-                        .path()
-                        .strip_prefix(&root)
-                        .unwrap_or(entry.path());
+                    let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
                     if glob.is_match(rel) {
                         out.push(entry.path().display().to_string());
                     }
@@ -473,9 +481,7 @@ pub fn register(registry: &mut Registry) {
                 for entry in walker
                     .filter_entry(|e| {
                         !(e.file_type().is_dir()
-                            && e.file_name()
-                                .to_str()
-                                .is_some_and(|n| skip.contains(n)))
+                            && e.file_name().to_str().is_some_and(|n| skip.contains(n)))
                     })
                     .filter_map(Result::ok)
                 {
@@ -514,8 +520,7 @@ pub fn register(registry: &mut Registry) {
                         bytes.type_name()
                     ));
                 };
-                let unsigned: Vec<u8> =
-                    a.get().lock().unwrap().iter().map(|b| *b as u8).collect();
+                let unsigned: Vec<u8> = a.get().lock().unwrap().iter().map(|b| *b as u8).collect();
                 std::fs::write(&path, unsigned).map_err(|e| io_err("write-bytes", &path, e))?;
                 Ok(Value::string(path))
             },
@@ -534,12 +539,9 @@ pub fn register(registry: &mut Registry) {
                     Some(v) => str_arg(v, "out-file")?,
                     None => format!("{src}.gz"),
                 };
-                let mut input =
-                    std::fs::File::open(&src).map_err(|e| io_err("gzip", &src, e))?;
-                let output =
-                    std::fs::File::create(&out).map_err(|e| io_err("gzip", &out, e))?;
-                let mut enc =
-                    flate2::write::GzEncoder::new(output, flate2::Compression::default());
+                let mut input = std::fs::File::open(&src).map_err(|e| io_err("gzip", &src, e))?;
+                let output = std::fs::File::create(&out).map_err(|e| io_err("gzip", &out, e))?;
+                let mut enc = flate2::write::GzEncoder::new(output, flate2::Compression::default());
                 std::io::copy(&mut input, &mut enc).map_err(|e| io_err("gzip", &src, e))?;
                 enc.finish().map_err(|e| io_err("gzip", &out, e))?;
                 Ok(Value::string(out))
@@ -556,9 +558,10 @@ pub fn register(registry: &mut Registry) {
                 let src = str_arg(&args[0], "source")?;
                 let out = match args.get(1) {
                     Some(v) => str_arg(v, "out-file")?,
-                    None => src.strip_suffix(".gz").map(str::to_string).ok_or_else(
-                        || format!("gunzip {src}: no .gz suffix; pass an out-file"),
-                    )?,
+                    None => src
+                        .strip_suffix(".gz")
+                        .map(str::to_string)
+                        .ok_or_else(|| format!("gunzip {src}: no .gz suffix; pass an out-file"))?,
                 };
                 let input = std::fs::File::open(&src).map_err(|e| io_err("gunzip", &src, e))?;
                 let mut dec = flate2::read::GzDecoder::new(input);
@@ -589,8 +592,8 @@ pub fn register(registry: &mut Registry) {
                             format!("zip: {} is not under root {}", p.display(), root.display())
                         })
                 };
-                let output = std::fs::File::create(&zip_file)
-                    .map_err(|e| io_err("zip", &zip_file, e))?;
+                let output =
+                    std::fs::File::create(&zip_file).map_err(|e| io_err("zip", &zip_file, e))?;
                 let mut zw = zip::ZipWriter::new(output);
                 let opts = zip::write::SimpleFileOptions::default();
                 let zerr = |e: zip::result::ZipError| format!("zip {zip_file}: {e}");
@@ -629,8 +632,8 @@ pub fn register(registry: &mut Registry) {
                 let dest = str_arg(&dest, "dest")?;
                 let input =
                     std::fs::File::open(&zip_file).map_err(|e| io_err("unzip", &zip_file, e))?;
-                let mut archive = zip::ZipArchive::new(input)
-                    .map_err(|e| format!("unzip {zip_file}: {e}"))?;
+                let mut archive =
+                    zip::ZipArchive::new(input).map_err(|e| format!("unzip {zip_file}: {e}"))?;
                 archive
                     .extract(&dest)
                     .map_err(|e| format!("unzip {zip_file}: {e}"))?;

@@ -204,10 +204,7 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "datalevin.timeout",
         include_str!("clj/datalevin/timeout.clj"),
     ),
-    (
-        "datalevin.inline",
-        include_str!("clj/datalevin/inline.clj"),
-    ),
+    ("datalevin.inline", include_str!("clj/datalevin/inline.clj")),
     ("datalevin.pipe", include_str!("clj/datalevin/pipe.clj")),
     (
         "datalevin.relation",

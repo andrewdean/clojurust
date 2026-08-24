@@ -333,9 +333,9 @@ pub fn select_reader_cond(clauses: &[Form]) -> Option<&Form> {
 /// the feature set). A `:cljs`-only conditional expanding to nothing is the
 /// CORRECT outcome on this platform — never warn for those.
 fn warn_foreign_platform_cond(clauses: &[Form]) {
-    let has_foreign = clauses.chunks(2).any(|pair| {
-        matches!(&pair[0].kind, FormKind::Keyword(k) if k == "clj")
-    });
+    let has_foreign = clauses
+        .chunks(2)
+        .any(|pair| matches!(&pair[0].kind, FormKind::Keyword(k) if k == "clj"));
     if !has_foreign {
         return;
     }
@@ -396,7 +396,6 @@ pub fn expand_reader_conds(forms: &[Form]) -> Vec<Form> {
     out
 }
 
-
 // ── EDN reading with tag sentinels ────────────────────────────────────────────
 
 /// Convert a form to data for `clojure.edn`: like [`form_to_value`], but
@@ -412,12 +411,14 @@ pub fn form_to_edn_value(form: &Form) -> Value {
 fn sentinelize_tags(form: &Form) -> Form {
     let span = form.span.clone();
     let kind = match &form.kind {
-        FormKind::TaggedLiteral(tag, inner) if tag != "uuid" && tag != "inst" => FormKind::Map(vec![
-            Form::new(FormKind::Keyword("cljrs.edn/tag".into()), span.clone()),
-            Form::new(FormKind::Symbol(tag.clone()), span.clone()),
-            Form::new(FormKind::Keyword("cljrs.edn/form".into()), span.clone()),
-            sentinelize_tags(inner),
-        ]),
+        FormKind::TaggedLiteral(tag, inner) if tag != "uuid" && tag != "inst" => {
+            FormKind::Map(vec![
+                Form::new(FormKind::Keyword("cljrs.edn/tag".into()), span.clone()),
+                Form::new(FormKind::Symbol(tag.clone()), span.clone()),
+                Form::new(FormKind::Keyword("cljrs.edn/form".into()), span.clone()),
+                sentinelize_tags(inner),
+            ])
+        }
         FormKind::TaggedLiteral(tag, inner) => {
             FormKind::TaggedLiteral(tag.clone(), Box::new(sentinelize_tags(inner)))
         }

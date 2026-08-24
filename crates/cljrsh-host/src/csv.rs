@@ -105,9 +105,7 @@ pub fn register(registry: &mut Registry) {
                 let bytes = writer
                     .into_inner()
                     .map_err(|e| format!("CSV write error: {e}"))?;
-                Ok(Value::string(
-                    String::from_utf8_lossy(&bytes).into_owned(),
-                ))
+                Ok(Value::string(String::from_utf8_lossy(&bytes).into_owned()))
             },
         ),
     );

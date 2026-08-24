@@ -101,8 +101,7 @@ pub fn execute(plan: Plan, creds: Creds) -> Result<Exchange, String> {
                 .build()
                 .map_err(|e| e.to_string())?;
             let mut req = client.request(
-                reqwest::Method::from_bytes(plan.method.as_bytes())
-                    .map_err(|e| e.to_string())?,
+                reqwest::Method::from_bytes(plan.method.as_bytes()).map_err(|e| e.to_string())?,
                 signed.uri().to_string(),
             );
             for (k, v) in signed.headers() {

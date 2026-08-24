@@ -64,11 +64,8 @@ fn properties_defaults_and_overrides() {
 #[test]
 fn exit_is_not_catchable() {
     let (_, mut env) = make_env();
-    let err = eval_in(
-        &mut env,
-        "(try (System/exit 3) (catch :default e :caught))",
-    )
-    .expect_err("System/exit must unwind past catch");
+    let err = eval_in(&mut env, "(try (System/exit 3) (catch :default e :caught))")
+        .expect_err("System/exit must unwind past catch");
     match err {
         EvalError::Exit(code) => assert_eq!(code, 3),
         other => panic!("expected EvalError::Exit(3), got {other:?}"),
@@ -78,11 +75,11 @@ fn exit_is_not_catchable() {
 #[test]
 fn command_line_args_bound_by_host() {
     let (globals, mut env) = make_env();
-    assert_eq!(eval_in(&mut env, "*command-line-args*").unwrap(), Value::Nil);
-    cljrs_builtins::system::set_command_line_args(
-        &globals,
-        &["a".to_string(), "b".to_string()],
+    assert_eq!(
+        eval_in(&mut env, "*command-line-args*").unwrap(),
+        Value::Nil
     );
+    cljrs_builtins::system::set_command_line_args(&globals, &["a".to_string(), "b".to_string()]);
     let v = eval_in(&mut env, "(vec *command-line-args*)").unwrap();
     let expected = eval_in(&mut env, "[\"a\" \"b\"]").unwrap();
     assert_eq!(v, expected);

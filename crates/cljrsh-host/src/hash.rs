@@ -7,13 +7,7 @@ use sha2::{Digest, Sha256};
 fn to_bytes(v: &Value) -> Result<Vec<u8>, String> {
     match v {
         Value::Str(s) => Ok(s.get().as_bytes().to_vec()),
-        Value::ByteArray(b) => Ok(b
-            .get()
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|&x| x as u8)
-            .collect()),
+        Value::ByteArray(b) => Ok(b.get().lock().unwrap().iter().map(|&x| x as u8).collect()),
         other => Err(format!(
             "sha256 expects a string or byte array, got {}",
             other.type_name()

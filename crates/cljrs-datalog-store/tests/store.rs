@@ -428,10 +428,12 @@ fn slice_and_count_range() {
         a: Some("ghost"),
         ..Bound::default()
     };
-    assert!(store
-        .slice(Index::Ave, &ghost, &ghost, None, false)
-        .expect("slice")
-        .is_empty());
+    assert!(
+        store
+            .slice(Index::Ave, &ghost, &ghost, None, false)
+            .expect("slice")
+            .is_empty()
+    );
 
     // eav slice bounded to one entity.
     let e2 = Bound {

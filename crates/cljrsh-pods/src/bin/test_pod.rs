@@ -113,7 +113,10 @@ fn handle(msg: &Bencode) -> bool {
                     ]));
                 }
                 "pod.test-pod/print-fn" => {
-                    send(&dict(vec![("id", bstr(id)), ("out", bstr("hello from pod\n"))]));
+                    send(&dict(vec![
+                        ("id", bstr(id)),
+                        ("out", bstr("hello from pod\n")),
+                    ]));
                     send(&dict(vec![
                         ("id", bstr(id)),
                         ("value", bstr(":printed")),
@@ -125,10 +128,7 @@ fn handle(msg: &Bencode) -> bool {
                         ("id", bstr(id)),
                         ("ex-message", bstr("pod exploded")),
                         ("ex-data", bstr("{:pod-var :error-fn}")),
-                        (
-                            "status",
-                            Bencode::List(vec![bstr("done"), bstr("error")]),
-                        ),
+                        ("status", Bencode::List(vec![bstr("done"), bstr("error")])),
                     ]));
                 }
                 other => {
@@ -136,10 +136,7 @@ fn handle(msg: &Bencode) -> bool {
                         ("id", bstr(id)),
                         ("ex-message", bstr(&format!("no such var: {other}"))),
                         ("ex-data", bstr("{}")),
-                        (
-                            "status",
-                            Bencode::List(vec![bstr("done"), bstr("error")]),
-                        ),
+                        ("status", Bencode::List(vec![bstr("done"), bstr("error")])),
                     ]));
                 }
             }

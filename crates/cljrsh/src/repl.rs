@@ -137,7 +137,10 @@ impl rustyline::Helper for ReplHelper {}
 type ReplEditor = rustyline::Editor<ReplHelper, rustyline::history::DefaultHistory>;
 
 pub fn run(globals: Arc<GlobalEnv>) -> i32 {
-    println!("cljrsh {} — :repl/quit or Ctrl-D to exit", crate::opts::VERSION);
+    println!(
+        "cljrsh {} — :repl/quit or Ctrl-D to exit",
+        crate::opts::VERSION
+    );
     let mut rl: ReplEditor = match rustyline::Editor::new() {
         Ok(rl) => rl,
         Err(e) => {
@@ -313,10 +316,7 @@ pub fn socket(globals: Arc<GlobalEnv>, addr: Option<&str>) -> i32 {
     0
 }
 
-fn serve_connection(
-    globals: &Arc<GlobalEnv>,
-    stream: std::net::TcpStream,
-) -> std::io::Result<()> {
+fn serve_connection(globals: &Arc<GlobalEnv>, stream: std::net::TcpStream) -> std::io::Result<()> {
     use std::io::{BufRead, BufReader, Write};
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
@@ -336,8 +336,7 @@ fn serve_connection(
             writer.flush()?;
             continue;
         }
-        let mut parser =
-            cljrs_reader::Parser::new(buffer.clone(), "<socket-repl>".into());
+        let mut parser = cljrs_reader::Parser::new(buffer.clone(), "<socket-repl>".into());
         match parser.parse_all() {
             Ok(forms) => {
                 buffer.clear();

@@ -124,7 +124,9 @@ pub fn load(path: &Path) -> Result<Project, ProjectError> {
         .map_err(|e| ProjectError::Parse(e.to_string()))?
         .ok_or_else(|| ProjectError::Shape("empty project file".to_string()))?;
     let FormKind::Map(entries) = &form.kind else {
-        return Err(ProjectError::Shape("project file must be a map".to_string()));
+        return Err(ProjectError::Shape(
+            "project file must be a map".to_string(),
+        ));
     };
 
     let root = path
@@ -207,9 +209,7 @@ fn parse_pods(pods_form: &Form, project: &mut Project) -> Result<(), ProjectErro
                 FormKind::Str(s) => Some(s.clone()),
                 _ => None,
             })
-            .ok_or_else(|| {
-                ProjectError::Shape(format!("pod {name}: missing :version string"))
-            })?;
+            .ok_or_else(|| ProjectError::Shape(format!("pod {name}: missing :version string")))?;
         project.pods.push((name.clone(), version));
     }
     Ok(())
@@ -224,7 +224,9 @@ fn parse_deps(deps_form: &Form, project: &mut Project) -> Result<(), ProjectErro
             return Err(ProjectError::Shape(":deps has an odd entry".to_string()));
         };
         let FormKind::Symbol(lib) = &k.kind else {
-            return Err(ProjectError::Shape(":deps keys must be lib symbols".to_string()));
+            return Err(ProjectError::Shape(
+                ":deps keys must be lib symbols".to_string(),
+            ));
         };
         let FormKind::Map(coord) = &v.kind else {
             return Err(ProjectError::Shape(format!(
@@ -425,7 +427,10 @@ fn parse_task_def(name: String, v: &Form) -> Result<TaskDef, ProjectError> {
 
 /// The evaluation order for `target`: its transitive `:depends` in
 /// topological order, target last. Depth-first, cycle-detecting.
-pub fn task_order<'p>(project: &'p Project, target: &str) -> Result<Vec<&'p TaskDef>, ProjectError> {
+pub fn task_order<'p>(
+    project: &'p Project,
+    target: &str,
+) -> Result<Vec<&'p TaskDef>, ProjectError> {
     fn visit<'p>(
         project: &'p Project,
         name: &str,
@@ -455,13 +460,7 @@ pub fn task_order<'p>(project: &'p Project, target: &str) -> Result<Vec<&'p Task
     }
 
     let mut out = Vec::new();
-    visit(
-        project,
-        target,
-        &mut Vec::new(),
-        &mut Vec::new(),
-        &mut out,
-    )?;
+    visit(project, target, &mut Vec::new(), &mut Vec::new(), &mut out)?;
     Ok(out)
 }
 
@@ -498,15 +497,18 @@ mod tests {
         let (_d, p) = write_project(
             r#"{:tasks {a (do 1) b {:task (do 2) :depends [a]} c {:task (do 3) :depends [b a]}}}"#,
         );
-        let order: Vec<_> = task_order(&p, "c").unwrap().iter().map(|t| t.name.as_str()).collect();
+        let order: Vec<_> = task_order(&p, "c")
+            .unwrap()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
         assert_eq!(order, vec!["a", "b", "c"]);
     }
 
     #[test]
     fn cycle_is_an_error() {
-        let (_d, p) = write_project(
-            r#"{:tasks {a {:task 1 :depends [b]} b {:task 2 :depends [a]}}}"#,
-        );
+        let (_d, p) =
+            write_project(r#"{:tasks {a {:task 1 :depends [b]} b {:task 2 :depends [a]}}}"#);
         assert!(matches!(task_order(&p, "a"), Err(ProjectError::Cycle(_))));
     }
 
@@ -532,10 +534,7 @@ mod tests {
         let sub = dir.path().join("a/b");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::write(dir.path().join("bb.edn"), "{}").unwrap();
-        assert_eq!(
-            find_project_file(&sub).unwrap(),
-            dir.path().join("bb.edn")
-        );
+        assert_eq!(find_project_file(&sub).unwrap(), dir.path().join("bb.edn"));
         std::fs::write(dir.path().join("cljrsh.edn"), "{}").unwrap();
         assert_eq!(
             find_project_file(&sub).unwrap(),

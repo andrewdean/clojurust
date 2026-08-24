@@ -92,7 +92,12 @@ fn format_frame(frame: &Frame) -> String {
 /// ±2 lines around the failing line, with a caret under the column.
 fn render_context(frame: &Frame, message: &str) -> Option<String> {
     let src = lookup_source(frame.span.file.as_str())?;
-    snippet(&src, frame.span.line as usize, frame.span.col as usize, message)
+    snippet(
+        &src,
+        frame.span.line as usize,
+        frame.span.col as usize,
+        message,
+    )
 }
 
 /// ±2 lines of `src` around `line_no`, with a caret under `col`.
@@ -171,7 +176,11 @@ fn describe(e: &EvalError) -> (String, String, Option<String>) {
             format!("Unable to resolve symbol: {s} in this context"),
             None,
         ),
-        EvalError::Arity { name, expected, got } => (
+        EvalError::Arity {
+            name,
+            expected,
+            got,
+        } => (
             "Arity error".to_string(),
             format!("Wrong number of args ({got}) passed to {name}; expected {expected}"),
             None,

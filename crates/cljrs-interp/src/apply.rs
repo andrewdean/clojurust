@@ -187,11 +187,8 @@ pub fn eval_call(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalRes
         FormKind::Symbol(s) => s.clone(),
         _ => "<anonymous>".to_string(),
     };
-    let _frame = crate::trace::FrameGuard::push(
-        name,
-        env.current_ns.clone(),
-        func_form.span.clone(),
-    );
+    let _frame =
+        crate::trace::FrameGuard::push(name, env.current_ns.clone(), func_form.span.clone());
     let result = eval_call_inner(func_form, arg_forms, env);
     // Control-flow signals (recur, exit) are not error conditions.
     if matches!(
@@ -322,12 +319,7 @@ fn eval_method_call(method: &str, arg_forms: &[Form], env: &mut Env) -> EvalResu
 /// Form-free, so the Tier-1 IR interpreter can route dot-marked
 /// `CallDirect` instructions here (see `dispatch_sentinel_by_name` in
 /// cljrs-eval) and behave exactly like the tree-walker's interop path.
-pub fn dispatch_method(
-    method: &str,
-    target: &Value,
-    args: &[Value],
-    env: &mut Env,
-) -> EvalResult {
+pub fn dispatch_method(method: &str, target: &Value, args: &[Value], env: &mut Env) -> EvalResult {
     // (.iterator coll) — Java-style iteration in portable .cljc :clj branches.
     if method == "iterator" && !matches!(target, Value::NativeObject(_)) {
         return cljrs_builtins::javamap::iterator_of(target)
@@ -362,11 +354,7 @@ pub fn dispatch_method(
         Value::Error(e) => match method {
             "getMessage" => Ok(Value::string(e.get().message())),
             "toString" => Ok(Value::string(format!("{target}"))),
-            "getCause" => Ok(e
-                .get()
-                .cause()
-                .map(Value::Error)
-                .unwrap_or(Value::Nil)),
+            "getCause" => Ok(e.get().cause().map(Value::Error).unwrap_or(Value::Nil)),
             _ => Err(EvalError::Runtime(format!(
                 ".{method} not supported on type {}",
                 target.type_name()
@@ -574,10 +562,11 @@ fn dispatch_vector_method(
                 .ok_or_else(|| EvalError::Runtime(format!(".get index {idx} out of bounds")))
         }
         "isEmpty" => Ok(Value::Bool(v.get().is_empty())),
-        "contains" => Ok(Value::Bool(
-            args.first()
-                .is_some_and(|needle| v.get().iter().any(|item| item == needle)),
-        )),
+        "contains" => {
+            Ok(Value::Bool(args.first().is_some_and(|needle| {
+                v.get().iter().any(|item| item == needle)
+            })))
+        }
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on Vector"
         ))),

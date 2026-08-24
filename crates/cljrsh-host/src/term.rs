@@ -27,7 +27,9 @@ pub fn register(registry: &mut Registry) {
                     "stdin" => std::io::stdin().is_terminal(),
                     "stdout" => std::io::stdout().is_terminal(),
                     "stderr" => std::io::stderr().is_terminal(),
-                    other => return Err(format!("tty? expects :stdin/:stdout/:stderr, got :{other}")),
+                    other => {
+                        return Err(format!("tty? expects :stdin/:stdout/:stderr, got :{other}"));
+                    }
                 };
                 Ok(Value::Bool(is_tty))
             },

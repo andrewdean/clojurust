@@ -56,7 +56,11 @@ pub struct AwsClient {
 
 impl std::fmt::Debug for AwsClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AwsClient {{ api: {:?}, region: {:?} }}", self.api, self.region)
+        write!(
+            f,
+            "AwsClient {{ api: {:?}, region: {:?} }}",
+            self.api, self.region
+        )
     }
 }
 
@@ -318,37 +322,41 @@ pub fn register(registry: &mut Registry) {
 
     registry.define(
         "aws/presign",
-        wrap_fn_variadic("aws/presign", 2, |args: &[Value]| -> Result<Value, String> {
-            let client = as_client(&args[0])?;
-            if client.api != "s3" {
-                return Err("presign is only supported for :s3 clients".to_string());
-            }
-            let Value::Map(m) = &args[1] else {
-                return Err("presign expects {:op ... :request ... :expires secs}".to_string());
-            };
-            let (op, request) = op_and_request(&args[1])?;
-            if op != "GetObject" {
-                return Err("presign currently supports :GetObject only".to_string());
-            }
-            let expires = match m.get(&kw("expires")) {
-                Some(Value::Long(secs)) => Duration::from_secs(secs as u64),
-                None => Duration::from_secs(900),
-                Some(other) => {
-                    return Err(format!(
-                        ":expires must be seconds, got {}",
-                        other.type_name()
-                    ));
+        wrap_fn_variadic(
+            "aws/presign",
+            2,
+            |args: &[Value]| -> Result<Value, String> {
+                let client = as_client(&args[0])?;
+                if client.api != "s3" {
+                    return Err("presign is only supported for :s3 clients".to_string());
                 }
-            };
-            let target = s3::S3Target {
-                region: client.region.clone(),
-                endpoint: client.endpoint.clone(),
-                path_style: client.path_style,
-            };
-            let (plan, _shape) = s3::plan(&op, &request, &target)?;
-            let creds = client.credentials()?;
-            wire::presign(&plan, &creds, expires).map(Value::string)
-        }),
+                let Value::Map(m) = &args[1] else {
+                    return Err("presign expects {:op ... :request ... :expires secs}".to_string());
+                };
+                let (op, request) = op_and_request(&args[1])?;
+                if op != "GetObject" {
+                    return Err("presign currently supports :GetObject only".to_string());
+                }
+                let expires = match m.get(&kw("expires")) {
+                    Some(Value::Long(secs)) => Duration::from_secs(secs as u64),
+                    None => Duration::from_secs(900),
+                    Some(other) => {
+                        return Err(format!(
+                            ":expires must be seconds, got {}",
+                            other.type_name()
+                        ));
+                    }
+                };
+                let target = s3::S3Target {
+                    region: client.region.clone(),
+                    endpoint: client.endpoint.clone(),
+                    path_style: client.path_style,
+                };
+                let (plan, _shape) = s3::plan(&op, &request, &target)?;
+                let creds = client.credentials()?;
+                wire::presign(&plan, &creds, expires).map(Value::string)
+            },
+        ),
     );
 
     // (aws/ops client) — the built-in op catalog for the client's api.

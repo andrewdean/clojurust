@@ -3,10 +3,10 @@
 #![allow(clippy::arc_with_non_send_sync)]
 
 mod array_list;
-pub mod javamap;
 mod bitops;
 pub mod builtins;
 pub mod form;
+pub mod javamap;
 mod new;
 mod regex;
 pub mod special;

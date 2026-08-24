@@ -81,13 +81,8 @@ pub fn init(globals: &Arc<cljrs_env::env::GlobalEnv>) {
     // (user, the stdlib internals) don't see the clojure.core additions
     // above. Refresh their refers; interns shadow refers, so namespaces
     // that define their own names are unaffected.
-    let ns_names: Vec<std::sync::Arc<str>> = globals
-        .namespaces
-        .read()
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect();
+    let ns_names: Vec<std::sync::Arc<str>> =
+        globals.namespaces.read().unwrap().keys().cloned().collect();
     for n in ns_names {
         if n.as_ref() != "clojure.core" {
             globals.refer_all(&n, "clojure.core");

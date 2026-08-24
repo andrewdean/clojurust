@@ -105,10 +105,7 @@ fn eval_def(args: &[Form], env: &mut Env) -> EvalResult {
         .globals
         .intern(&env.current_ns, Arc::from(name.as_str()), val.clone());
     let meta = merge_meta(meta_opt, docstring.as_deref().map(doc_meta));
-    let meta = merge_meta(
-        name_ns_meta(name.as_str(), &env.current_ns),
-        meta,
-    );
+    let meta = merge_meta(name_ns_meta(name.as_str(), &env.current_ns), meta);
     if let Some(meta_val) = meta {
         var.get().set_meta(meta_val);
     }
@@ -1835,8 +1832,7 @@ fn eval_letfn(args: &[Form], env: &mut Env) -> EvalResult {
             for i in 0..f.closed_over_names.len() {
                 let slot = f.closed_over_names[i].clone();
                 if names.contains(&slot)
-                    && let Some((_, replacement)) =
-                        fns.iter().find(|(n, _)| *n == slot)
+                    && let Some((_, replacement)) = fns.iter().find(|(n, _)| *n == slot)
                 {
                     f.closed_over_vals[i] = replacement.clone();
                 }
@@ -2099,8 +2095,7 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
                 let mut impls = proto.get().impls.lock().unwrap();
                 for tag in &type_tags {
                     let methods = impls.entry(tag.clone()).or_default();
-                    let merged =
-                        merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    let merged = merge_method_impl(methods.get(&method_name), fn_val.clone());
                     cljrs_value::register_interop_method(
                         tag.clone(),
                         method_name.clone(),
@@ -2172,8 +2167,7 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
                 let mut impls = proto_ptr.get().impls.lock().unwrap();
                 for tag in type_tags {
                     let methods = impls.entry(tag.clone()).or_default();
-                    let merged =
-                        merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    let merged = merge_method_impl(methods.get(&method_name), fn_val.clone());
                     cljrs_value::register_interop_method(
                         tag.clone(),
                         method_name.clone(),
@@ -2254,8 +2248,7 @@ fn merge_method_impl(existing: Option<&Value>, new_val: Value) -> Value {
     let mut arities = old_fn.arities.clone();
     for a in &new_fn.arities {
         if let Some(slot) = arities.iter_mut().find(|b| {
-            b.params.len() == a.params.len()
-                && b.rest_param.is_some() == a.rest_param.is_some()
+            b.params.len() == a.params.len() && b.rest_param.is_some() == a.rest_param.is_some()
         }) {
             *slot = a.clone();
         } else {
@@ -2527,11 +2520,7 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
     let mut let_form = vec![mk(FK::Symbol("let*".into())), mk(FK::Vector(bindings))];
     let_form.extend(items[2..].iter().cloned());
     Form {
-        kind: FK::List(vec![
-            items[0].clone(),
-            params_form,
-            mk(FK::List(let_form)),
-        ]),
+        kind: FK::List(vec![items[0].clone(), params_form, mk(FK::List(let_form))]),
         span: form.span.clone(),
     }
 }

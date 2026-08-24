@@ -26,19 +26,15 @@ fn eval_src(src: &str) -> Result<Value, cljrs_env::error::EvalError> {
 
 #[test]
 fn data_readers_binding_applies() {
-    let v = eval_src(
-        "(binding [*data-readers* {'my/tag (fn [v] [:tagged v])}] #my/tag 42)",
-    )
-    .unwrap();
+    let v =
+        eval_src("(binding [*data-readers* {'my/tag (fn [v] [:tagged v])}] #my/tag 42)").unwrap();
     assert_eq!(v, eval_src("[:tagged 42]").unwrap());
 }
 
 #[test]
 fn default_data_reader_fn_catches_unknown() {
-    let v = eval_src(
-        "(binding [*default-data-reader-fn* (fn [t v] [:unknown t v])] #any/x 1)",
-    )
-    .unwrap();
+    let v = eval_src("(binding [*default-data-reader-fn* (fn [t v] [:unknown t v])] #any/x 1)")
+        .unwrap();
     assert_eq!(v, eval_src("[:unknown 'any/x 1]").unwrap());
 }
 

@@ -74,21 +74,36 @@ pub fn plan(op: &str, req: &MapValue, t: &S3Target) -> Result<(Plan, Shape), Str
         "GetObject" => {
             let key = get_str(req, "Key").ok_or("GetObject needs :Key")?;
             (
-                mk("GET", wire::build_url(&base, &key_path(&key), &query), vec![], vec![]),
+                mk(
+                    "GET",
+                    wire::build_url(&base, &key_path(&key), &query),
+                    vec![],
+                    vec![],
+                ),
                 Shape::Object,
             )
         }
         "HeadObject" => {
             let key = get_str(req, "Key").ok_or("HeadObject needs :Key")?;
             (
-                mk("HEAD", wire::build_url(&base, &key_path(&key), &query), vec![], vec![]),
+                mk(
+                    "HEAD",
+                    wire::build_url(&base, &key_path(&key), &query),
+                    vec![],
+                    vec![],
+                ),
                 Shape::Head,
             )
         }
         "DeleteObject" => {
             let key = get_str(req, "Key").ok_or("DeleteObject needs :Key")?;
             (
-                mk("DELETE", wire::build_url(&base, &key_path(&key), &query), vec![], vec![]),
+                mk(
+                    "DELETE",
+                    wire::build_url(&base, &key_path(&key), &query),
+                    vec![],
+                    vec![],
+                ),
                 Shape::Empty,
             )
         }
@@ -112,12 +127,22 @@ pub fn plan(op: &str, req: &MapValue, t: &S3Target) -> Result<(Plan, Shape), Str
                 headers.push(("content-type".to_string(), ct));
             }
             (
-                mk("PUT", wire::build_url(&base, &key_path(&key), &query), headers, body),
+                mk(
+                    "PUT",
+                    wire::build_url(&base, &key_path(&key), &query),
+                    headers,
+                    body,
+                ),
                 Shape::Put,
             )
         }
         "HeadBucket" => (
-            mk("HEAD", wire::build_url(&base, &format!("{prefix}/"), &query), vec![], vec![]),
+            mk(
+                "HEAD",
+                wire::build_url(&base, &format!("{prefix}/"), &query),
+                vec![],
+                vec![],
+            ),
             Shape::Head,
         ),
         "CreateBucket" => {
@@ -131,7 +156,12 @@ pub fn plan(op: &str, req: &MapValue, t: &S3Target) -> Result<(Plan, Shape), Str
                 .into_bytes()
             };
             (
-                mk("PUT", wire::build_url(&base, &format!("{prefix}/"), &query), vec![], body),
+                mk(
+                    "PUT",
+                    wire::build_url(&base, &format!("{prefix}/"), &query),
+                    vec![],
+                    body,
+                ),
                 Shape::Empty,
             )
         }
@@ -150,7 +180,12 @@ pub fn plan(op: &str, req: &MapValue, t: &S3Target) -> Result<(Plan, Shape), Str
                 query.insert("max-keys".to_string(), n.to_string());
             }
             (
-                mk("GET", wire::build_url(&base, &format!("{prefix}/"), &query), vec![], vec![]),
+                mk(
+                    "GET",
+                    wire::build_url(&base, &format!("{prefix}/"), &query),
+                    vec![],
+                    vec![],
+                ),
                 Shape::List,
             )
         }
@@ -228,7 +263,8 @@ pub fn shape_response(shape: &Shape, ex: &wire::Exchange) -> Value {
                     if let Some(k) = wire::xml_tag(block, "Key") {
                         e = e.assoc(kw("Key"), Value::string(k));
                     }
-                    if let Some(sz) = wire::xml_tag(block, "Size").and_then(|s| s.parse::<i64>().ok())
+                    if let Some(sz) =
+                        wire::xml_tag(block, "Size").and_then(|s| s.parse::<i64>().ok())
                     {
                         e = e.assoc(kw("Size"), Value::Long(sz));
                     }

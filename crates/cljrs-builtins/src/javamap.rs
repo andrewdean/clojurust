@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use cljrs_value::{NativeObject, NativeObjectBox, Value, ValueResult};
 use cljrs_value::error::ValueError;
+use cljrs_value::{NativeObject, NativeObjectBox, Value, ValueResult};
 
 #[derive(Debug)]
 pub struct JavaHashMap {
@@ -162,7 +162,11 @@ pub fn iterator_of(target: &Value) -> ValueResult<Value> {
     )))
 }
 
-fn dispatch_iterator(it: &JavaIterator, method: &str, _args: &[Value]) -> Option<ValueResult<Value>> {
+fn dispatch_iterator(
+    it: &JavaIterator,
+    method: &str,
+    _args: &[Value],
+) -> Option<ValueResult<Value>> {
     let mut items = it.items.lock().unwrap();
     Some(match method {
         "hasNext" => Ok(Value::Bool(!items.is_empty())),
@@ -347,9 +351,7 @@ fn dispatch_array_list(
                 ".remove requires an argument".into(),
             )),
         },
-        "contains" => Ok(Value::Bool(
-            args.first().is_some_and(|v| items.contains(v)),
-        )),
+        "contains" => Ok(Value::Bool(args.first().is_some_and(|v| items.contains(v)))),
         "indexOf" => Ok(Value::Long(
             args.first()
                 .and_then(|v| items.iter().position(|x| x == v))
@@ -392,12 +394,14 @@ impl cljrs_gc::Trace for JavaHashSet {
 
 /// `(HashSet.)` — an int argument is a capacity hint (ignored); a
 /// collection argument copies its elements.
+// Value contains interior-mutable cells (atoms); as on the JVM, mutating
+// an element while it sits in a HashSet is undefined behavior for the set.
+#[allow(clippy::mutable_key_type)]
 pub fn builtin_hash_set_new(args: &[Value]) -> ValueResult<Value> {
-    let items: std::collections::HashSet<Value> =
-        match args.first().map(Value::unwrap_meta) {
-            None | Some(Value::Nil) | Some(Value::Long(_)) => Default::default(),
-            Some(other) => crate::builtins::value_to_seq(other)?.into_iter().collect(),
-        };
+    let items: std::collections::HashSet<Value> = match args.first().map(Value::unwrap_meta) {
+        None | Some(Value::Nil) | Some(Value::Long(_)) => Default::default(),
+        Some(other) => crate::builtins::value_to_seq(other)?.into_iter().collect(),
+    };
     Ok(Value::NativeObject(cljrs_value::gc_native_object(
         JavaHashSet {
             items: Mutex::new(items),
@@ -405,11 +409,7 @@ pub fn builtin_hash_set_new(args: &[Value]) -> ValueResult<Value> {
     )))
 }
 
-fn dispatch_hash_set(
-    s: &JavaHashSet,
-    method: &str,
-    args: &[Value],
-) -> Option<ValueResult<Value>> {
+fn dispatch_hash_set(s: &JavaHashSet, method: &str, args: &[Value]) -> Option<ValueResult<Value>> {
     let mut items = s.items.lock().unwrap();
     Some(match method {
         "add" => match args.first() {
@@ -437,9 +437,7 @@ fn dispatch_hash_set(
             Ok(Value::Bool(changed))
         }
         "contains" => Ok(Value::Bool(args.first().is_some_and(|v| items.contains(v)))),
-        "remove" => Ok(Value::Bool(
-            args.first().is_some_and(|v| items.remove(v)),
-        )),
+        "remove" => Ok(Value::Bool(args.first().is_some_and(|v| items.remove(v)))),
         "size" => Ok(Value::Long(items.len() as i64)),
         "isEmpty" => Ok(Value::Bool(items.is_empty())),
         "clear" => {
@@ -578,7 +576,9 @@ impl cljrs_gc::Trace for JavaObject {
 
 /// `(Object.)` — a fresh object equal only to itself.
 pub fn builtin_object_new(_args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::NativeObject(cljrs_value::gc_native_object(JavaObject)))
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaObject,
+    )))
 }
 
 // ── java.util.ArrayDeque (used as a stack by malli's regex drivers) ─────────
@@ -674,11 +674,9 @@ pub fn builtin_date_formatter_new(_args: &[Value]) -> ValueResult<Value> {
 fn dispatch_date_formatter(method: &str, args: &[Value]) -> Option<ValueResult<Value>> {
     Some(match method {
         // Builder / configuration chain — stateless, return a formatter.
-        "appendPattern" | "optionalStart" | "optionalEnd" | "appendFraction"
-        | "appendOffset" | "parseDefaulting" | "toFormatter" | "withZone"
-        | "appendValue" | "appendLiteral" | "parseLenient" | "parseStrict" => {
-            builtin_date_formatter_new(&[])
-        }
+        "appendPattern" | "optionalStart" | "optionalEnd" | "appendFraction" | "appendOffset"
+        | "parseDefaulting" | "toFormatter" | "withZone" | "appendValue" | "appendLiteral"
+        | "parseLenient" | "parseStrict" => builtin_date_formatter_new(&[]),
         "parse" => match args.first() {
             Some(Value::Str(s)) => {
                 match cljrs_types::instant::parse_rfc3339_millis(s.get().as_str()) {

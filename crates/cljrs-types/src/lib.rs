@@ -1,3 +1,3 @@
 pub mod error;
-pub mod span;
 pub mod instant;
+pub mod span;

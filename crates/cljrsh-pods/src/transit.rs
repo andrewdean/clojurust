@@ -194,8 +194,7 @@ fn decode_tagged(
         }
         other => {
             let rep = decode_inner_h(value, cache, false, handler)?;
-            handler(other, rep)
-                .ok_or_else(|| format!("unsupported transit tag ~#{other}"))
+            handler(other, rep).ok_or_else(|| format!("unsupported transit tag ~#{other}"))
         }
     }
 }
@@ -227,7 +226,10 @@ fn decode_uncached(
     } else if let Some(i) = s.strip_prefix("~i") {
         Value::Long(i.parse::<i64>().map_err(|e| format!("bad ~i int: {e}"))?)
     } else if let Some(d) = s.strip_prefix("~d") {
-        Value::Double(d.parse::<f64>().map_err(|e| format!("bad ~d double: {e}"))?)
+        Value::Double(
+            d.parse::<f64>()
+                .map_err(|e| format!("bad ~d double: {e}"))?,
+        )
     } else if let Some(t) = s.strip_prefix("~t") {
         Value::Instant(cljrs_types::instant::parse_rfc3339_millis(t)?)
     } else if let Some(u) = s.strip_prefix("~u") {
@@ -283,20 +285,22 @@ pub fn encode(v: &Value) -> Result<Json, String> {
         }
         Value::Str(s) => encode_string(s.get()),
         Value::Char(c) => encode_string(&c.to_string()),
-        Value::Keyword(k) => Json::String(format!("~:{}", qualified(&k.get().namespace, &k.get().name))),
-        Value::Symbol(s) => Json::String(format!("~${}", qualified(&s.get().namespace, &s.get().name))),
+        Value::Keyword(k) => Json::String(format!(
+            "~:{}",
+            qualified(&k.get().namespace, &k.get().name)
+        )),
+        Value::Symbol(s) => Json::String(format!(
+            "~${}",
+            qualified(&s.get().namespace, &s.get().name)
+        )),
         Value::Instant(ms) => Json::String(format!(
             "~t{}",
             cljrs_types::instant::format_rfc3339_millis(*ms)
         )),
         Value::Uuid(u) => Json::String(format!("~u{}", uuid::Uuid::from_u128(*u))),
-        Value::Vector(items) => Json::Array(
-            items
-                .get()
-                .iter()
-                .map(encode)
-                .collect::<Result<_, _>>()?,
-        ),
+        Value::Vector(items) => {
+            Json::Array(items.get().iter().map(encode).collect::<Result<_, _>>()?)
+        }
         Value::List(items) => Json::Array(vec![
             Json::String("~#list".to_string()),
             Json::Array(items.get().iter().map(encode).collect::<Result<_, _>>()?),
@@ -314,10 +318,7 @@ pub fn encode(v: &Value) -> Result<Json, String> {
             Json::Array(out)
         }
         other => {
-            return Err(format!(
-                "cannot transit-encode a {}",
-                other.type_name()
-            ));
+            return Err(format!("cannot transit-encode a {}", other.type_name()));
         }
     })
 }
@@ -380,10 +381,7 @@ mod tests {
     #[test]
     fn encode_roundtrip() {
         let mut m = MapValue::empty();
-        m = m.assoc(
-            Value::keyword(Keyword::simple("id")),
-            Value::Long(1),
-        );
+        m = m.assoc(Value::keyword(Keyword::simple("id")), Value::Long(1));
         m = m.assoc(
             Value::keyword(Keyword::simple("when")),
             Value::Instant(1000),

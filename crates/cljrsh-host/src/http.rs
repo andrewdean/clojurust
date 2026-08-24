@@ -28,7 +28,10 @@ fn as_str(v: &Value, what: &str) -> Result<String, String> {
     match v {
         Value::Str(s) => Ok(s.get().to_string()),
         Value::Keyword(k) => Ok(k.get().name.to_string()),
-        other => Err(format!("{what} must be a string, got {}", other.type_name())),
+        other => Err(format!(
+            "{what} must be a string, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -173,26 +176,29 @@ fn execute(plan: Plan) -> Result<Exchange, String> {
 pub fn register(registry: &mut Registry) {
     registry.define(
         "cljrsh.http/request*",
-        wrap_fn1("cljrsh.http/request*", |opts: Value| -> Result<Value, String> {
-            let plan = parse_plan(&opts)?;
-            let url = plan.url.clone();
-            let (status, header_pairs, body) = std::thread::Builder::new()
-                .name("cljrsh-http".into())
-                .spawn(move || execute(plan))
-                .map_err(|e| format!("failed to spawn http thread: {e}"))?
-                .join()
-                .map_err(|_| format!("http thread panicked for {url}"))?
-                .map_err(|e| format!("request to {url}: {e}"))?;
+        wrap_fn1(
+            "cljrsh.http/request*",
+            |opts: Value| -> Result<Value, String> {
+                let plan = parse_plan(&opts)?;
+                let url = plan.url.clone();
+                let (status, header_pairs, body) = std::thread::Builder::new()
+                    .name("cljrsh-http".into())
+                    .spawn(move || execute(plan))
+                    .map_err(|e| format!("failed to spawn http thread: {e}"))?
+                    .join()
+                    .map_err(|_| format!("http thread panicked for {url}"))?
+                    .map_err(|e| format!("request to {url}: {e}"))?;
 
-            let mut headers = MapValue::empty();
-            for (name, value) in header_pairs {
-                headers = headers.assoc(Value::string(name), Value::string(value));
-            }
-            let mut out = MapValue::empty();
-            out = out.assoc(kw("status"), Value::Long(status));
-            out = out.assoc(kw("headers"), Value::Map(headers));
-            out = out.assoc(kw("body"), Value::string(body));
-            Ok(Value::Map(out))
-        }),
+                let mut headers = MapValue::empty();
+                for (name, value) in header_pairs {
+                    headers = headers.assoc(Value::string(name), Value::string(value));
+                }
+                let mut out = MapValue::empty();
+                out = out.assoc(kw("status"), Value::Long(status));
+                out = out.assoc(kw("headers"), Value::Map(headers));
+                out = out.assoc(kw("body"), Value::string(body));
+                Ok(Value::Map(out))
+            },
+        ),
     );
 }

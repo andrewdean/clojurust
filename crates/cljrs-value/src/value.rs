@@ -3,9 +3,9 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use crate::collections::{
-    SortedByMap, SortedBySet,
     PersistentArrayMap, PersistentHashMap, PersistentHashSet, PersistentList, PersistentQueue,
-    PersistentVector, SortedMap, SortedSet, TransientMap, TransientSet, TransientVector,
+    PersistentVector, SortedByMap, SortedBySet, SortedMap, SortedSet, TransientMap, TransientSet,
+    TransientVector,
 };
 use crate::error::ExceptionInfo;
 use crate::hash::{
@@ -21,9 +21,9 @@ use crate::types::{
     Namespace, NativeFn, Protocol, ProtocolFn, Var, Volatile,
 };
 use cljrs_gc::{GcPtr, MarkVisitor, Trace};
+use fancy_regex::Regex;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
-use fancy_regex::Regex;
 
 /// A GC-traced mutable array of Values (backs `object-array`).
 #[derive(Debug)]

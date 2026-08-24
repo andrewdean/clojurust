@@ -45,7 +45,9 @@ fn inst_prints_readably_and_roundtrips() {
         Value::string("#inst \"2026-08-21T12:34:56.789-00:00\"".to_string())
     );
     assert_eq!(
-        eval_src("(= #inst \"2026-08-21T12:34:56.789Z\" (read-string (pr-str #inst \"2026-08-21T12:34:56.789Z\")))"),
+        eval_src(
+            "(= #inst \"2026-08-21T12:34:56.789Z\" (read-string (pr-str #inst \"2026-08-21T12:34:56.789Z\")))"
+        ),
         Value::Bool(true)
     );
 }

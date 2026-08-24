@@ -149,7 +149,11 @@ pub(crate) fn builtin_get_property(args: &[Value]) -> ValueResult<Value> {
             });
         }
     };
-    if let Some(v) = property_overrides().lock().unwrap().get(name.get().as_str()) {
+    if let Some(v) = property_overrides()
+        .lock()
+        .unwrap()
+        .get(name.get().as_str())
+    {
         return Ok(Value::string(v.clone()));
     }
     match default_property(name.get().as_str()) {
@@ -162,10 +166,10 @@ pub(crate) fn builtin_get_property(args: &[Value]) -> ValueResult<Value> {
 pub(crate) fn builtin_set_property(args: &[Value]) -> ValueResult<Value> {
     match args {
         [Value::Str(name), Value::Str(value)] => {
-            let prev = property_overrides()
-                .lock()
-                .unwrap()
-                .insert(name.get().as_str().to_string(), value.get().as_str().to_string());
+            let prev = property_overrides().lock().unwrap().insert(
+                name.get().as_str().to_string(),
+                value.get().as_str().to_string(),
+            );
             Ok(prev.map(Value::string).unwrap_or(Value::Nil))
         }
         [a, b] => Err(ValueError::WrongType {

@@ -5,12 +5,12 @@
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
+use k8s_openapi::api::core::v1::Pod;
 use kube::api::{
     Api, AttachParams, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams,
 };
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::discovery::{Discovery, Scope};
-use k8s_openapi::api::core::v1::Pod;
 use kube::{Client, Config};
 use serde_json::Value as Json;
 use tokio::io::AsyncWriteExt;
@@ -93,7 +93,8 @@ impl WorkerHandle {
         self.tx
             .send((cmd, rtx))
             .map_err(|_| "k8s worker is gone".to_string())?;
-        rrx.recv().map_err(|_| "k8s worker dropped the reply".to_string())?
+        rrx.recv()
+            .map_err(|_| "k8s worker dropped the reply".to_string())?
     }
 }
 
@@ -128,7 +129,10 @@ pub fn spawn(context: Option<String>, kubeconfig: Option<String>) -> Result<Work
             });
         })
         .map_err(|e| format!("spawning k8s worker: {e}"))?;
-    Ok(WorkerHandle { tx, _thread: thread })
+    Ok(WorkerHandle {
+        tx,
+        _thread: thread,
+    })
 }
 
 struct Forward {
@@ -267,13 +271,15 @@ impl WorkerState {
         }
     }
 
-    async fn api(&mut self, kind: &KindRef, ns: Option<&str>) -> Result<Api<DynamicObject>, String> {
+    async fn api(
+        &mut self,
+        kind: &KindRef,
+        ns: Option<&str>,
+    ) -> Result<Api<DynamicObject>, String> {
         let (ar, scope) = self.resolve_fresh(kind).await?;
         Ok(match (scope, ns) {
             (Scope::Namespaced, Some(ns)) => Api::namespaced_with(self.client.clone(), ns, &ar),
-            (Scope::Namespaced, None) => {
-                Api::default_namespaced_with(self.client.clone(), &ar)
-            }
+            (Scope::Namespaced, None) => Api::default_namespaced_with(self.client.clone(), &ar),
             (Scope::Cluster, _) => Api::all_with(self.client.clone(), &ar),
         })
     }
@@ -401,10 +407,7 @@ impl WorkerState {
                     container,
                     ..AttachParams::default().stdout(true).stderr(true)
                 };
-                let mut proc = api
-                    .exec(&name, command, &ap)
-                    .await
-                    .map_err(fmt_err)?;
+                let mut proc = api.exec(&name, command, &ap).await.map_err(fmt_err)?;
                 let stdout = read_stream(proc.stdout()).await;
                 let stderr = read_stream(proc.stderr()).await;
                 let status = proc.take_status();
@@ -423,11 +426,7 @@ impl WorkerState {
                 let req = http::Request::get(&path)
                     .body(Vec::new())
                     .map_err(|e| e.to_string())?;
-                let text = self
-                    .client
-                    .request_text(req)
-                    .await
-                    .map_err(fmt_err)?;
+                let text = self.client.request_text(req).await.map_err(fmt_err)?;
                 Ok(serde_json::from_str(&text).unwrap_or(Json::String(text)))
             }
             Cmd::PortForward {
@@ -437,12 +436,9 @@ impl WorkerState {
                 local,
             } => {
                 let api = self.pods(ns.as_deref());
-                let listener = tokio::net::TcpListener::bind((
-                    "127.0.0.1",
-                    local.unwrap_or(0),
-                ))
-                .await
-                .map_err(|e| format!("binding local port: {e}"))?;
+                let listener = tokio::net::TcpListener::bind(("127.0.0.1", local.unwrap_or(0)))
+                    .await
+                    .map_err(|e| format!("binding local port: {e}"))?;
                 let local_port = listener.local_addr().map_err(|e| e.to_string())?.port();
                 let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
                 let id = self.next_forward;
@@ -514,10 +510,7 @@ async fn read_stream(stream: Option<impl tokio::io::AsyncRead + Unpin>) -> Strin
 
 fn fmt_err(e: kube::Error) -> String {
     match e {
-        kube::Error::Api(err) => format!(
-            "{} ({}): {}",
-            err.reason, err.code, err.message
-        ),
+        kube::Error::Api(err) => format!("{} ({}): {}", err.reason, err.code, err.message),
         other => other.to_string(),
     }
 }

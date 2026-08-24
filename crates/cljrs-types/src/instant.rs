@@ -102,9 +102,7 @@ pub fn format_rfc3339_millis(epoch_millis: i64) -> String {
     let hour = secs_of_day / 3_600;
     let minute = (secs_of_day % 3_600) / 60;
     let second = secs_of_day % 60;
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}-00:00"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}-00:00")
 }
 
 /// Days since 1970-01-01 from a civil date (Howard Hinnant's algorithm).
@@ -139,10 +137,7 @@ mod tests {
     #[test]
     fn roundtrip_epoch() {
         assert_eq!(parse_rfc3339_millis("1970-01-01T00:00:00Z").unwrap(), 0);
-        assert_eq!(
-            format_rfc3339_millis(0),
-            "1970-01-01T00:00:00.000-00:00"
-        );
+        assert_eq!(format_rfc3339_millis(0), "1970-01-01T00:00:00.000-00:00");
     }
 
     #[test]
@@ -151,10 +146,7 @@ mod tests {
             parse_rfc3339_millis("2026-08-21T12:34:56.789Z").unwrap(),
             parse_rfc3339_millis("2026-08-21T14:34:56.789+02:00").unwrap(),
         );
-        assert_eq!(
-            parse_rfc3339_millis("2026-08-21").unwrap() % 86_400_000,
-            0
-        );
+        assert_eq!(parse_rfc3339_millis("2026-08-21").unwrap() % 86_400_000, 0);
         // Fraction longer than millis truncates.
         assert_eq!(
             parse_rfc3339_millis("2026-08-21T00:00:00.123456Z").unwrap() % 1000,

@@ -270,10 +270,7 @@ fn apply_alias_refer(
     }
 }
 
-pub fn find_source_file(
-    rel: &str,
-    src_paths: &[std::path::PathBuf],
-) -> Option<(String, String)> {
+pub fn find_source_file(rel: &str, src_paths: &[std::path::PathBuf]) -> Option<(String, String)> {
     for dir in src_paths {
         // `.cljrs` first (this platform's own sources), then the babashka/JVM
         // family in babashka's probe order: a `.bb` variant shadows a `.clj`

@@ -61,12 +61,11 @@ pub fn irsa_available() -> bool {
 pub fn assume_role_with_web_identity(region: &str) -> Result<Creds, String> {
     let token_file = std::env::var("AWS_WEB_IDENTITY_TOKEN_FILE")
         .map_err(|_| "AWS_WEB_IDENTITY_TOKEN_FILE not set".to_string())?;
-    let role_arn =
-        std::env::var("AWS_ROLE_ARN").map_err(|_| "AWS_ROLE_ARN not set".to_string())?;
-    let token = std::fs::read_to_string(&token_file)
-        .map_err(|e| format!("reading {token_file}: {e}"))?;
-    let session_name = std::env::var("AWS_ROLE_SESSION_NAME")
-        .unwrap_or_else(|_| "cljrsh".to_string());
+    let role_arn = std::env::var("AWS_ROLE_ARN").map_err(|_| "AWS_ROLE_ARN not set".to_string())?;
+    let token =
+        std::fs::read_to_string(&token_file).map_err(|e| format!("reading {token_file}: {e}"))?;
+    let session_name =
+        std::env::var("AWS_ROLE_SESSION_NAME").unwrap_or_else(|_| "cljrsh".to_string());
 
     let endpoint = format!("https://sts.{region}.amazonaws.com/");
     let params = [
@@ -88,7 +87,9 @@ pub fn assume_role_with_web_identity(region: &str) -> Result<Creds, String> {
     let status = resp.status();
     let body = resp.text().map_err(|e| e.to_string())?;
     if !status.is_success() {
-        return Err(format!("STS AssumeRoleWithWebIdentity failed ({status}): {body}"));
+        return Err(format!(
+            "STS AssumeRoleWithWebIdentity failed ({status}): {body}"
+        ));
     }
     let tag = |name: &str| -> Option<String> {
         let open = format!("<{name}>");
@@ -98,9 +99,8 @@ pub fn assume_role_with_web_identity(region: &str) -> Result<Creds, String> {
         Some(body[start..end].trim().to_string())
     };
     let expires = tag("Expiration").and_then(|e| {
-        cljrs_types_parse_rfc3339(&e).map(|ms| {
-            SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
-        })
+        cljrs_types_parse_rfc3339(&e)
+            .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64))
     });
     Ok(Creds {
         access_key_id: tag("AccessKeyId").ok_or("STS response missing AccessKeyId")?,

@@ -24,6 +24,10 @@
 //! reach localhost can eval in the embedding process. Same trust model as a
 //! user-session `cljrs nrepl`, worth knowing when the host is a shell.
 
+// C-ABI entry points take raw pointers whose validity is the caller's
+// contract; each deref site carries its own `unsafe` block.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::{Read, Write};
@@ -91,10 +95,11 @@ fn printed_to_json(printed: &str) -> String {
     if printed.parse::<i64>().is_ok() {
         return printed.to_string();
     }
-    if let Ok(f) = printed.parse::<f64>() {
-        if f.is_finite() && printed.chars().all(|c| "+-.eE0123456789".contains(c)) {
-            return printed.to_string();
-        }
+    if let Ok(f) = printed.parse::<f64>()
+        && f.is_finite()
+        && printed.chars().all(|c| "+-.eE0123456789".contains(c))
+    {
+        return printed.to_string();
     }
     if printed.len() >= 2 && printed.starts_with('"') && printed.ends_with('"') {
         // pr-str escapes only backslash and quote; undo, then JSON-escape.
@@ -115,13 +120,13 @@ fn register_qml_ns(globals: &Arc<cljrs_eval::GlobalEnv>, slot: CallbackSlot) {
             other => other.to_string().trim_start_matches(':').to_string(),
         };
         let vjson = value_json(&args[1]);
-        if let Some((cb, user)) = *slot.lock().unwrap() {
-            if let (Ok(ck), Ok(cv)) = (
+        if let Some((cb, user)) = *slot.lock().unwrap()
+            && let (Ok(ck), Ok(cv)) = (
                 CString::new(key.replace('\0', "")),
                 CString::new(vjson.replace('\0', "")),
-            ) {
-                cb(user as *mut c_void, ck.as_ptr(), cv.as_ptr());
-            }
+            )
+        {
+            cb(user as *mut c_void, ck.as_ptr(), cv.as_ptr());
         }
         Ok(Value::Nil)
     };
@@ -181,7 +186,11 @@ pub extern "C" fn cljrs_qt_new() -> *mut Runtime {
 /// The port the embedded nREPL server is listening on (127.0.0.1).
 #[unsafe(no_mangle)]
 pub extern "C" fn cljrs_qt_nrepl_port(rt: *const Runtime) -> u16 {
-    if rt.is_null() { 0 } else { unsafe { &*rt }.port }
+    if rt.is_null() {
+        0
+    } else {
+        unsafe { &*rt }.port
+    }
 }
 
 /// Register (or clear, with null) the state callback for `qml/set!`.
@@ -199,11 +208,16 @@ pub extern "C" fn cljrs_qt_set_state_callback(
 }
 
 fn bstr(map: &BTreeMap<Vec<u8>, Bencode>, key: &str) -> Option<String> {
-    map.get(key.as_bytes()).and_then(|v| v.as_str()).map(String::from)
+    map.get(key.as_bytes())
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 fn eval_over_nrepl(rt: &Runtime, code: &str) -> Result<String, String> {
-    let mut guard = rt.conn.lock().map_err(|_| "connection poisoned".to_string())?;
+    let mut guard = rt
+        .conn
+        .lock()
+        .map_err(|_| "connection poisoned".to_string())?;
     if guard.is_none() {
         let stream = TcpStream::connect(("127.0.0.1", rt.port))
             .map_err(|e| format!("nrepl connect failed: {e}"))?;
@@ -222,7 +236,9 @@ fn eval_over_nrepl(rt: &Runtime, code: &str) -> Result<String, String> {
     let out = cljrs_bencode::encode_to_vec(&Bencode::Dict(msg));
 
     let mut run = || -> Result<String, String> {
-        stream.write_all(&out).map_err(|e| format!("nrepl write failed: {e}"))?;
+        stream
+            .write_all(&out)
+            .map_err(|e| format!("nrepl write failed: {e}"))?;
 
         let mut buf: Vec<u8> = Vec::new();
         let mut chunk = [0u8; 8192];
@@ -233,7 +249,9 @@ fn eval_over_nrepl(rt: &Runtime, code: &str) -> Result<String, String> {
                 cljrs_bencode::decode(&buf).map_err(|e| format!("bencode: {e}"))?
             {
                 buf.drain(..used);
-                let Some(dict) = frame.as_dict() else { continue };
+                let Some(dict) = frame.as_dict() else {
+                    continue;
+                };
                 // Single client on this connection, but stay strict anyway.
                 if bstr(dict, "id").as_deref() != Some(id.as_str()) {
                     continue;
@@ -256,9 +274,7 @@ fn eval_over_nrepl(rt: &Runtime, code: &str) -> Result<String, String> {
                         Bencode::List(items) => Some(items),
                         _ => None,
                     })
-                    .map(|items| {
-                        items.iter().any(|i| i.as_str() == Some("done"))
-                    })
+                    .map(|items| items.iter().any(|i| i.as_str() == Some("done")))
                     .unwrap_or(false);
                 if done {
                     return if err_text.is_empty() {
@@ -268,7 +284,9 @@ fn eval_over_nrepl(rt: &Runtime, code: &str) -> Result<String, String> {
                     };
                 }
             }
-            let n = stream.read(&mut chunk).map_err(|e| format!("nrepl read failed: {e}"))?;
+            let n = stream
+                .read(&mut chunk)
+                .map_err(|e| format!("nrepl read failed: {e}"))?;
             if n == 0 {
                 return Err("nrepl connection closed".to_string());
             }

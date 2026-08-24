@@ -223,12 +223,13 @@ pub fn eval_str(env: &mut Env, src: &str, filename: &str) -> Result<Value, ExecE
 /// recursion then reports GasExhausted with a Clojure stack trace instead of
 /// dying in a native stack overflow.
 pub fn eval_form(form: &cljrs_reader::Form, env: &mut Env) -> Result<Value, EvalError> {
-    let gas: Option<u64> = std::env::var("CLJRSH_GAS").ok().and_then(|v| v.parse().ok());
+    let gas: Option<u64> = std::env::var("CLJRSH_GAS")
+        .ok()
+        .and_then(|v| v.parse().ok());
     crate::with_driver(|drv| match (drv, gas) {
         (Some((rt, local)), _) => {
-            let _guard = gas.map(|g| {
-                cljrs_env::gas::GasGuard::install(cljrs_env::gas::GasMeter::new(g))
-            });
+            let _guard =
+                gas.map(|g| cljrs_env::gas::GasGuard::install(cljrs_env::gas::GasMeter::new(g)));
             local.block_on(rt, cljrs_async::eval_async::eval_async(form, env))
         }
         (None, Some(g)) => cljrs_interp::eval::eval_with_gas(form, env, g),
@@ -292,11 +293,8 @@ fn requested_exit(val: &Value) -> Option<(i32, Option<String>)> {
         None
     }
     match val {
-        Value::Error(e) => from_error(e.get()).or_else(|| {
-            e.get()
-                .cause()
-                .and_then(|cause| from_error(cause.get()))
-        }),
+        Value::Error(e) => from_error(e.get())
+            .or_else(|| e.get().cause().and_then(|cause| from_error(cause.get()))),
         _ => None,
     }
 }

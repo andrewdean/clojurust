@@ -41,9 +41,8 @@ fn test_pod_path() -> Option<std::path::PathBuf> {
 }
 
 fn run_case(script: &Path) -> Result<(), String> {
-    let sidecar = |ext: &str| -> Option<String> {
-        std::fs::read_to_string(script.with_extension(ext)).ok()
-    };
+    let sidecar =
+        |ext: &str| -> Option<String> { std::fs::read_to_string(script.with_extension(ext)).ok() };
     let mut envs: Vec<(String, String)> = Vec::new();
     if let Some(requires) = sidecar("requires") {
         for cap in requires.split_whitespace() {
@@ -73,10 +72,7 @@ fn run_case(script: &Path) -> Result<(), String> {
                         pod.to_string_lossy().into_owned(),
                     )),
                     None => {
-                        eprintln!(
-                            "skipping {}: cljrsh-test-pod not built",
-                            script.display()
-                        );
+                        eprintln!("skipping {}: cljrsh-test-pod not built", script.display());
                         return Ok(());
                     }
                 },
@@ -158,8 +154,7 @@ fn bb_conformance_corpus() {
             // One level deep: a case directory with its own cwd (bb.edn etc).
             for sub in std::fs::read_dir(&path).expect("case dir") {
                 let sub = sub.expect("dir entry").path();
-                if sub.extension().is_some_and(|e| e == "clj")
-                    && sub.with_extension("out").exists()
+                if sub.extension().is_some_and(|e| e == "clj") && sub.with_extension("out").exists()
                 {
                     scripts.push(sub);
                 }

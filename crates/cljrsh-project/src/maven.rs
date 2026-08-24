@@ -92,7 +92,9 @@ fn fetch(coord: &Coord, ext: &str, mvn_cache: &Path) -> Result<PathBuf, String> 
         let url = format!("{repo}/{rel}");
         match client.get(&url).send() {
             Ok(resp) if resp.status().is_success() => {
-                let bytes = resp.bytes().map_err(|e| format!("downloading {url}: {e}"))?;
+                let bytes = resp
+                    .bytes()
+                    .map_err(|e| format!("downloading {url}: {e}"))?;
                 eprintln!("cljrsh: downloaded {url}");
                 let tmp = target.with_extension(format!("{ext}.part"));
                 std::fs::File::create(&tmp)
@@ -122,7 +124,8 @@ fn extract_jar(coord: &Coord, jar: &Path, extracted: &Path) -> Result<PathBuf, S
         return Ok(dir);
     }
     let file = std::fs::File::open(jar).map_err(|e| format!("opening {}: {e}", jar.display()))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("bad jar {}: {e}", jar.display()))?;
+    let mut zip =
+        zip::ZipArchive::new(file).map_err(|e| format!("bad jar {}: {e}", jar.display()))?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = entry.enclosed_name() else {
@@ -149,7 +152,10 @@ fn pom_dependencies(owner: &Coord, pom: &str) -> Result<Vec<Coord>, String> {
     // The <dependencyManagement> section pins versions without declaring
     // dependencies; strip it so its entries aren't fetched, but keep it for
     // version lookups.
-    let (managed, body) = match (pom.find("<dependencyManagement>"), pom.find("</dependencyManagement>")) {
+    let (managed, body) = match (
+        pom.find("<dependencyManagement>"),
+        pom.find("</dependencyManagement>"),
+    ) {
         (Some(a), Some(b)) if b > a => {
             let managed = &pom[a..b];
             let mut body = String::with_capacity(pom.len());
@@ -185,19 +191,15 @@ fn pom_dependencies(owner: &Coord, pom: &str) -> Result<Vec<Coord>, String> {
         ) else {
             continue;
         };
-        let version = dep
-            .version
-            .as_deref()
-            .and_then(&interp)
-            .or_else(|| {
-                managed
-                    .iter()
-                    .find(|m| {
-                        m.group.as_deref() == Some(group.as_str())
-                            && m.artifact.as_deref() == Some(artifact.as_str())
-                    })
-                    .and_then(|m| m.version.as_deref().and_then(&interp))
-            });
+        let version = dep.version.as_deref().and_then(&interp).or_else(|| {
+            managed
+                .iter()
+                .find(|m| {
+                    m.group.as_deref() == Some(group.as_str())
+                        && m.artifact.as_deref() == Some(artifact.as_str())
+                })
+                .and_then(|m| m.version.as_deref().and_then(&interp))
+        });
         let Some(version) = version else {
             eprintln!(
                 "cljrsh: warning: skipping dep {group}:{artifact} of {}:{} (no resolvable version; parent poms are not consulted)",
@@ -316,7 +318,10 @@ mod tests {
             version: "0.1".into(),
         };
         let deps = pom_dependencies(&owner, pom).unwrap();
-        let names: Vec<String> = deps.iter().map(|d| format!("{}:{}", d.ga(), d.version)).collect();
+        let names: Vec<String> = deps
+            .iter()
+            .map(|d| format!("{}:{}", d.ga(), d.version))
+            .collect();
         // org.clojure/clojure is filtered later (EXCLUDED) — parsing keeps it.
         assert_eq!(
             names,

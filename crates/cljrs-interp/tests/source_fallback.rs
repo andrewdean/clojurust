@@ -36,10 +36,7 @@ fn require_resolves_through_source_fallback() {
             )
         })
     }));
-    let result = eval_in(
-        &mut env,
-        "(require '[fallback.lib :as fl]) (fl/answer)",
-    );
+    let result = eval_in(&mut env, "(require '[fallback.lib :as fl]) (fl/answer)");
     assert_eq!(result, Value::Long(42));
 }
 

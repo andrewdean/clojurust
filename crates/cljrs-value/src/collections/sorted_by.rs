@@ -11,8 +11,8 @@
 
 use std::cmp::Ordering;
 
-use crate::error::ValueResult;
 use crate::Value;
+use crate::error::ValueResult;
 
 /// Comparator callback: total order over values, may fail (bad comparator).
 pub type CmpFn<'a> = &'a mut dyn FnMut(&Value, &Value) -> ValueResult<Ordering>;
@@ -95,8 +95,7 @@ impl SortedByMap {
 
 impl PartialEq for SortedByMap {
     fn eq(&self, other: &Self) -> bool {
-        self.count() == other.count()
-            && self.iter().all(|(k, v)| other.get(k) == Some(v))
+        self.count() == other.count() && self.iter().all(|(k, v)| other.get(k) == Some(v))
     }
 }
 

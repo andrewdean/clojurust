@@ -133,7 +133,7 @@ fn install_sigint_handler() {
     #[cfg(feature = "nu")]
     let _ = NU_INTERRUPT.set(cljrsh_nu::default_interrupt_flag());
     unsafe {
-        libc::signal(libc::SIGINT, on_sigint as libc::sighandler_t);
+        libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
     }
 }
 
@@ -181,12 +181,7 @@ fn run(opts: Opts) -> i32 {
                 "{require}({fn_sym} (babashka.cli/parse-opts (vec (or *command-line-args* []))))"
             );
             let prelude = "(require 'babashka.cli) ";
-            exec::run_program(
-                &globals,
-                &format!("{prelude}{src}"),
-                "<exec>",
-                modes(true),
-            )
+            exec::run_program(&globals, &format!("{prelude}{src}"), "<exec>", modes(true))
         }
         Program::Main(main_sym) => {
             // `-m my.ns [args…]` — require the namespace and apply its
@@ -197,8 +192,7 @@ fn run(opts: Opts) -> i32 {
             } else {
                 format!("{main_sym}/-main")
             };
-            let src =
-                format!("(require '{ns}) (apply {call} (or *command-line-args* []))");
+            let src = format!("(require '{ns}) (apply {call} (or *command-line-args* []))");
             exec::run_program(&globals, &src, "<main>", modes(false))
         }
         Program::File(path) => {
@@ -242,9 +236,7 @@ fn run(opts: Opts) -> i32 {
             }
             match name.as_str() {
                 "nrepl-server" => nrepl(&globals, opts.args.first().map(String::as_str)),
-                "socket-repl" => {
-                    repl::socket(globals, opts.args.first().map(String::as_str))
-                }
+                "socket-repl" => repl::socket(globals, opts.args.first().map(String::as_str)),
                 "uberscript" => uberscript::run(&globals, &opts.args),
                 "prepare" => prepare(&project),
                 "describe" => describe(),
@@ -267,21 +259,22 @@ fn run(opts: Opts) -> i32 {
                         run_args.remove(0);
                     }
                     match (&project, run_args.first()) {
-                    (Some(project), Some(task)) => {
-                        let task = task.clone();
-                        // Remaining args become *command-line-args*.
-                        cljrs_builtins::system::set_command_line_args(&globals, &run_args[1..]);
-                        tasks::run(&globals, project, &task)
+                        (Some(project), Some(task)) => {
+                            let task = task.clone();
+                            // Remaining args become *command-line-args*.
+                            cljrs_builtins::system::set_command_line_args(&globals, &run_args[1..]);
+                            tasks::run(&globals, project, &task)
+                        }
+                        (None, _) => {
+                            eprintln!("cljrsh: no bb.edn project here");
+                            2
+                        }
+                        (_, None) => {
+                            eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
+                            2
+                        }
                     }
-                    (None, _) => {
-                        eprintln!("cljrsh: no bb.edn project here");
-                        2
-                    }
-                    (_, None) => {
-                        eprintln!("cljrsh: run requires a task name (see `cljrsh tasks`)");
-                        2
-                    }
-                }},
+                }
                 _ => {
                     if project.is_some() {
                         eprintln!(
@@ -312,8 +305,11 @@ fn prepare(project: &Option<cljrsh_project::Project>) -> i32 {
     }
     match cljrsh_project::resolve_deps(project, &tasks::dep_cache_dir()) {
         Ok(dirs) => {
-            println!("Prepared {} dependenc{}:", dirs.len(),
-                     if dirs.len() == 1 { "y" } else { "ies" });
+            println!(
+                "Prepared {} dependenc{}:",
+                dirs.len(),
+                if dirs.len() == 1 { "y" } else { "ies" }
+            );
             for d in dirs {
                 println!("  {}", d.display());
             }
@@ -349,8 +345,8 @@ fn print_deps(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let project = cljrsh_project::find_project_file(&cwd)
-        .and_then(|f| cljrsh_project::load(&f).ok());
+    let project =
+        cljrsh_project::find_project_file(&cwd).and_then(|f| cljrsh_project::load(&f).ok());
 
     match format {
         "classpath" => {
@@ -375,10 +371,7 @@ fn print_deps(args: &[String]) -> i32 {
                     }
                 }
             }
-            let rendered: Vec<String> = entries
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect();
+            let rendered: Vec<String> = entries.iter().map(|p| p.display().to_string()).collect();
             println!("{}", rendered.join(":"));
             0
         }
@@ -479,7 +472,10 @@ fn nrepl(globals: &std::sync::Arc<cljrs_env::env::GlobalEnv>, addr: Option<&str>
     use std::net::ToSocketAddrs as _;
     let addr: std::net::SocketAddr = match addr.to_socket_addrs().ok().and_then(|resolved| {
         let all: Vec<_> = resolved.collect();
-        all.iter().find(|a| a.is_ipv4()).copied().or_else(|| all.first().copied())
+        all.iter()
+            .find(|a| a.is_ipv4())
+            .copied()
+            .or_else(|| all.first().copied())
     }) {
         Some(a) => a,
         None => {

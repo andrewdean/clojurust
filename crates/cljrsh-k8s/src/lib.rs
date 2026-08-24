@@ -79,7 +79,8 @@ fn as_client(v: &Value) -> Result<&K8sClient, String> {
 }
 
 fn kind_ref(m: &MapValue) -> Result<KindRef, String> {
-    let name = opt_str(m, "kind").ok_or("needs :kind (e.g. :pods, :Deployment, :CausewayWorkspace)")?;
+    let name =
+        opt_str(m, "kind").ok_or("needs :kind (e.g. :pods, :Deployment, :CausewayWorkspace)")?;
     Ok(KindRef {
         name,
         group: opt_str(m, "group"),
@@ -104,9 +105,7 @@ fn command(m: &MapValue) -> Result<Cmd, String> {
             field_selector: opt_str(m, "field-selector"),
         },
         "apply" => {
-            let manifest = m
-                .get(&kw("manifest"))
-                .ok_or(":apply needs :manifest")?;
+            let manifest = m.get(&kw("manifest")).ok_or(":apply needs :manifest")?;
             Cmd::Apply {
                 manifest: cljrsh_host::json::value_to_json(&manifest)?,
             }
@@ -138,7 +137,10 @@ fn command(m: &MapValue) -> Result<Cmd, String> {
                     .iter()
                     .map(|e| match &e {
                         Value::Str(s) => Ok(s.get().to_string()),
-                        other => Err(format!("command elements must be strings, got {}", other.type_name())),
+                        other => Err(format!(
+                            "command elements must be strings, got {}",
+                            other.type_name()
+                        )),
                     })
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => return Err(":exec needs :command [\"sh\" \"-c\" ...]".to_string()),

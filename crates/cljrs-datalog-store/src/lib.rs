@@ -787,12 +787,7 @@ impl Store {
     /// Encode a bound's provided components (contiguous from the index's
     /// most-significant position) into a key prefix. `Ok(None)` means the
     /// bound names an unknown attribute, so the range is empty.
-    fn bound_prefix(
-        &self,
-        ro: &RoTxn<'_>,
-        index: Index,
-        b: &Bound<'_>,
-    ) -> Result<Option<Vec<u8>>> {
+    fn bound_prefix(&self, ro: &RoTxn<'_>, index: Index, b: &Bound<'_>) -> Result<Option<Vec<u8>>> {
         let mut key = Vec::new();
         match index {
             Index::Eav => {

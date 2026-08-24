@@ -11,11 +11,11 @@ use std::sync::Arc;
 pub mod apply;
 pub mod arity;
 pub mod destructure;
-pub mod trace;
 pub mod eval;
 pub mod macros;
 pub mod special;
 pub mod syntax_quote;
+pub mod trace;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod versioned;
 mod virtualize;

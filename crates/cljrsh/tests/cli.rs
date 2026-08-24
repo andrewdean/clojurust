@@ -70,7 +70,11 @@ fn command_line_args_after_expr() {
 
 #[test]
 fn double_dash_separates_args() {
-    let r = run(&["-e", "(pr (vec *command-line-args*))", "--", "-e"], None, &[]);
+    let r = run(
+        &["-e", "(pr (vec *command-line-args*))", "--", "-e"],
+        None,
+        &[],
+    );
     assert_eq!(r.stdout, "[\"-e\"]");
 }
 
@@ -235,7 +239,11 @@ fn cheshire_compat_roundtrip() {
         None,
         &[],
     );
-    assert_eq!(r.stdout, "{:a [1 2.5 nil], :b \"x\"}\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "{:a [1 2.5 nil], :b \"x\"}\n",
+        "stderr: {}",
+        r.stderr
+    );
 }
 
 #[test]
@@ -358,7 +366,11 @@ fn yaml_compat_roundtrip() {
         None,
         &[],
     );
-    assert_eq!(r.stdout, "{:name \"x\", :tags [\"a\"]}\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "{:name \"x\", :tags [\"a\"]}\n",
+        "stderr: {}",
+        r.stderr
+    );
 }
 
 #[test]
@@ -372,7 +384,11 @@ fn csv_compat_roundtrip() {
         None,
         &[],
     );
-    assert_eq!(r.stdout, "[[\"a\" \"b\"] [\"1\" \"2,x\"]]\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "[[\"a\" \"b\"] [\"1\" \"2,x\"]]\n",
+        "stderr: {}",
+        r.stderr
+    );
 }
 
 // ── Embedded nushell (cljrsh-nu, feature "nu") ───────────────────────────────
@@ -487,7 +503,11 @@ fn task_project() -> tempfile::TempDir {
 fn tasks_listing_hides_private_and_shows_docs() {
     let dir = task_project();
     let r = run_in(dir.path(), &["tasks"]);
-    assert!(r.stdout.contains("compile-it Compile"), "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains("compile-it Compile"),
+        "stdout: {}",
+        r.stdout
+    );
     assert!(r.stdout.contains("build"));
     assert!(!r.stdout.contains("hidden"));
 }
@@ -496,7 +516,11 @@ fn tasks_listing_hides_private_and_shows_docs() {
 fn task_depends_order_and_result_binding() {
     let dir = task_project();
     let r = run_in(dir.path(), &["build"]);
-    assert_eq!(r.stdout, "cleaning\ncompiling\nresult 42\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "cleaning\ncompiling\nresult 42\n",
+        "stderr: {}",
+        r.stderr
+    );
 }
 
 #[test]
@@ -532,7 +556,10 @@ fn future_deref_top_level() {
 #[test]
 fn mapv_deref_futures_no_deadlock() {
     let r = run(
-        &["-e", "(mapv deref (mapv (fn [i] (future (* i 10))) [1 2 3]))"],
+        &[
+            "-e",
+            "(mapv deref (mapv (fn [i] (future (* i 10))) [1 2 3]))",
+        ],
         None,
         &[],
     );
@@ -565,7 +592,11 @@ fn future_predicates_and_single_run() {
         &[],
     );
     // Body printed exactly once even with two derefs.
-    assert_eq!(r.stdout, "ran\n[true :done :done true]\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "ran\n[true :done :done true]\n",
+        "stderr: {}",
+        r.stderr
+    );
 }
 
 #[test]
@@ -586,8 +617,7 @@ fn pmap_and_promise() {
 #[test]
 fn pods_end_to_end_through_binary() {
     // The test pod binary lives in the same target dir as cljrsh.
-    let pod = std::path::Path::new(env!("CARGO_BIN_EXE_cljrsh"))
-        .with_file_name("cljrsh-test-pod");
+    let pod = std::path::Path::new(env!("CARGO_BIN_EXE_cljrsh")).with_file_name("cljrsh-test-pod");
     if !pod.exists() {
         eprintln!("skipping: cljrsh-test-pod not built");
         return;
@@ -716,7 +746,10 @@ fn error_report_has_type_data_location_and_trace() {
     let r = run(&[path.to_str().unwrap()], None, &[]);
     assert_eq!(r.code, 1);
     let err = &r.stderr;
-    assert!(err.contains("Type:     clojure.lang.ExceptionInfo"), "{err}");
+    assert!(
+        err.contains("Type:     clojure.lang.ExceptionInfo"),
+        "{err}"
+    );
     assert!(err.contains("Message:  kaboom"), "{err}");
     assert!(err.contains("Data:     {:k 7}"), "{err}");
     assert!(err.contains("boom.clj:4:4"), "location: {err}");
@@ -736,9 +769,15 @@ fn reader_error_report_has_location_and_caret() {
     assert_eq!(r.code, 1);
     let err = &r.stderr;
     assert!(err.contains("Type:     Reader error"), "{err}");
-    assert!(err.contains("Message:  unexpected closing delimiter"), "{err}");
+    assert!(
+        err.contains("Message:  unexpected closing delimiter"),
+        "{err}"
+    );
     assert!(err.contains("bad.clj:2:13"), "location: {err}");
-    assert!(err.contains("^--- unexpected closing delimiter"), "caret: {err}");
+    assert!(
+        err.contains("^--- unexpected closing delimiter"),
+        "caret: {err}"
+    );
 
     // Unclosed-at-EOF points at the opening delimiter.
     let path2 = dir.path().join("unclosed.clj");
@@ -818,7 +857,11 @@ fn local_root_dep_resolves() {
     let dir = tempfile::tempdir().unwrap();
     let lib = dir.path().join("mylib/src/coollib");
     std::fs::create_dir_all(&lib).unwrap();
-    std::fs::write(lib.join("core.clj"), "(ns coollib.core) (def marker :dep-loaded)").unwrap();
+    std::fs::write(
+        lib.join("core.clj"),
+        "(ns coollib.core) (def marker :dep-loaded)",
+    )
+    .unwrap();
     std::fs::write(
         dir.path().join("bb.edn"),
         r#"{:deps {coollib/coollib {:local/root "mylib"}}}"#,
@@ -908,8 +951,14 @@ fn aws_s3_signing_and_list_against_mock() {
         r.stderr
     );
     // Path-style URL against custom endpoint + SigV4 headers.
-    assert!(req.starts_with("GET /b/?list-type=2&prefix=a%2F"), "req: {req}");
-    assert!(req.contains("authorization: AWS4-HMAC-SHA256"), "req: {req}");
+    assert!(
+        req.starts_with("GET /b/?list-type=2&prefix=a%2F"),
+        "req: {req}"
+    );
+    assert!(
+        req.contains("authorization: AWS4-HMAC-SHA256"),
+        "req: {req}"
+    );
     assert!(req.contains("Credential=AKIATEST/"), "req: {req}");
     assert!(req.contains("x-amz-date:"), "req: {req}");
     assert!(req.contains("x-amz-content-sha256:"), "req: {req}");
@@ -1052,5 +1101,9 @@ fn kustomize_build_when_kubectl_available() {
            [(mapv :kind rendered) (get-in (first rendered) [:metadata :namespace])])"
     );
     let r = run(&["-e", &expr], None, &[]);
-    assert_eq!(r.stdout, "[[\"ConfigMap\"] \"ns1\"]\n", "stderr: {}", r.stderr);
+    assert_eq!(
+        r.stdout, "[[\"ConfigMap\"] \"ns1\"]\n",
+        "stderr: {}",
+        r.stderr
+    );
 }

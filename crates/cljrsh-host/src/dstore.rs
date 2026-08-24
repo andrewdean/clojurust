@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use cljrs_datalog_store::{AttrProps, Datom, Op, Store, StoreValue, Bound, Index};
+use cljrs_datalog_store::{AttrProps, Bound, Datom, Index, Op, Store, StoreValue};
 use cljrs_gc::{GcPtr, MarkVisitor, Trace};
 use cljrs_interop::{Registry, wrap_fn_variadic, wrap_fn1, wrap_fn2};
 use cljrs_value::value::MapValue;
@@ -178,17 +178,19 @@ fn index_arg(v: &Value) -> Result<Index, String> {
             "vae" => Ok(Index::Vae),
             other => Err(format!("unknown index: :{other}")),
         },
-        other => Err(format!("index must be a keyword, got {}", other.type_name())),
+        other => Err(format!(
+            "index must be a keyword, got {}",
+            other.type_name()
+        )),
     }
 }
 
+/// (entity, attribute, value, closed?) with nil wildcards as None.
+type BoundParts = (Option<u64>, Option<String>, Option<StoreValue>, bool);
+
 /// A bound crosses as `[e a v]` or `[e a v closed?]` with nil wildcards;
 /// nil (or an absent arg) is the unbounded bound.
-fn bound_parts(
-    store: &Store,
-    index: Index,
-    v: Option<&Value>,
-) -> Result<(Option<u64>, Option<String>, Option<StoreValue>, bool), String> {
+fn bound_parts(store: &Store, index: Index, v: Option<&Value>) -> Result<BoundParts, String> {
     let val = match v.map(Value::unwrap_meta) {
         None | Some(Value::Nil) => return Ok((None, None, None, true)),
         Some(val) => val,
@@ -202,12 +204,13 @@ fn bound_parts(
     let sv = match parts.get(2).map(Value::unwrap_meta) {
         None | Some(Value::Nil) => None,
         // The vae index keys refs; a bare integer there is a ref target.
-        Some(Value::Long(n)) if index == Index::Vae && *n >= 0 => {
-            Some(StoreValue::Ref(*n as u64))
-        }
+        Some(Value::Long(n)) if index == Index::Vae && *n >= 0 => Some(StoreValue::Ref(*n as u64)),
         Some(val) => Some(to_store_value(store, a.as_deref(), val)?),
     };
-    let closed = !matches!(parts.get(3).map(Value::unwrap_meta), Some(Value::Bool(false)));
+    let closed = !matches!(
+        parts.get(3).map(Value::unwrap_meta),
+        Some(Value::Bool(false))
+    );
     Ok((e, a, sv, closed))
 }
 
