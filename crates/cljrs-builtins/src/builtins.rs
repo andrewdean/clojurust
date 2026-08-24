@@ -1195,6 +1195,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("to-array-2d", Arity::Fixed(1), builtin_to_array_2d),
         ("into-array", Arity::Variadic { min: 1 }, builtin_into_array),
         ("aclone", Arity::Fixed(1), builtin_aclone),
+        ("make-array", Arity::Variadic { min: 1 }, builtin_make_array),
         ("alength", Arity::Fixed(1), builtin_alength),
         ("aget", Arity::Variadic { min: 2 }, builtin_aget),
         ("aset", Arity::Fixed(3), builtin_aset),
@@ -1762,6 +1763,16 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         (
             "LongObjectHashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "IdentityHashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "java.util.IdentityHashMap.",
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_hashmap_new,
         ),
@@ -4507,6 +4518,36 @@ fn builtin_nth(args: &[Value]) -> ValueResult<Value> {
             .map(Value::Char)
             .or(default)
             .unwrap_or(Value::Nil)),
+        Value::ObjectArray(a) => {
+            let items = a.get().0.lock().unwrap();
+            match items.get(idx) {
+                Some(v) => Ok(v.clone()),
+                None => Ok(default.ok_or(ValueError::Other(format!(
+                    "nth index {idx} out of bounds for array of {}",
+                    items.len()
+                )))?),
+            }
+        }
+        Value::IntArray(a) => {
+            let items = a.get().lock().unwrap();
+            match items.get(idx) {
+                Some(v) => Ok(Value::Long(*v as i64)),
+                None => Ok(default.ok_or(ValueError::Other(format!(
+                    "nth index {idx} out of bounds for array of {}",
+                    items.len()
+                )))?),
+            }
+        }
+        Value::LongArray(a) => {
+            let items = a.get().lock().unwrap();
+            match items.get(idx) {
+                Some(v) => Ok(Value::Long(*v)),
+                None => Ok(default.ok_or(ValueError::Other(format!(
+                    "nth index {idx} out of bounds for array of {}",
+                    items.len()
+                )))?),
+            }
+        }
         Value::Nil => Ok(default.unwrap_or(Value::Nil)),
         v => {
             if let Some(vv) = native_coll_as_vector(args[0].unwrap_meta()) {
@@ -5181,6 +5222,11 @@ fn builtin_into_array(args: &[Value]) -> ValueResult<Value> {
             let v: Vec<Value> = ValueIter::new(coll.clone()).collect();
             Ok(Value::ObjectArray(GcPtr::new(ObjectArray::new(v))))
         }
+        // A class symbol (Object, String, ...) means an object array.
+        Some(Value::Symbol(_)) => {
+            let v: Vec<Value> = ValueIter::new(coll.clone()).collect();
+            Ok(Value::ObjectArray(GcPtr::new(ObjectArray::new(v))))
+        }
         _ => Err(ValueError::Other(
             "second arg to into-array must be a keyword giving a primitive type".to_string(),
         )),
@@ -5257,6 +5303,23 @@ fn builtin_arraycopy(args: &[Value]) -> ValueResult<Value> {
         }
     }
     Ok(Value::Nil)
+}
+
+/// `(make-array Object n)` — an object array of nils. Primitive class
+/// tokens are not modeled; object arrays cover the vendored uses.
+fn builtin_make_array(args: &[Value]) -> ValueResult<Value> {
+    let n = match args.last() {
+        Some(Value::Long(n)) if *n >= 0 => *n as usize,
+        _ => {
+            return Err(ValueError::Other(
+                "make-array requires a non-negative length".to_string(),
+            ));
+        }
+    };
+    Ok(Value::ObjectArray(GcPtr::new(ObjectArray::new(vec![
+        Value::Nil;
+        n
+    ]))))
 }
 
 /// `(aclone arr)` — clone an array.
@@ -8905,6 +8968,7 @@ fn builtin_instance_q(args: &[Value]) -> ValueResult<Value> {
     };
     let val = args[1].unwrap_meta();
     let result = match expected_tag.as_ref() {
+        "java.lang.Object" | "Object" => !matches!(val, Value::Nil),
         "clojure.lang.BigInt" | "BigInt" => matches!(val, Value::BigInt(_)),
         "java.math.BigDecimal" | "BigDecimal" => matches!(val, Value::BigDecimal(_)),
         "clojure.lang.Ratio" | "Ratio" => matches!(val, Value::Ratio(_)),

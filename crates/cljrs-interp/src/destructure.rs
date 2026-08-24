@@ -219,7 +219,12 @@ pub fn bind_associative(pattern: &[Form], val: &Value, env: &mut Env) -> EvalRes
                         // Entries may be symbols (`a`, `ns/a`), keywords
                         // (`:a`, `:ns/a`), or auto-resolved keywords
                         // (`::a`); all bind the NAME part, looked up by the
-                        // full (possibly qualified) keyword.
+                        // full (possibly qualified) keyword. Peel type
+                        // hints: `:keys [^ints idxs]`.
+                        let mut sym_form = sym_form;
+                        while let FormKind::Meta(_, inner) = &sym_form.kind {
+                            sym_form = inner;
+                        }
                         let entry = match &sym_form.kind {
                             FormKind::Symbol(sym) => {
                                 let parsed = Symbol::parse(sym);

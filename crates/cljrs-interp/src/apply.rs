@@ -538,6 +538,27 @@ fn dispatch_vector_method(
             Ok(Value::Long(-1))
         }
         "size" => Ok(Value::Long(v.get().count() as i64)),
+        // Read-only java.util.List interop: vendored JVM-flavored code
+        // reads the ported arms' persistent vectors as Lists.
+        "get" => {
+            let idx = match args.first() {
+                Some(Value::Long(i)) if *i >= 0 => *i as usize,
+                _ => {
+                    return Err(EvalError::Runtime(
+                        ".get requires a non-negative integer index".into(),
+                    ));
+                }
+            };
+            v.get()
+                .nth(idx)
+                .cloned()
+                .ok_or_else(|| EvalError::Runtime(format!(".get index {idx} out of bounds")))
+        }
+        "isEmpty" => Ok(Value::Bool(v.get().is_empty())),
+        "contains" => Ok(Value::Bool(
+            args.first()
+                .is_some_and(|needle| v.get().iter().any(|item| item == needle)),
+        )),
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on Vector"
         ))),

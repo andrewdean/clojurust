@@ -577,6 +577,10 @@
                          forms))
           gx)))
 
+;; Class tokens for JVM-interop idioms: (into-array Object ...),
+;; (instance? Object x), (make-array Object n).
+(def Object 'java.lang.Object)
+
 (defmacro while
   "Repeatedly executes body while test expression is true."
   [test & body]

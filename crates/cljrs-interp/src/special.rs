@@ -1934,8 +1934,12 @@ fn eval_defprotocol(args: &[Form], env: &mut Env) -> EvalResult {
             i += 2;
             continue;
         }
-        let form = &rest[i];
+        let mut form = &rest[i];
         i += 1;
+        // Peel `^ReturnType` hints: (defprotocol P ^Rel (m [x])).
+        while let FormKind::Meta(_, inner) = &form.kind {
+            form = inner;
+        }
         // Each method spec is (method-name [params...] "doc"?)
         let parts = match &form.kind {
             FormKind::List(parts) => parts,

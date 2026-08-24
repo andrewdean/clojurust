@@ -287,6 +287,24 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                 None => Ok(Value::Nil),
             }
         }
+        // (vector idx) → nth (IFn on vectors).
+        Value::Vector(v) => match args.first().map(|a| a.unwrap_meta()) {
+            Some(Value::Long(i)) if *i >= 0 => {
+                v.get().nth(*i as usize).cloned().ok_or_else(|| {
+                    EvalError::Runtime(format!(
+                        "vector index {i} out of bounds for length {}",
+                        v.get().count()
+                    ))
+                })
+            }
+            Some(other) => Err(EvalError::Runtime(format!(
+                "vectors expect an integer index, got {}",
+                other.type_name()
+            ))),
+            None => Err(EvalError::Runtime(
+                "vector call requires an index argument".into(),
+            )),
+        },
         Value::Set(s) => match args.first() {
             Some(k) => {
                 if s.contains(k) {

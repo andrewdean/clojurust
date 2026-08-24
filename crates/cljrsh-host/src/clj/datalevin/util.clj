@@ -564,11 +564,20 @@
         (transient (first maps))
         (rest maps)))))
 
+#?(:cljrsh
+(defn idxs-of
+  [pred coll]
+  (loop [xs (seq coll), i 0, res []]
+    (if xs
+      (recur (next xs) (inc i)
+             (if (pred (first xs)) (conj res i) res))
+      (seq res))))
+:clj
 (defn idxs-of
   [pred coll]
   (sequence (comp (map #(when (pred %1) %2))
                (remove nil?))
-            coll (range)))
+            coll (range))))
 
 (defn keep-idxs
   "take a set of idxs to keep"

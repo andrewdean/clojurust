@@ -119,6 +119,18 @@
   []
   (volatile! #{}))
 
+;; Vendored callers pass the HashSet shim; ported callers pass
+;; volatiles of sets. Both key tuples by their vec (wrap-array).
+(defn- seen-contains? [s k]
+  (if (volatile? s) (contains? @s k) (.contains s k)))
+
+(defn- seen-add! [s k]
+  (if (volatile? s)
+    (when-not (contains? @s k)
+      (vswap! s conj k)
+      true)
+    (.add s k)))
+
 (defn rel-not-empty
   [rel]
   (let [tuples (:tuples rel)]
@@ -285,19 +297,17 @@
              (loop [ts  (seq t1)
                     res []]
                (if ts
-                 (let [t (first ts)
-                       k (vec t)]
-                   (if (contains? @seen-set k)
-                     (recur (next ts) res)
-                     (do (vswap! seen-set conj k)
-                         (recur (next ts) (conj res t)))))
+                 (let [t (first ts)]
+                   (if (seen-add! seen-set (vec t))
+                     (recur (next ts) (conj res t))
+                     (recur (next ts) res)))
                  res))))))
 
 (defn add-to-seen!
   "Add all tuples from relation to seen-set. Returns the seen-set."
   [rel seen-set]
   (doseq [t (:tuples rel)]
-    (vswap! seen-set conj (vec t)))
+    (seen-add! seen-set (vec t)))
   seen-set)
 
 (defn select-tuples

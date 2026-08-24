@@ -95,6 +95,20 @@ pub fn dispatch(map: &JavaHashMap, method: &str, args: &[Value]) -> Option<Value
             inner.clear();
             Ok(Value::Nil)
         }
+        // Snapshot views (Java returns live views; scripts only read them).
+        "values" => Ok(Value::Vector(cljrs_gc::GcPtr::new(
+            cljrs_value::PersistentVector::from_iter(inner.values().cloned()),
+        ))),
+        "keySet" => Ok(Value::Vector(cljrs_gc::GcPtr::new(
+            cljrs_value::PersistentVector::from_iter(inner.keys().cloned()),
+        ))),
+        "entrySet" => Ok(Value::Vector(cljrs_gc::GcPtr::new(
+            cljrs_value::PersistentVector::from_iter(
+                inner
+                    .iter()
+                    .map(|(k, v)| Value::map_entry(k.clone(), v.clone())),
+            ),
+        ))),
         _ => return None,
     })
 }
