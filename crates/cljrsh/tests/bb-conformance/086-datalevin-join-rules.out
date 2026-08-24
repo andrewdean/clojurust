@@ -1,0 +1,16 @@
+{?e 0, ?n 1, ?a 2} ([1 "Ivan" 20] [2 "Petr" 30] [2 "Petr" 31])
+[[1 "Ivan" 20] [2 "Petr" 99]]
+([1 :a :c] [1 :a :d] [1 :b :c] [1 :b :d])
+[[1 :a] [2 :a]]
+[[1 "Ivan"] [3 "Oleg"]]
+([1 "Ivan" 20] [2 "Petr" 30] [2 "Petr" 31])
+[1 2 3] 3 2 [1 2 3] 6
+true false true 1
+1 nil true
+false
+3
+(ancestor sibling) {ancestor 2, sibling 1}
+((:a :b :c) (:d))
+{ancestor #{ancestor}, sibling #{}}
+[(sibling) (ancestor)]
+true false

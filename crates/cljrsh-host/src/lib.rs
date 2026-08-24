@@ -142,6 +142,7 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     ),
     ("datalevin.db", include_str!("clj/datalevin/db.clj")),
     ("datalevin.join", include_str!("clj/datalevin/join.clj")),
+    ("datalevin.rules", include_str!("clj/datalevin/rules.clj")),
     (
         "datalevin.storage",
         include_str!("clj/datalevin/storage.clj"),

@@ -407,6 +407,17 @@ fn lower_list(ctx: &mut LowerCtx, parts: &[Form]) -> R {
         "or" => lower_or(ctx, args),
         "try" => lower_try(ctx, args),
         "binding" => lower_binding(ctx, args),
+        // Single-threaded runtime: locking is the body, monitor evaluated
+        // for effect.
+        "locking" => {
+            if args.is_empty() {
+                return Err(LowerError::MalformedSpecialForm(
+                    "locking requires a monitor expression".into(),
+                ));
+            }
+            lower_form(ctx, &args[0])?;
+            lower_body(ctx, &args[1..])
+        }
         "letfn" => lower_letfn(ctx, args),
         "with-out-str" => lower_with_out_str(ctx, args),
         // `(var sym)` — same as the `#'sym` reader form: load the Var object.

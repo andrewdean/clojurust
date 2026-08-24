@@ -467,6 +467,29 @@ pub fn native_coll_count(v: &Value) -> Option<usize> {
     None
 }
 
+// ── java.lang.Object — the unique-sentinel idiom ────────────────────────────
+
+#[derive(Debug)]
+pub struct JavaObject;
+
+impl NativeObject for JavaObject {
+    fn type_tag(&self) -> &str {
+        "java.lang.Object"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaObject {
+    fn trace(&self, _visitor: &mut cljrs_gc::MarkVisitor) {}
+}
+
+/// `(Object.)` — a fresh object equal only to itself.
+pub fn builtin_object_new(_args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(JavaObject)))
+}
+
 // ── java.util.ArrayDeque (used as a stack by malli's regex drivers) ─────────
 
 #[derive(Debug)]

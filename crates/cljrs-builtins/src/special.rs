@@ -39,6 +39,7 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "reify",
     "load-file",
     "binding",
+    "locking",
     "with-out-str",
     "await",
 ];

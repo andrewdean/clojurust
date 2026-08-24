@@ -1721,6 +1721,16 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::javamap::builtin_hashmap_new,
         ),
         (
+            "Object.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_object_new,
+        ),
+        (
+            "java.lang.Object.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_object_new,
+        ),
+        (
             "HashSet.",
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_hash_set_new,

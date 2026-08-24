@@ -577,6 +577,14 @@
                          forms))
           gx)))
 
+(defmacro while
+  "Repeatedly executes body while test expression is true."
+  [test & body]
+  `(loop []
+     (when ~test
+       ~@body
+       (recur))))
+
 (defmacro dotimes
   "bindings => name n. Repeatedly executes body (presumably for side
   effects) with name bound to integers from 0 through n-1."

@@ -60,6 +60,17 @@ pub fn eval_special(head: &str, args: &[Form], env: &mut Env) -> EvalResult {
         "reify" => eval_reify(args, env),
         "load-file" => eval_load_file(args, env),
         "binding" => eval_binding(args, env),
+        // Single-threaded runtime: locking evaluates the monitor
+        // expression for effect and runs the body.
+        "locking" => {
+            if args.is_empty() {
+                return Err(EvalError::Runtime(
+                    "locking requires a monitor expression".into(),
+                ));
+            }
+            eval(&args[0], env)?;
+            eval_body(&args[1..], env)
+        }
         "with-out-str" => eval_with_out_str(args, env),
         "await" => eval_await(args, env),
         _ => unreachable!("unknown special form: {head}"),
