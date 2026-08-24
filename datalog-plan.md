@@ -246,8 +246,19 @@ default, and it stays contained inside the store crate.
    gated + portable fill-rule-output-and-hash); parse/SCC/dependency/
    stratification verified, solve-stratified awaits the resolve
    rung's query context; runtime gained locking, while, (Object.).
-   Conformance case 086. Next rungs: resolve (+ aggregate/cache) ->
-   graph/range/plan -> execute/access -> the query facade.
+   Conformance case 086. Resolve rung done
+   2026-08-23 (4d2193c2): datalevin.query.resolve + query.aggregate
+   near-verbatim; verified against the durable store: resolve-ins,
+   lookup-pattern, patterns/predicates/fn-bindings/or/not/not-join,
+   and RECURSIVE RULES end-to-end (semi-naive stratified transitive
+   closure, unbound and bound), grouped and ungrouped aggregates.
+   relation seen-sets are polymorphic (HashSet shim or volatile).
+   Upstream: defprotocol return-type hints, :keys type hints,
+   callable vectors, nth on arrays, read-only List interop on
+   vectors, HashMap views, Object class token, IdentityHashMap
+   alias. Conformance case 087. Note: query.cache requires
+   query.execute, so it lands with the execute rung. Next rungs:
+   graph/range/plan -> execute/access (+ cache) -> the query facade.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
