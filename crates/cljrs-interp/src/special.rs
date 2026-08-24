@@ -2083,10 +2083,10 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
                 let fn_val = build_impl_fn(parts, env)?;
                 let mut impls = proto.get().impls.lock().unwrap();
                 for tag in &type_tags {
-                    impls
-                        .entry(tag.clone())
-                        .or_default()
-                        .insert(method_name.clone(), fn_val.clone());
+                    let methods = impls.entry(tag.clone()).or_default();
+                    let merged =
+                        merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    methods.insert(method_name.clone(), merged);
                 }
                 drop(impls);
                 cljrs_value::bump_protocol_generation();
@@ -2151,10 +2151,10 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
                 let fn_val = build_impl_fn(parts, env)?;
                 let mut impls = proto_ptr.get().impls.lock().unwrap();
                 for tag in type_tags {
-                    impls
-                        .entry(tag.clone())
-                        .or_default()
-                        .insert(method_name.clone(), fn_val.clone());
+                    let methods = impls.entry(tag.clone()).or_default();
+                    let merged =
+                        merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    methods.insert(method_name.clone(), merged);
                 }
                 drop(impls);
                 cljrs_value::bump_protocol_generation();
@@ -2176,10 +2176,29 @@ fn build_impl_fn(parts: &[Form], env: &mut Env) -> EvalResult<Value> {
             "protocol method impl requires params and body".into(),
         ));
     }
-    // parts[1] should be the params vector.
-    let params_form = &parts[1];
-    let body = &parts[2..];
-    let arity = parse_arity(params_form, body)?;
+    // Either `(name [params] body...)` or the extend-type multi-arity
+    // form `(name ([params] body...) ([params2] body...))`.
+    let arities = if matches!(parts[1].kind, FormKind::List(_)) {
+        let mut arities = Vec::new();
+        for form in &parts[1..] {
+            let FormKind::List(clause) = &form.kind else {
+                return Err(EvalError::Runtime(
+                    "protocol method impl: expected ([params] body...) clauses".into(),
+                ));
+            };
+            if clause.is_empty() {
+                return Err(EvalError::Runtime(
+                    "protocol method impl: empty arity clause".into(),
+                ));
+            }
+            arities.push(parse_arity(&clause[0], &clause[1..])?);
+        }
+        arities
+    } else {
+        let params_form = &parts[1];
+        let body = &parts[2..];
+        vec![parse_arity(params_form, body)?]
+    };
     let (closed_over_names, closed_over_vals) = env.all_local_bindings();
     let fn_name = match &parts[0].kind {
         FormKind::Symbol(s) => Some(Arc::from(s.as_str())),
@@ -2187,13 +2206,46 @@ fn build_impl_fn(parts: &[Form], env: &mut Env) -> EvalResult<Value> {
     };
     let cljrs_fn = CljxFn::new(
         fn_name,
-        vec![arity],
+        arities,
         closed_over_names,
         closed_over_vals,
         false,
         Arc::clone(&env.current_ns),
     );
     Ok(Value::Fn(GcPtr::new(cljrs_fn)))
+}
+
+/// Merge a repeated method definition into the one already registered:
+/// `(m [x] ...) (m [x y] ...)` in a defrecord/deftype/reify/extend body
+/// accumulates arities instead of the last form silently winning. Arities
+/// with the same shape are replaced; both definitions share one lexical
+/// environment, so the newer closure stands in for both.
+fn merge_method_impl(existing: Option<&Value>, new_val: Value) -> Value {
+    let (Some(Value::Fn(old)), Value::Fn(newf)) = (existing, &new_val) else {
+        return new_val;
+    };
+    let old_fn = old.get();
+    let new_fn = newf.get();
+    let mut arities = old_fn.arities.clone();
+    for a in &new_fn.arities {
+        if let Some(slot) = arities.iter_mut().find(|b| {
+            b.params.len() == a.params.len()
+                && b.rest_param.is_some() == a.rest_param.is_some()
+        }) {
+            *slot = a.clone();
+        } else {
+            arities.push(a.clone());
+        }
+    }
+    let merged = CljxFn::new(
+        new_fn.name.clone(),
+        arities,
+        new_fn.closed_over_names.clone(),
+        new_fn.closed_over_vals.clone(),
+        false,
+        Arc::clone(&new_fn.defining_ns),
+    );
+    Value::Fn(GcPtr::new(merged))
 }
 
 // ── defmulti ──────────────────────────────────────────────────────────────────
@@ -2354,6 +2406,42 @@ fn inject_record_fields(form: &Form, fields: &[Arc<str>]) -> Form {
     let (Some(_method), Some(params_form)) = (items.first(), items.get(1)) else {
         return form.clone();
     };
+    // Multi-arity clause form `(method ([params] body...) ...)`: inject
+    // into each clause by round-tripping it through the single-arity path.
+    if matches!(params_form.kind, FK::List(_)) {
+        let mut new_items = vec![items[0].clone()];
+        for clause in &items[1..] {
+            let FK::List(cparts) = &clause.kind else {
+                new_items.push(clause.clone());
+                continue;
+            };
+            if cparts.is_empty() {
+                new_items.push(clause.clone());
+                continue;
+            }
+            let mut pseudo = vec![items[0].clone()];
+            pseudo.extend(cparts.iter().cloned());
+            let injected = inject_record_fields(
+                &Form {
+                    kind: FK::List(pseudo),
+                    span: clause.span.clone(),
+                },
+                fields,
+            );
+            let FK::List(inj) = &injected.kind else {
+                new_items.push(clause.clone());
+                continue;
+            };
+            new_items.push(Form {
+                kind: FK::List(inj[1..].to_vec()),
+                span: clause.span.clone(),
+            });
+        }
+        return Form {
+            kind: FK::List(new_items),
+            span: form.span.clone(),
+        };
+    }
     let FK::Vector(params) = &params_form.kind else {
         return form.clone();
     };
@@ -2624,10 +2712,9 @@ fn register_impls_for_tag(type_tag: &Arc<str>, forms: &[Form], env: &mut Env) ->
                 };
                 let fn_val = build_impl_fn(parts, env)?;
                 let mut impls = proto.get().impls.lock().unwrap();
-                impls
-                    .entry(type_tag.clone())
-                    .or_default()
-                    .insert(method_name, fn_val);
+                let methods = impls.entry(type_tag.clone()).or_default();
+                let merged = merge_method_impl(methods.get(&method_name), fn_val);
+                methods.insert(method_name, merged);
                 drop(impls);
                 cljrs_value::bump_protocol_generation();
             }

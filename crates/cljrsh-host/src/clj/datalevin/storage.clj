@@ -13,6 +13,7 @@
   (:require
    [cljrs.dstore.native :as native]
    [datalevin.constants :as c]
+   [datalevin.interface :as i]
    [datalevin.datom :as d]
    [datalevin.pipe :as p]
    [datalevin.relation :as r]
@@ -524,3 +525,106 @@
   "Tuples of [e attr v] over the whole store."
   [store]
   (mapv (fn [[e a v]] (object-array [e a v])) (search* store nil nil nil)))
+
+;; ── datalevin.interface bridge ───────────────────────────────────────
+;; Vendored code (tx.common, query.cache, ...) reaches storage through
+;; the interface protocols; the subset the query family uses delegates
+;; to the fns above. Bodies are ns-qualified: a protocol method named
+;; like the fn it calls would otherwise resolve the name to itself.
+
+(extend-type Store
+  i/IStore
+  (opts [s] (datalevin.storage/opts s))
+  (db-name [s] (datalevin.storage/db-name s))
+  (dir [s] (datalevin.storage/dir s))
+  (close [s] (datalevin.storage/close s))
+  (closed? [s] (datalevin.storage/closed? s))
+  (last-modified [s] (datalevin.storage/last-modified s))
+  (max-tx [s] (datalevin.storage/max-tx s))
+  (schema [s] (datalevin.storage/schema s))
+  (rschema [s] (datalevin.storage/rschema s))
+  (attrs [s] (datalevin.storage/attrs s))
+  (init-max-eid [s] (datalevin.storage/init-max-eid s))
+  (datom-count [s index] (datalevin.storage/datom-count s index))
+  (load-datoms [s datoms] (datalevin.storage/load-datoms s datoms))
+  (fetch [s datom] (datalevin.storage/fetch s datom))
+  (populated? [s index low-datom high-datom]
+    (datalevin.storage/populated? s index low-datom high-datom))
+  (size [s index low-datom high-datom]
+    (datalevin.storage/size s index low-datom high-datom))
+  (e-size [s e] (datalevin.storage/e-size s e))
+  (a-size [s a] (datalevin.storage/a-size s a))
+  (e-sample [s a] (datalevin.storage/e-sample s a))
+  (default-ratio [s a] (datalevin.storage/default-ratio s a))
+  (v-size [s v] (datalevin.storage/v-size s v))
+  (av-size [s a v] (datalevin.storage/av-size s a v))
+  (av-range-size [s a lv hv] (datalevin.storage/av-range-size s a lv hv))
+  (cardinality [s a] (datalevin.storage/cardinality s a))
+  (head [s index low-datom high-datom]
+    (datalevin.storage/head s index low-datom high-datom))
+  (tail [s index high-datom low-datom]
+    (datalevin.storage/tail s index high-datom low-datom))
+  (slice
+    ([s index low-datom high-datom]
+     (datalevin.storage/slice s index low-datom high-datom))
+    ([s index low-datom high-datom n]
+     (datalevin.storage/slice s index low-datom high-datom n)))
+  (rslice
+    ([s index high-datom low-datom]
+     (datalevin.storage/rslice s index high-datom low-datom))
+    ([s index high-datom low-datom n]
+     (datalevin.storage/rslice s index high-datom low-datom n)))
+  (e-datoms [s e] (datalevin.storage/e-datoms s e))
+  (e-first-datom [s e] (datalevin.storage/e-first-datom s e))
+  (av-datoms [s a v] (datalevin.storage/av-datoms s a v))
+  (av-first-datom [s a v] (datalevin.storage/av-first-datom s a v))
+  (ea-first-datom [s e a] (datalevin.storage/ea-first-datom s e a))
+  (ea-first-v [s e a] (datalevin.storage/ea-first-v s e a))
+  (av-first-e [s a v] (datalevin.storage/av-first-e s a v))
+  (v-datoms [s v] (datalevin.storage/v-datoms s v))
+  (size-filter [s index pred low-datom high-datom]
+    (datalevin.storage/size-filter s index pred low-datom high-datom))
+  (head-filter [s index pred low-datom high-datom]
+    (datalevin.storage/head-filter s index pred low-datom high-datom))
+  (tail-filter [s index pred high-datom low-datom]
+    (datalevin.storage/tail-filter s index pred high-datom low-datom))
+  (slice-filter [s index pred low-datom high-datom]
+    (datalevin.storage/slice-filter s index pred low-datom high-datom))
+  (rslice-filter [s index pred high-datom low-datom]
+    (datalevin.storage/rslice-filter s index pred high-datom low-datom))
+  (ave-tuples
+    ([s out attr val-ranges]
+     (datalevin.storage/ave-tuples s out attr val-ranges nil false))
+    ([s out attr val-ranges vpred]
+     (datalevin.storage/ave-tuples s out attr val-ranges vpred false))
+    ([s out attr val-ranges vpred get-v?]
+     (datalevin.storage/ave-tuples s out attr val-ranges vpred get-v?))
+    ([s out attr val-ranges vpred get-v? indices]
+     (datalevin.storage/ave-tuples s out attr val-ranges vpred get-v?
+                                   indices)))
+  (ave-tuples-list [s attr val-ranges vpred get-v?]
+    (datalevin.storage/ave-tuples-list s attr val-ranges vpred get-v?))
+  (sample-ave-tuples [s out attr mcount val-ranges vpred get-v?]
+    (datalevin.storage/sample-ave-tuples s out attr mcount val-ranges
+                                         vpred get-v?))
+  (sample-ave-tuples-list [s attr mcount val-ranges vpred get-v?]
+    (datalevin.storage/sample-ave-tuples-list s attr mcount val-ranges
+                                              vpred get-v?))
+  (eav-scan-v [s in out eid-idx attrs-v]
+    (datalevin.storage/eav-scan-v s in out eid-idx attrs-v))
+  (eav-scan-v-list [s in eid-idx attrs-v]
+    (datalevin.storage/eav-scan-v-list s in eid-idx attrs-v))
+  (val-eq-scan-e
+    ([s in out v-idx attr]
+     (datalevin.storage/val-eq-scan-e s in out v-idx attr))
+    ([s in out v-idx attr bound]
+     (datalevin.storage/val-eq-scan-e s in out v-idx attr bound)))
+  (val-eq-scan-e-list
+    ([s in v-idx attr]
+     (datalevin.storage/val-eq-scan-e-list s in v-idx attr))
+    ([s in v-idx attr bound]
+     (datalevin.storage/val-eq-scan-e-list s in v-idx attr bound)))
+  (val-eq-filter-e [s in out v-idx attr f-idx]
+    (datalevin.storage/val-eq-filter-e s in out v-idx attr f-idx))
+  (val-eq-filter-e-list [s in v-idx attr f-idx]
+    (datalevin.storage/val-eq-filter-e-list s in v-idx attr f-idx)))
