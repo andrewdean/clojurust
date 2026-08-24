@@ -221,11 +221,21 @@ default, and it stays contained inside the store crate.
    (ave-tuples, sampled variants, eav-scan-v with :pred/:fidx/:skip?
    and card-many products, val-eq-scan-e/-filter-e), and the
    search-tuples case-tree helpers; cardinality is exact under 16k
-   datoms, else the datom count (statistic only). Next rung: the db
-   port (datalevin.db protocols + DB record over datalevin.storage,
-   tx pipeline gated to native transact initially), then
-   join/rules -> resolve (+ aggregate/cache) -> graph/range/plan ->
-   execute/access -> the query facade.
+   datoms, else the datom count (statistic only). Db rung done
+   2026-08-23 (21d76141): datalevin.db replaced with the query-path
+   surface — upstream protocols verbatim, DB record over
+   datalevin.storage with the upstream case trees, helpers via a
+   vendored datalevin.db.tx.common (pending-tx probes gated off);
+   datalevin.validate replaced with the eight query-path validators;
+   storage gained a datalevin.interface IStore bridge (ns-qualified
+   bodies avoid method-name self-capture). Upstream fixes: protocol
+   method impls accept the multi-arity clause form and repeated
+   same-name forms merge arities (defrecord/deftype/reify/extend-type/
+   extend-protocol); record field injection reaches clause bodies.
+   Conformance case 085. Not ported: datalevin tx pipeline (writes go
+   through storage/load-datoms), pending-tx caches, result caches,
+   remote, UDF. Next rungs: join/rules -> resolve (+ aggregate/cache)
+   -> graph/range/plan -> execute/access -> the query facade.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
