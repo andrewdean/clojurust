@@ -71,6 +71,9 @@ nREPL server, and optional Kubernetes/AWS clients plus an embedded nushell
 engine.
 
 ```bash
+# prebuilt binaries: linux x86_64/aarch64, macOS arm64 (see Releases)
+curl -LO https://github.com/andrewdean/clojurust/releases/latest/download/cljrsh-x86_64-unknown-linux-gnu.tar.gz
+# or build from source:
 cargo install --git https://github.com/andrewdean/clojurust cljrsh
 
 cljrsh -e '(+ 1 2 3)'

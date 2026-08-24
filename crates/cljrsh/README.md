@@ -13,14 +13,30 @@ layer; new code should prefer the first-party `cljrsh.*` namespaces.
 
 ## Install
 
-Build from this repository with cargo:
+Every release attaches prebuilt binaries. Download the tarball for your
+platform, unpack it, and put `cljrsh` on your PATH:
 
 ```bash
-cargo install --git https://github.com/andrewdean/clojurust cljrsh
+curl -LO https://github.com/andrewdean/clojurust/releases/latest/download/cljrsh-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cljrsh-x86_64-unknown-linux-gnu.tar.gz
+install cljrsh-x86_64-unknown-linux-gnu/cljrsh ~/.local/bin/
 ```
 
-For the smaller distribution build (thin LTO, stripped, ~60 MB instead of
-~94 MB), install from a checkout:
+Substitute the target triple for your machine: `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, or `aarch64-apple-darwin` (Apple silicon).
+Each release also carries a `SHA256SUMS` file. The binaries are the dist
+build: thin LTO, stripped, self-contained.
+
+To build from source instead, install with cargo, either from crates.io or
+from this repository:
+
+```bash
+cargo install cljrsh
+cargo install --git https://github.com/andrewdean/clojurust cljrsh   # latest commit
+```
+
+Both build the ~94 MB release profile. For the same ~60 MB dist build the
+releases carry, install from a checkout:
 
 ```bash
 git clone https://github.com/andrewdean/clojurust

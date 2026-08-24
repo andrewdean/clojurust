@@ -17,15 +17,31 @@ driver. The rest of this series spends most of its time in `cljrsh`.
 
 ## Install
 
-Both install from the repository with cargo:
+The fastest path to `cljrsh` is a prebuilt binary from the
+[releases page](https://github.com/andrewdean/clojurust/releases/latest).
+Download the tarball for your platform, unpack it, and put the binary on
+your PATH:
 
 ```bash
-cargo install --git https://github.com/andrewdean/clojurust cljrs
-cargo install --git https://github.com/andrewdean/clojurust cljrsh
+curl -LO https://github.com/andrewdean/clojurust/releases/latest/download/cljrsh-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cljrsh-x86_64-unknown-linux-gnu.tar.gz
+install cljrsh-x86_64-unknown-linux-gnu/cljrsh ~/.local/bin/
+```
+
+Releases cover three targets: `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, and `aarch64-apple-darwin` (Apple silicon).
+
+Both binaries also install with cargo, from crates.io or from the
+repository:
+
+```bash
+cargo install cljrs cljrsh
+cargo install --git https://github.com/andrewdean/clojurust cljrsh   # latest commit
 ```
 
 For the smaller distribution build of cljrsh (thin LTO, stripped: ~60 MB
-instead of ~94 MB), install from a checkout:
+instead of ~94 MB; the same build the releases carry), install from a
+checkout:
 
 ```bash
 git clone https://github.com/andrewdean/clojurust
