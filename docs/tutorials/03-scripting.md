@@ -123,9 +123,11 @@ unchanged, registry included:
 
 The first load downloads the pod binary for your platform; later loads start
 from the cache in ~70 ms. All three payload formats work (EDN, JSON,
-transit), so existing pods like `go-sqlite3`, `postgresql`, and `datalevin`
-run as-is. On that last one: `cljrsh.datalog` wraps the datalevin pod into
-one-call datalog queries over plain collections:
+transit), so existing pods like `go-sqlite3` and `postgresql` run as-is.
+
+Datalog needs no pod: `cljrsh.datalog` is a built-in engine (the datalevin
+query pipeline running natively on an embedded LMDB store) with one-call
+queries over plain collections:
 
 ```clojure
 (require '[cljrsh.datalog :as d])
@@ -137,6 +139,10 @@ one-call datalog queries over plain collections:
      (d/facts people))
 ;; => #{["Ada" 120] ["Grace" 130]}
 ```
+
+The same namespace opens durable databases: `(d/conn "path")`,
+`(d/transact! conn tx-data)`, and `(d/q query (d/db conn))` persist across
+runs, with no server and no JVM.
 
 ## Bundling with uberscript
 
