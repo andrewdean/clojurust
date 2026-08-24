@@ -257,8 +257,22 @@ default, and it stays contained inside the store crate.
    callable vectors, nth on arrays, read-only List interop on
    vectors, HashMap views, Object class token, IdentityHashMap
    alias. Conformance case 087. Note: query.cache requires
-   query.execute, so it lands with the execute rung. Next rungs:
-   graph/range/plan -> execute/access (+ cache) -> the query facade.
+   query.execute, so it lands with the execute rung. Planner rung done
+   2026-08-23 (fa77f143): query.access, optimizer.graph (portable
+   idx/value-type inline), optimizer.range (portable max-string,
+   like validation via built-ins compiler), query.plan, and
+   query-optimizer (5.1k lines) all load; graph building with
+   predicate pushdown verified on the durable store. Portable arms:
+   SIP bitmaps = volatile sets; plan/writing? = true so every
+   parallel pipeline collapses onto the upstream sequential fallback
+   branches; DPK record replaces DPKey; plan cache = datascript LRU
+   in a volatile; FnSink replaces the AbstractCollection proxy.
+   Runtime feature: interop method calls on deftype/defrecord
+   dispatch to protocol methods ((.-field x) stays field access);
+   CompletableFuture/ConcurrentHashMap/putIfAbsent shims; pipes
+   answer .add/.addAll. Conformance case 088. Final rung: execute
+   (2.8k lines) + access/ave + access/function + query.cache ->
+   the datalevin.query facade, then wire cljrsh.datalog to it.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
