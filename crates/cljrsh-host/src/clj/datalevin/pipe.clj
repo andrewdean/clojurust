@@ -189,6 +189,21 @@
   []
   (new-sink))
 
+;; Interop bridge: vendored code adds to pipes through the
+;; java.util.Collection surface ((.add sink tuple)); interop method
+;; dispatch routes those here.
+(defprotocol ICollAdd
+  (add [this tuple])
+  (addAll [this tuples]))
+
+(extend-protocol ICollAdd
+  TuplePipe
+  (add [this tuple] (-add-batch this [tuple]))
+  (addAll [this tuples] (-add-batch this (vec tuples)))
+  CountedTuplePipe
+  (add [this tuple] (-add-batch this [tuple]))
+  (addAll [this tuples] (-add-batch this (vec tuples))))
+
 (defn tuple-pipe
   []
   (->TuplePipe (volatile! {:tuples [] :i 0 :finished false})))

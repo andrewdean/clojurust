@@ -19,6 +19,10 @@
    [datalevin.relation :as r]
    [datalevin.util :as u :refer [raise]]))
 
+(def ^:dynamic *parallel-list-scan?*
+  "Accepted for API parity with upstream; scans are single-threaded."
+  false)
+
 ;; ── store handle ─────────────────────────────────────────────────────
 
 (defrecord Store [handle dir opts])

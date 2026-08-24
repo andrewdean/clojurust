@@ -1767,6 +1767,26 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
             crate::javamap::builtin_hashmap_new,
         ),
         (
+            "ConcurrentHashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "java.util.concurrent.ConcurrentHashMap.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_hashmap_new,
+        ),
+        (
+            "CompletableFuture.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_completable_future_new,
+        ),
+        (
+            "java.util.concurrent.CompletableFuture.",
+            Arity::Variadic { min: 0 },
+            crate::javamap::builtin_completable_future_new,
+        ),
+        (
             "IdentityHashMap.",
             Arity::Variadic { min: 0 },
             crate::javamap::builtin_hashmap_new,

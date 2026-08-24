@@ -85,6 +85,20 @@ pub fn dispatch(map: &JavaHashMap, method: &str, args: &[Value]) -> Option<Value
         "containsKey" => Ok(Value::Bool(
             args.first().is_some_and(|k| inner.contains_key(k)),
         )),
+        "putIfAbsent" => {
+            let (Some(k), Some(v)) = (args.first(), args.get(1)) else {
+                return Some(Err(cljrs_value::ValueError::Other(
+                    ".putIfAbsent requires key and value".into(),
+                )));
+            };
+            match inner.get(k) {
+                Some(existing) => Ok(existing.clone()),
+                None => {
+                    inner.insert(k.clone(), v.clone());
+                    Ok(Value::Nil)
+                }
+            }
+        }
         "remove" => Ok(args
             .first()
             .and_then(|k| inner.remove(k))
@@ -176,6 +190,9 @@ pub fn dispatch_any(
     }
     if let Some(l) = obj.downcast_ref::<JavaArrayList>() {
         return dispatch_array_list(l, method, args);
+    }
+    if let Some(f) = obj.downcast_ref::<JavaCompletableFuture>() {
+        return dispatch_completable_future(f, method, args);
     }
     if let Some(s) = obj.downcast_ref::<JavaHashSet>() {
         return dispatch_hash_set(s, method, args);
@@ -479,6 +496,66 @@ pub fn native_coll_count(v: &Value) -> Option<usize> {
         return Some(m.inner.lock().unwrap().len());
     }
     None
+}
+
+// ── java.util.concurrent.CompletableFuture — a settable box ─────────────────
+// Single-threaded runtime: complete stores the value, get returns it (or
+// raises when nothing has been delivered — the JVM would block forever).
+
+#[derive(Debug)]
+pub struct JavaCompletableFuture {
+    pub slot: Mutex<Option<Value>>,
+}
+
+impl NativeObject for JavaCompletableFuture {
+    fn type_tag(&self) -> &str {
+        "java.util.concurrent.CompletableFuture"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl cljrs_gc::Trace for JavaCompletableFuture {
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        if let Some(v) = self.slot.lock().unwrap().as_ref() {
+            v.trace(visitor);
+        }
+    }
+}
+
+pub fn builtin_completable_future_new(_args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::NativeObject(cljrs_value::gc_native_object(
+        JavaCompletableFuture {
+            slot: Mutex::new(None),
+        },
+    )))
+}
+
+fn dispatch_completable_future(
+    f: &JavaCompletableFuture,
+    method: &str,
+    args: &[Value],
+) -> Option<ValueResult<Value>> {
+    let mut slot = f.slot.lock().unwrap();
+    Some(match method {
+        "complete" => {
+            let was_empty = slot.is_none();
+            if was_empty {
+                *slot = Some(args.first().cloned().unwrap_or(Value::Nil));
+            }
+            Ok(Value::Bool(was_empty))
+        }
+        "get" | "join" => match slot.as_ref() {
+            Some(v) => Ok(v.clone()),
+            None => Err(cljrs_value::ValueError::Other(
+                "CompletableFuture.get: nothing delivered (single-threaded runtime would deadlock)"
+                    .into(),
+            )),
+        },
+        "isDone" => Ok(Value::Bool(slot.is_some())),
+        _ => return None,
+    })
 }
 
 // ── java.lang.Object — the unique-sentinel idiom ────────────────────────────

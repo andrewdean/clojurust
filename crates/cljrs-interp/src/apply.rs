@@ -314,7 +314,7 @@ fn eval_method_call(method: &str, arg_forms: &[Form], env: &mut Env) -> EvalResu
         .map(|f| eval(f, env))
         .collect::<EvalResult<_>>()?;
 
-    dispatch_method(method, &target, &args)
+    dispatch_method(method, &target, &args, env)
 }
 
 /// Dispatch `(.method target args…)` on an already-evaluated target.
@@ -322,7 +322,12 @@ fn eval_method_call(method: &str, arg_forms: &[Form], env: &mut Env) -> EvalResu
 /// Form-free, so the Tier-1 IR interpreter can route dot-marked
 /// `CallDirect` instructions here (see `dispatch_sentinel_by_name` in
 /// cljrs-eval) and behave exactly like the tree-walker's interop path.
-pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResult {
+pub fn dispatch_method(
+    method: &str,
+    target: &Value,
+    args: &[Value],
+    env: &mut Env,
+) -> EvalResult {
     // (.iterator coll) — Java-style iteration in portable .cljc :clj branches.
     if method == "iterator" && !matches!(target, Value::NativeObject(_)) {
         return cljrs_builtins::javamap::iterator_of(target)
@@ -372,8 +377,22 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
         // `map->Record` accepts partial maps, and the JVM fills missing
         // basis fields with nil rather than erroring.
         Value::TypeInstance(ti) => {
-            let field = method.strip_prefix('-').unwrap_or(method);
-            let key = Value::keyword(cljrs_value::Keyword::simple(field));
+            // `(.-field x)` is explicit field-access syntax; `(.method x …)`
+            // dispatches to the type's own protocol method first (like
+            // deftype interface methods on the JVM), with field access as
+            // the fallback.
+            if let Some(field) = method.strip_prefix('-') {
+                let key = Value::keyword(cljrs_value::Keyword::simple(field));
+                return Ok(ti.get().fields.get(&key).unwrap_or(Value::Nil));
+            }
+            let tag = cljrs_env::apply::type_tag_of(target);
+            if let Some(impl_fn) = cljrs_value::lookup_interop_method(tag.as_ref(), method) {
+                let mut call_args = Vec::with_capacity(args.len() + 1);
+                call_args.push(target.clone());
+                call_args.extend_from_slice(args);
+                return cljrs_env::apply::apply_value(&impl_fn, call_args, env);
+            }
+            let key = Value::keyword(cljrs_value::Keyword::simple(method));
             Ok(ti.get().fields.get(&key).unwrap_or(Value::Nil))
         }
         Value::NativeObject(obj) => {

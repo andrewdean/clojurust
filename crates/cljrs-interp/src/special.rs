@@ -2042,7 +2042,7 @@ fn eval_dot(args: &[Form], env: &mut Env) -> EvalResult {
         call_args.push(eval(f, env)?);
     }
     let _args_root = cljrs_env::gc_roots::root_values(&call_args);
-    crate::apply::dispatch_method(method.trim_start_matches('-'), &target, &call_args)
+    crate::apply::dispatch_method(method.trim_start_matches('-'), &target, &call_args, env)
 }
 
 fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
@@ -2101,6 +2101,11 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
                     let methods = impls.entry(tag.clone()).or_default();
                     let merged =
                         merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    cljrs_value::register_interop_method(
+                        tag.clone(),
+                        method_name.clone(),
+                        merged.clone(),
+                    );
                     methods.insert(method_name.clone(), merged);
                 }
                 drop(impls);
@@ -2169,6 +2174,11 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
                     let methods = impls.entry(tag.clone()).or_default();
                     let merged =
                         merge_method_impl(methods.get(&method_name), fn_val.clone());
+                    cljrs_value::register_interop_method(
+                        tag.clone(),
+                        method_name.clone(),
+                        merged.clone(),
+                    );
                     methods.insert(method_name.clone(), merged);
                 }
                 drop(impls);
@@ -2729,6 +2739,11 @@ fn register_impls_for_tag(type_tag: &Arc<str>, forms: &[Form], env: &mut Env) ->
                 let mut impls = proto.get().impls.lock().unwrap();
                 let methods = impls.entry(type_tag.clone()).or_default();
                 let merged = merge_method_impl(methods.get(&method_name), fn_val);
+                cljrs_value::register_interop_method(
+                    type_tag.clone(),
+                    method_name.clone(),
+                    merged.clone(),
+                );
                 methods.insert(method_name, merged);
                 drop(impls);
                 cljrs_value::bump_protocol_generation();

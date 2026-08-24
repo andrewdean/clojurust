@@ -155,6 +155,31 @@ pub fn bump_protocol_generation() {
     PROTOCOL_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 }
 
+// ── interop method registry ──────────────────────────────────────────────────
+// (tag, method-name) → impl fn, fed by defrecord/deftype/reify/extend-type.
+// Lets `(.method instance args…)` interop calls dispatch to the type's
+// protocol methods, as deftype interface methods do on the JVM.
+
+// Thread-local: evaluation is single-threaded, and the entries are
+// duplicate pointers to impls the protocol objects already keep traced.
+thread_local! {
+    static INTEROP_METHODS: std::cell::RefCell<
+        std::collections::HashMap<(Arc<str>, Arc<str>), crate::Value>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Record a protocol method impl for interop dispatch.
+pub fn register_interop_method(tag: Arc<str>, method: Arc<str>, f: crate::Value) {
+    INTEROP_METHODS.with(|m| {
+        m.borrow_mut().insert((tag, method), f);
+    });
+}
+
+/// The impl fn for `(.method x …)` on a value whose type tag is `tag`.
+pub fn lookup_interop_method(tag: &str, method: &str) -> Option<crate::Value> {
+    INTEROP_METHODS.with(|m| m.borrow().get(&(Arc::from(tag), Arc::from(method))).cloned())
+}
+
 impl cljrs_gc::Trace for Protocol {
     fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
         {

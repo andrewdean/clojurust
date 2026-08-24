@@ -1,0 +1,7 @@
+(:graph :graph? :late-clauses :opt-clauses :optimizable-not-joins :optimizable-or-joins :parsed-q :rels :sources)
+(?e)
+true true false 10 true
+true true false
+true
+false
+true true true

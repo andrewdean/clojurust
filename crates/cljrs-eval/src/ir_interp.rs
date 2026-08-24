@@ -1080,7 +1080,7 @@ fn dispatch_sentinel_by_name(
                 ".{method} requires a target object"
             )));
         };
-        return cljrs_interp::apply::dispatch_method(method, target, rest);
+        return cljrs_interp::apply::dispatch_method(method, target, rest, env);
     }
     match name {
         "volatile!" => cljrs_interp::apply::eval_volatile(args),
