@@ -206,10 +206,26 @@ default, and it stays contained inside the store crate.
    sum/sum-dedupe/difference/renumbering/prod/project-distinct/
    many-tuples/seen-set iteration/timeout abort (conformance case 084).
    Runtime gained System/arraycopy (all array families, overlap-safe),
-   so join-tuples/conj-tuple run upstream-original. Next rung: the
-   optimizer tree (query/plan/resolve/execute) against the store's
-   IStore adapter; aggregate and cache vendor alongside resolve (their
-   only blockers).
+   so join-tuples/conj-tuple run upstream-original. Pipes + range-scan
+   natives rung done 2026-08-23: datalevin.inline and datalevin.pipe
+   vendored (the :cljrsh pipe keeps the public surface over volatile
+   state, single-threaded, honoring the :datalevin/end-scan sentinel;
+   additive new-sink/sink-seq/add-one helpers in both arms);
+   cljrs-datalog-store gained slice/rslice/count-range with
+   partial-datom open/closed bounds over all three indexes, exposed as
+   cljrs.dstore.native slice/rslice/count-range. Storage adapter rung
+   done 2026-08-23: datalevin.storage REPLACED (not vendored) with a
+   cljrsh-only implementation over cljrs.dstore.native — schema with
+   synthesized stable aids, the slice/size/head/filter families with
+   sentinel translation, the optimizer's physical operators
+   (ave-tuples, sampled variants, eav-scan-v with :pred/:fidx/:skip?
+   and card-many products, val-eq-scan-e/-filter-e), and the
+   search-tuples case-tree helpers; cardinality is exact under 16k
+   datoms, else the datom count (statistic only). Next rung: the db
+   port (datalevin.db protocols + DB record over datalevin.storage,
+   tx pipeline gated to native transact initially), then
+   join/rules -> resolve (+ aggregate/cache) -> graph/range/plan ->
+   execute/access -> the query facade.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl
