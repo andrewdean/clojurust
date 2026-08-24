@@ -173,9 +173,17 @@ default, and it stays contained inside the store crate.
    given :cljrsh arms (conformance case 082). Runtime gained
    unchecked-byte/short/int and variadic bit-and/or/xor. Reminder: the
    feature set includes :clj, so vendored gates must lead with a
-   :cljrsh arm; bare #?(:clj ...) still fires. Next rungs: parser.clj
-   (near-pure), then interface.clj/built-ins, then the optimizer tree
-   (query/plan/resolve/execute) against the store's IStore adapter.
+   :cljrsh arm; bare #?(:clj ...) still fires. Parser and interface rungs done
+   2026-08-23: datalevin.query-util, datalevin.parser (validation,
+   clause typing, rules, find-vars all verified), and
+   datalevin.interface (8 protocols) load and work; extend-type
+   accepts nil upstream and seqable? has a portable arm. built-ins
+   strategy: the portable predicate/aggregate halves vendor next, with
+   the contiguous fulltext/vector/idoc block (lines ~210-770) and its
+   query-fns entries gated to :clj until the db/storage adapters exist;
+   its ns requires on db/storage/idoc/embedding gate the same way.
+   Then the optimizer tree (query/plan/resolve/execute) against the
+   store's IStore adapter.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

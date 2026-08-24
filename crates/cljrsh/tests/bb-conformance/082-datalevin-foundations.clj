@@ -14,3 +14,10 @@
   (let [s1 (u/reservoir-sampling 100 5)
         s2 (u/reservoir-sampling 100 5)]
     (prn (= s1 s2) (count s1) (= s1 (sort s1)))))
+(require '[datalevin.parser :as dp] '[datalevin.interface])
+(let [pq (dp/parse-query '[:find ?n ?a :in $ ?min
+                           :where [?e :name ?n] [?e :age ?a] [(>= ?a ?min)]])]
+  (prn (mapv (comp str type) (:qwhere pq)))
+  (prn (dp/find-vars (:qfind pq)))
+  (prn (count (:qin pq))))
+(prn (some? (dp/parse-rules '[[(person ?e) [?e :person true]]])))

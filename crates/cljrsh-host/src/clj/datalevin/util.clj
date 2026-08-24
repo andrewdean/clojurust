@@ -70,14 +70,20 @@
     (.shutdownNow pool)
     (.awaitTermination pool 100 TimeUnit/MILLISECONDS)))
 
-(defn seqable?
-  ^Boolean [x]
-  (and (not (string? x))
-       (or (seq? x)
-           (instance? clojure.lang.Seqable x)
-           (nil? x)
-           (instance? Iterable x)
-           (instance? java.util.Map x))))
+#?(:cljrsh
+   (defn seqable?
+     [x]
+     (and (not (string? x))
+          (or (seq? x) (nil? x) (coll? x) (array? x))))
+   :clj
+   (defn seqable?
+     ^Boolean [x]
+     (and (not (string? x))
+          (or (seq? x)
+              (instance? clojure.lang.Seqable x)
+              (nil? x)
+              (instance? Iterable x)
+              (instance? java.util.Map x)))))
 
 (defmacro some-of
   ([] nil)

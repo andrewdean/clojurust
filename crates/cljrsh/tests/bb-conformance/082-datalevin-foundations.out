@@ -7,3 +7,7 @@ true
 [1 :name "Ivan"] false
 [{:k 1, :n "a"} {:k 2, :n "c"}]
 true 5 true
+["Pattern" "Pattern" "Predicate"]
+(?n ?a)
+2
+true

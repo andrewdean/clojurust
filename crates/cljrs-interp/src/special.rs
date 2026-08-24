@@ -2031,6 +2031,8 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
     }
     let type_sym = match &args[0].kind {
         FormKind::Symbol(s) => s.clone(),
+        // (extend-type nil ...) extends the nil dispatch tag, as on the JVM.
+        FormKind::Nil => "nil".to_string(),
         _ => {
             return Err(EvalError::Runtime(
                 "extend-type: first arg must be a type symbol".into(),

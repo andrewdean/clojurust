@@ -123,6 +123,15 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         include_str!("clj/datalevin/constants.clj"),
     ),
     ("datalevin.datom", include_str!("clj/datalevin/datom.clj")),
+    (
+        "datalevin.query-util",
+        include_str!("clj/datalevin/query_util.clj"),
+    ),
+    ("datalevin.parser", include_str!("clj/datalevin/parser.clj")),
+    (
+        "datalevin.interface",
+        include_str!("clj/datalevin/interface.clj"),
+    ),
 ];
 
 /// Register every native namespace and compat source into `globals`.
