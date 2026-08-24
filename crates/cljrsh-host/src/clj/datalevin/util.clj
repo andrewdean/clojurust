@@ -818,6 +818,12 @@
   (/ ^long (factorial n) ^long (factorial (- n r))))
 
 #_(def map+ map)
+#?(:cljrsh
+(defn map+
+  "Sequential on cljrs."
+  ([f coll] (mapv f coll))
+  ([f c1 c2] (mapv f c1 c2)))
+:clj
 (defn map+
   "parallel map using worker-thread-pool"
   ([f coll]
@@ -845,7 +851,7 @@
                             #(with-bindings bindings
                                (f e1 e2)))
                           c1 c2))]
-     (mapv #(.get ^Future %) futs))))
+     (mapv #(.get ^Future %) futs)))))
 
 (defn supports-virtual-threads?
   "Returns true when the running JVM is 21+ (Loom / virtual threads)."

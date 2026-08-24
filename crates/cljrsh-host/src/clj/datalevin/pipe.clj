@@ -158,20 +158,23 @@
 (defn produce [pipe] (-produce pipe))
 
 (defn add-batch
-  "Into a pipe, or into a non-pipe volatile sink; nil sink ignores."
+  "Into a pipe, a volatile sink, or a mutable-list sink; nil ignores."
   [x tuples]
   (cond
-    (pipe? x) (-add-batch x tuples)
-    (nil? x)  false
-    :else     (do (vswap! x into tuples) true)))
+    (pipe? x)     (-add-batch x tuples)
+    (nil? x)      false
+    (volatile? x) (do (vswap! x into tuples) true)
+    :else         (do (.addAll x (vec tuples)) true)))
 
 (defn add-one
-  "Add a single tuple to a pipe or a non-pipe volatile sink."
+  "Add a single tuple to a pipe, a volatile sink, or a mutable-list
+  sink."
   [x tuple]
   (cond
-    (pipe? x) (-add-batch x [tuple])
-    (nil? x)  false
-    :else     (do (vswap! x conj tuple) true)))
+    (pipe? x)     (-add-batch x [tuple])
+    (nil? x)      false
+    (volatile? x) (do (vswap! x conj tuple) true)
+    :else         (do (.add x tuple) true)))
 
 (defn drain-to
   [pipe sink]
@@ -185,9 +188,10 @@
 (defn total [pipe] (-total pipe))
 
 (defn batch-buffer
-  "A fresh batching buffer (no thread-local reuse on cljrs)."
+  "A fresh batching buffer (no thread-local reuse on cljrs). A mutable
+  list shim: vendored code drives it with .add/.size/.clear."
   []
-  (new-sink))
+  (java.util.ArrayList.))
 
 ;; Interop bridge: vendored code adds to pipes through the
 ;; java.util.Collection surface ((.add sink tuple)); interop method

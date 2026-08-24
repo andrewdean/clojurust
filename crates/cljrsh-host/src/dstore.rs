@@ -311,10 +311,11 @@ pub fn register(registry: &mut Registry) {
             |handle: Value| -> Result<Value, String> {
                 with_store(&handle, |store| {
                     let mut m = MapValue::empty();
-                    for (name, props) in store.attrs() {
+                    for (name, aid, props) in store.attrs_with_aids() {
                         let mut pm = MapValue::empty();
                         pm = pm.assoc(kw("cardinality-many"), Value::Bool(props.cardinality_many));
                         pm = pm.assoc(kw("ref"), Value::Bool(props.ref_type));
+                        pm = pm.assoc(kw("aid"), Value::Long(aid as i64));
                         m = m.assoc(Value::keyword(Keyword::parse(&name)), Value::Map(pm));
                     }
                     Ok(Value::Map(m))

@@ -62,19 +62,18 @@
 
 (defn schema
   "attr -> {:db/aid n, :db/cardinality ..., :db/valueType ...}. Aids are
-  synthesized as positions in sorted attr order: stable per store state,
-  used only for grouping and ordering."
+  the native index aids, so aid order matches eav/ave iteration order
+  within an entity (pull's merge join and eav-scan-v grouping rely on
+  this)."
   [store]
-  (let [as (sort-by (comp str key) (native-attrs store))]
-    (into {}
-          (map-indexed
-            (fn [i [a props]]
-              [a (cond-> {:db/aid i
-                          :db/cardinality (if (:cardinality-many props)
-                                            :db.cardinality/many
-                                            :db.cardinality/one)}
-                   (:ref props) (assoc :db/valueType :db.type/ref))]))
-          as)))
+  (into {}
+        (map (fn [[a props]]
+               [a (cond-> {:db/aid (:aid props)
+                           :db/cardinality (if (:cardinality-many props)
+                                             :db.cardinality/many
+                                             :db.cardinality/one)}
+                    (:ref props) (assoc :db/valueType :db.type/ref))]))
+        (native-attrs store)))
 
 (defn rschema
   "property -> #{attrs}."

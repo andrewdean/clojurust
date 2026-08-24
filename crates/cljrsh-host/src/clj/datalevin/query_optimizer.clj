@@ -2556,13 +2556,20 @@
                            (sort-by (fn [{:keys [attr]}] ((aid db) attr))))
               attrs   (mapv :attr all)
               vars    (mapv attr-var all)
-              skips   (cond-> (set (sequence
-                                     (comp (map (fn [a v]
+              skips   (cond-> (set #?(:cljrsh
+                                       (keep (fn [[a v]]
                                                (when (or (= v '_)
                                                          (qu/placeholder? v))
-                                                 a)))
-                                        (remove nil?))
-                                     attrs vars))
+                                                 a))
+                                             (map vector attrs vars))
+                                       :clj
+                                       (sequence
+                                         (comp (map (fn [a v]
+                                                   (when (or (= v '_)
+                                                             (qu/placeholder? v))
+                                                     a)))
+                                            (remove nil?))
+                                         attrs vars)))
                         no-var? (conj attr))
               pred-options
               (mapv (fn [v clause]
@@ -2573,12 +2580,17 @@
                     vars all)
               attrs-v      (attrs-vec attrs pred-options skips (repeat nil))
               cols         (into (:cols init)
-                                 (sequence
-                                   (comp
-                                     (map (fn [a v]
-                                            (when-not (skips a) #{a v})))
-                                     (remove nil?))
-                                   attrs vars))
+                                 #?(:cljrsh
+                                    (keep (fn [[a v]]
+                                            (when-not (skips a) #{a v}))
+                                          (map vector attrs vars))
+                                    :clj
+                                    (sequence
+                                      (comp
+                                        (map (fn [a v]
+                                               (when-not (skips a) #{a v})))
+                                        (remove nil?))
+                                      attrs vars)))
               strata       (conj (:strata init) (set vars))
               ires         (:result init)
               isp          (:sample init)

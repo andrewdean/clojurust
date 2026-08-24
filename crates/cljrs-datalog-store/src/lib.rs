@@ -265,14 +265,24 @@ impl Store {
     /// Every declared attribute with its properties.
     #[must_use]
     pub fn attrs(&self) -> Vec<(String, AttrProps)> {
-        let mut out: Vec<(String, AttrProps)> = self
+        self.attrs_with_aids()
+            .into_iter()
+            .map(|(name, _aid, props)| (name, props))
+            .collect()
+    }
+
+    /// Every declared attribute with its index aid and properties,
+    /// ordered by aid — the eav/ave iteration order within an entity.
+    #[must_use]
+    pub fn attrs_with_aids(&self) -> Vec<(String, u32, AttrProps)> {
+        let mut out: Vec<(String, u32, AttrProps)> = self
             .attrs
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .map(|(name, (_aid, props))| (name.clone(), *props))
+            .map(|(name, (aid, props))| (name.clone(), *aid, *props))
             .collect();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.sort_by_key(|(_, aid, _)| *aid);
         out
     }
 

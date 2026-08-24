@@ -581,6 +581,22 @@
 ;; (instance? Object x), (make-array Object n).
 (def Object 'java.lang.Object)
 
+(defn eduction
+  "Returns a sequence application of the transducers to the items in
+  coll. (Approximation: eagerly realizable sequence, not a reducible
+  view.)"
+  [& xforms-and-coll]
+  (let [coll (last xforms-and-coll)
+        xfs  (butlast xforms-and-coll)]
+    (if (seq xfs)
+      (sequence (apply comp xfs) coll)
+      (sequence coll))))
+
+(defn ->Eduction
+  "Eduction constructor interop: an eagerly realizable sequence view."
+  [xform coll]
+  (sequence xform coll))
+
 (defmacro while
   "Repeatedly executes body while test expression is true."
   [test & body]
@@ -1031,7 +1047,10 @@
        (seq acc)))))
 
 (defn reduce-kv [f init m]
-  (reduce (fn [acc kv] (f acc (first kv) (second kv))) init m))
+  (if (vector? m)
+    (reduce (fn [acc iv] (f acc (nth iv 0) (nth iv 1)))
+            init (map-indexed vector m))
+    (reduce (fn [acc kv] (f acc (first kv) (second kv))) init m)))
 
 (defn update
   "Returns a new structure with the value at key updated by applying f to

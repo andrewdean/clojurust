@@ -1576,6 +1576,8 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("Math/abs", Arity::Fixed(1), builtin_abs),
         ("Math/floor", Arity::Fixed(1), builtin_floor),
         ("Math/ceil", Arity::Fixed(1), builtin_ceil),
+        ("Math/addExact", Arity::Fixed(2), builtin_math_add_exact),
+        ("Math/multiplyExact", Arity::Fixed(2), builtin_math_multiply_exact),
         ("Math/round", Arity::Fixed(1), builtin_round),
         ("Math/sqrt", Arity::Fixed(1), builtin_sqrt),
         ("Math/pow", Arity::Fixed(2), builtin_pow),
@@ -1906,6 +1908,9 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
     // JVM wrapper-class constant statics (portable .cljc code reads these).
     for (name, value) in [
         ("Long/MAX_VALUE", Value::Long(i64::MAX)),
+        ("Long/MIN_VALUE", Value::Long(i64::MIN)),
+        ("Long/SIZE", Value::Long(64)),
+        ("Integer/SIZE", Value::Long(32)),
         // Locale constants: opaque keywords — locale-parameterized string
         // methods ignore them (Rust's Unicode case mapping is unconditional).
         ("java.util.Locale/US", Value::keyword(Keyword::parse("cljrs.locale/US"))),
@@ -5342,6 +5347,32 @@ fn builtin_make_array(args: &[Value]) -> ValueResult<Value> {
     ]))))
 }
 
+/// `(Math/addExact a b)` — checked long addition; raises on overflow.
+fn builtin_math_add_exact(args: &[Value]) -> ValueResult<Value> {
+    match (&args[0], &args[1]) {
+        (Value::Long(a), Value::Long(b)) => a
+            .checked_add(*b)
+            .map(Value::Long)
+            .ok_or_else(|| ValueError::Other("long overflow".to_string())),
+        _ => Err(ValueError::Other(
+            "Math/addExact requires two integers".to_string(),
+        )),
+    }
+}
+
+/// `(Math/multiplyExact a b)` — checked long multiplication.
+fn builtin_math_multiply_exact(args: &[Value]) -> ValueResult<Value> {
+    match (&args[0], &args[1]) {
+        (Value::Long(a), Value::Long(b)) => a
+            .checked_mul(*b)
+            .map(Value::Long)
+            .ok_or_else(|| ValueError::Other("long overflow".to_string())),
+        _ => Err(ValueError::Other(
+            "Math/multiplyExact requires two integers".to_string(),
+        )),
+    }
+}
+
 /// `(aclone arr)` — clone an array.
 fn builtin_aclone(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
@@ -5988,6 +6019,12 @@ fn assoc_in_impl(m: Value, keys: &[Value], val: Value) -> ValueResult<Value> {
     let inner = match base {
         Value::Map(map) => map.get(k).unwrap_or(Value::Nil),
         Value::TypeInstance(ti) => ti.get().fields.get(k).unwrap_or(Value::Nil),
+        Value::Vector(v) => match k {
+            Value::Long(i) if *i >= 0 => {
+                v.get().nth(*i as usize).cloned().unwrap_or(Value::Nil)
+            }
+            _ => Value::Nil,
+        },
         _ => Value::Nil,
     };
     let updated = assoc_in_impl(inner, &keys[1..], val)?;
@@ -5997,6 +6034,25 @@ fn assoc_in_impl(m: Value, keys: &[Value], val: Value) -> ValueResult<Value> {
             type_tag: ti.get().type_tag.clone(),
             fields: ti.get().fields.assoc(k.clone(), updated),
         })),
+        // Vectors assoc by index (appending at len, like clojure assoc).
+        Value::Vector(v) => match k {
+            Value::Long(i) if *i >= 0 && (*i as usize) <= v.get().count() => {
+                let idx = *i as usize;
+                let items: Vec<Value> = v.get().iter().cloned().collect();
+                let mut items = items;
+                if idx == items.len() {
+                    items.push(updated);
+                } else {
+                    items[idx] = updated;
+                }
+                Value::Vector(GcPtr::new(PersistentVector::from_iter(items)))
+            }
+            _ => {
+                return Err(ValueError::Other(format!(
+                    "assoc-in: vector index {k} out of bounds"
+                )));
+            }
+        },
         _ => Value::Map(MapValue::empty().assoc(k.clone(), updated)),
     };
     Ok(match meta {
@@ -6261,7 +6317,16 @@ fn seq_first_rest(v: &Value) -> ValueResult<Option<(Value, Value)>> {
 
 fn builtin_select_keys(args: &[Value]) -> ValueResult<Value> {
     let mut map = PersistentHashMap::empty();
-    match &args[0] {
+    match args[0].unwrap_meta() {
+        // Records select into a plain map, like on the JVM.
+        Value::TypeInstance(ti) => {
+            for k in ValueIter::new(args[1].clone()) {
+                if let Some(v) = ti.get().fields.get(&k) {
+                    map = map.assoc(k.clone(), v.clone());
+                }
+            }
+            Ok(Value::Map(MapValue::Hash(GcPtr::new(map))))
+        }
         Value::Map(src) => {
             if matches!(
                 &args[1],

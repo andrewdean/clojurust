@@ -172,6 +172,31 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         include_str!("clj/datalevin/query_optimizer.clj"),
     ),
     (
+        "datalevin.pull-parser",
+        include_str!("clj/datalevin/pull_parser.clj"),
+    ),
+    (
+        "datalevin.pull-api",
+        include_str!("clj/datalevin/pull_api.clj"),
+    ),
+    (
+        "datalevin.query.access.ave",
+        include_str!("clj/datalevin/query/access/ave.clj"),
+    ),
+    (
+        "datalevin.query.access.function",
+        include_str!("clj/datalevin/query/access/function.clj"),
+    ),
+    (
+        "datalevin.query.execute",
+        include_str!("clj/datalevin/query/execute.clj"),
+    ),
+    (
+        "datalevin.query.cache",
+        include_str!("clj/datalevin/query/cache.clj"),
+    ),
+    ("datalevin.query", include_str!("clj/datalevin/query.clj")),
+    (
         "datalevin.storage",
         include_str!("clj/datalevin/storage.clj"),
     ),

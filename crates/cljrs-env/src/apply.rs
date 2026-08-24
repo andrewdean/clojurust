@@ -287,6 +287,14 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                 None => Ok(Value::Nil),
             }
         }
+        Value::TransientMap(m) => match args.first() {
+            Some(k) => Ok(m
+                .get()
+                .find(k)
+                .map(|(_, v)| v)
+                .unwrap_or(args.get(1).cloned().unwrap_or(Value::Nil))),
+            None => Ok(Value::Nil),
+        },
         // (vector idx) → nth (IFn on vectors).
         Value::Vector(v) => match args.first().map(|a| a.unwrap_meta()) {
             Some(Value::Long(i)) if *i >= 0 => {
