@@ -12,6 +12,7 @@ use cljrs_env::env::GlobalEnv;
 use cljrs_interop::Registry;
 
 pub mod csv;
+pub mod dstore;
 pub mod fs;
 pub mod hash;
 pub mod http;
@@ -26,7 +27,10 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     // require; the babashka.* entries below are compatibility shims over
     // them).
     ("cljrsh.process", include_str!("clj/cljrsh/process.cljrs")),
-    ("borkdude.dynaload", include_str!("clj/borkdude/dynaload.cljrs")),
+    (
+        "borkdude.dynaload",
+        include_str!("clj/borkdude/dynaload.cljrs"),
+    ),
     ("cljrsh.wait", include_str!("clj/cljrsh/wait.cljrs")),
     ("cljrsh.http", include_str!("clj/cljrsh/http.cljrs")),
     ("cljrsh.datalog", include_str!("clj/cljrsh/datalog.cljrs")),
@@ -39,21 +43,31 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         include_str!("clj/babashka/cli_internal.cljc"),
     ),
     ("babashka.fs", include_str!("clj/babashka/fs.cljrs")),
-    ("babashka.process", include_str!("clj/babashka/process.cljrs")),
+    (
+        "babashka.process",
+        include_str!("clj/babashka/process.cljrs"),
+    ),
     (
         "babashka.http-client",
         include_str!("clj/babashka/http_client.cljrs"),
     ),
     ("babashka.wait", include_str!("clj/babashka/wait.cljrs")),
-    ("babashka.terminal", include_str!("clj/babashka/terminal.cljrs")),
+    (
+        "babashka.terminal",
+        include_str!("clj/babashka/terminal.cljrs"),
+    ),
     ("cheshire.core", include_str!("clj/cheshire/core.cljrs")),
     ("clj-yaml.core", include_str!("clj/clj_yaml/core.cljrs")),
-    ("clojure.data.csv", include_str!("clj/clojure/data/csv.cljrs")),
+    (
+        "clojure.data.csv",
+        include_str!("clj/clojure/data/csv.cljrs"),
+    ),
     (
         "clojure.java.shell",
         include_str!("clj/clojure/java/shell.cljrs"),
     ),
     ("clojure.java.io", include_str!("clj/clojure/java/io.cljrs")),
+    ("cljrs.dstore", include_str!("clj/cljrs/dstore.cljrs")),
     ("tf", include_str!("clj/tf.cljrs")),
     ("kustomize", include_str!("clj/kustomize.cljrs")),
     // Vendored from datascript 1.8.1 (EPL-1.0, github.com/tonsky/datascript)
@@ -70,9 +84,15 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
     ),
     ("datascript.util", include_str!("clj/datascript/util.cljc")),
     ("datascript.lru", include_str!("clj/datascript/lru.cljc")),
-    ("datascript.inline", include_str!("clj/datascript/inline.clj")),
+    (
+        "datascript.inline",
+        include_str!("clj/datascript/inline.clj"),
+    ),
     ("datascript.db", include_str!("clj/datascript/db.cljc")),
-    ("datascript.parser", include_str!("clj/datascript/parser.cljc")),
+    (
+        "datascript.parser",
+        include_str!("clj/datascript/parser.cljc"),
+    ),
     (
         "datascript.built-ins",
         include_str!("clj/datascript/built_ins.cljc"),
@@ -89,7 +109,10 @@ const COMPAT_SOURCES: &[(&str, &str)] = &[
         "datascript.impl.entity",
         include_str!("clj/datascript/impl/entity.cljc"),
     ),
-    ("datascript.query", include_str!("clj/datascript/query.cljc")),
+    (
+        "datascript.query",
+        include_str!("clj/datascript/query.cljc"),
+    ),
 ];
 
 /// Register every native namespace and compat source into `globals`.
@@ -98,7 +121,17 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     if globals.is_loaded("cljrsh.fs") {
         return;
     }
-    for ns in ["cljrsh.fs", "cljrsh.json", "cljrsh.io", "cljrsh.http", "cljrsh.yaml", "cljrsh.csv", "cljrsh.term", "cljrsh.hash"] {
+    for ns in [
+        "cljrsh.fs",
+        "cljrsh.json",
+        "cljrsh.io",
+        "cljrsh.http",
+        "cljrsh.yaml",
+        "cljrsh.csv",
+        "cljrsh.term",
+        "cljrsh.hash",
+        "cljrs.dstore.native",
+    ] {
         globals.get_or_create_ns(ns);
         globals.refer_all(ns, "clojure.core");
     }
@@ -111,6 +144,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     csv::register(&mut registry);
     term::register(&mut registry);
     hash::register(&mut registry);
+    dstore::register(&mut registry);
     globals.mark_loaded("cljrsh.fs");
     globals.mark_loaded("cljrsh.json");
     globals.mark_loaded("cljrsh.io");
@@ -120,6 +154,7 @@ pub fn init(globals: &Arc<GlobalEnv>) {
     globals.mark_loaded("cljrsh.csv");
     globals.mark_loaded("cljrsh.term");
     globals.mark_loaded("cljrsh.hash");
+    globals.mark_loaded("cljrs.dstore.native");
 
     for (ns, src) in COMPAT_SOURCES {
         globals.register_builtin_source(ns, src);

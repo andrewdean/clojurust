@@ -49,6 +49,9 @@ pub struct AttrProps {
     /// Cardinality-many keeps every asserted value; cardinality-one (the
     /// default) replaces the previous value on assert.
     pub cardinality_many: bool,
+    /// Ref-typed attributes index their entity-id values in `vae`; the
+    /// host layer coerces integer values to [`StoreValue::Ref`] for them.
+    pub ref_type: bool,
 }
 
 #[derive(Debug)]
@@ -84,6 +87,7 @@ const META_NEXT_AID: &[u8] = b"next-aid";
 const META_NEXT_GIANT: &[u8] = b"next-giant";
 
 const FLAG_CARD_MANY: u8 = 0x01;
+const FLAG_REF: u8 = 0x02;
 
 /// The triple store.
 pub struct Store {
@@ -99,6 +103,12 @@ pub struct Store {
     attrs: RwLock<HashMap<String, (u32, AttrProps)>>,
     /// aid → attr name for decoding index keys.
     attr_names: RwLock<HashMap<u32, String>>,
+}
+
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Store").finish_non_exhaustive()
+    }
 }
 
 impl Store {
@@ -118,6 +128,9 @@ impl Store {
     ///
     /// Returns the underlying storage error.
     pub fn open_with_flags(path: &Path, flags: EnvFlags) -> Result<Store> {
+        // LMDB requires the environment directory to exist.
+        std::fs::create_dir_all(path)
+            .map_err(|_io| StoreError::Codec("cannot create store dir"))?;
         let env = Env::options()
             .map_size(1 << 30)
             .max_dbs(16)
@@ -151,6 +164,7 @@ impl Store {
                 let flags = *v.get(4).ok_or(StoreError::Codec("short schema entry"))?;
                 let props = AttrProps {
                     cardinality_many: flags & FLAG_CARD_MANY != 0,
+                    ref_type: flags & FLAG_REF != 0,
                 };
                 attrs.insert(name.clone(), (aid, props));
                 attr_names.insert(aid, name);
@@ -213,11 +227,14 @@ impl Store {
             }
         };
         let mut rec = aid.to_be_bytes().to_vec();
-        rec.push(if props.cardinality_many {
-            FLAG_CARD_MANY
-        } else {
-            0
-        });
+        let mut flag_byte = 0;
+        if props.cardinality_many {
+            flag_byte |= FLAG_CARD_MANY;
+        }
+        if props.ref_type {
+            flag_byte |= FLAG_REF;
+        }
+        rec.push(flag_byte);
         txn.put(self.schema, name.as_bytes(), &rec)?;
         self.attrs
             .write()
@@ -243,6 +260,39 @@ impl Store {
         let next = current + 1;
         txn.put(self.meta, key, &next.to_be_bytes())?;
         Ok(next)
+    }
+
+    /// Every declared attribute with its properties.
+    #[must_use]
+    pub fn attrs(&self) -> Vec<(String, AttrProps)> {
+        let mut out: Vec<(String, AttrProps)> = self
+            .attrs
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(name, (_aid, props))| (name.clone(), *props))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// The smallest entity id >= `from` that has any datom, or None.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying storage error.
+    pub fn next_eid(&self, from: u64) -> Result<Option<u64>> {
+        let ro = self.env.read_txn()?;
+        let mut cursor = ro.cursor(self.eav)?;
+        match cursor.set_range(&from.to_be_bytes())? {
+            None => Ok(None),
+            Some((k, _)) => Ok(Some(u64::from_be_bytes(
+                k.get(..8)
+                    .ok_or(StoreError::Codec("short eav key"))?
+                    .try_into()
+                    .expect("length checked"),
+            ))),
+        }
     }
 
     /// The largest entity id ever asserted.

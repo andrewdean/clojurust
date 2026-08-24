@@ -23,6 +23,7 @@ fn search_covers_the_pattern_case_tree() {
             "friend",
             AttrProps {
                 cardinality_many: true,
+                ref_type: false,
             },
         )
         .expect("schema");
@@ -109,6 +110,7 @@ fn cardinality_one_replaces_and_many_accumulates() {
             "alias",
             AttrProps {
                 cardinality_many: true,
+                ref_type: false,
             },
         )
         .expect("schema");
@@ -260,6 +262,7 @@ fn store_persists_across_reopen() {
                 "tag",
                 AttrProps {
                     cardinality_many: true,
+                    ref_type: false,
                 },
             )
             .expect("schema");
@@ -271,7 +274,8 @@ fn store_persists_across_reopen() {
     assert_eq!(
         store.attr_props("tag"),
         Some(AttrProps {
-            cardinality_many: true
+            cardinality_many: true,
+            ref_type: false,
         }),
         "schema must survive reopen"
     );
@@ -310,4 +314,29 @@ fn mixed_value_types_sort_within_their_type() {
         .collect();
     // Longs (-5 < 3), then doubles (-0.5 < 2.5), then strings.
     assert_eq!(order, [1, 2, 3, 4, 5, 6]);
+}
+
+#[test]
+fn ref_typed_attrs_and_next_eid() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path()).expect("open");
+    store
+        .set_attr(
+            "boss",
+            AttrProps {
+                cardinality_many: false,
+                ref_type: true,
+            },
+        )
+        .expect("schema");
+    store
+        .transact(&[add(3, "boss", StoreValue::Ref(9)), add(7, "name", s("x"))])
+        .expect("tx");
+    assert!(store.attr_props("boss").expect("props").ref_type);
+    let listed = store.attrs();
+    assert!(listed.iter().any(|(n, p)| n == "boss" && p.ref_type));
+    assert_eq!(store.next_eid(0).expect("next"), Some(3));
+    assert_eq!(store.next_eid(3).expect("next"), Some(3));
+    assert_eq!(store.next_eid(4).expect("next"), Some(7));
+    assert_eq!(store.next_eid(8).expect("next"), None);
 }

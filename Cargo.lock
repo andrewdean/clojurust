@@ -1843,6 +1843,7 @@ name = "cljrsh-host"
 version = "0.1.0"
 dependencies = [
  "cljrs-builtins",
+ "cljrs-datalog-store",
  "cljrs-env",
  "cljrs-gc",
  "cljrs-interop",

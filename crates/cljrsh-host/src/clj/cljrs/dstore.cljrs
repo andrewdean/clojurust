@@ -1,0 +1,103 @@
+;; cljrs.dstore — durable datalog on the native triple store.
+;;
+;; DurableDB satisfies datascript's db protocols, so the vendored query
+;; engine (q, pull) runs unmodified against disk. Writes go through the
+;; native transact (schema-aware, cardinality enforced, refs reverse-
+;; indexed); reads translate the engine's pattern case tree onto the
+;; store's eav/ave/vae indexes.
+(ns cljrs.dstore
+  (:require [cljrs.dstore.native :as native]
+            [datascript.db :as db]
+            [datascript.lru :as lru]
+            [datascript.query :as dq]
+            [datascript.pull-api :as dpa]))
+
+(defn- ->datom [[e a v]]
+  (db/datom e a v))
+
+(defn- search* [handle e a v]
+  (map ->datom (native/search handle e a v)))
+
+;; pull-patterns/pull-attrs are the parse caches pull-api expects on
+;; every db (it reads them by field).
+(defrecord DurableDB [handle pull-patterns pull-attrs]
+  db/IDB
+  (-schema [_]
+    (reduce-kv
+      (fn [m a props]
+        (assoc m a
+          (cond-> {:db/cardinality (if (:cardinality-many props)
+                                     :db.cardinality/many
+                                     :db.cardinality/one)}
+            (:ref props) (assoc :db/valueType :db.type/ref))))
+      {}
+      (native/attrs handle)))
+  (-attrs-by [_ property]
+    (let [attrs (native/attrs handle)]
+      (case property
+        :db.cardinality/many
+        (set (keep (fn [[a props]] (when (:cardinality-many props) a)) attrs))
+        :db.type/ref
+        (set (keep (fn [[a props]] (when (:ref props) a)) attrs))
+        #{})))
+
+  db/ISearch
+  (-search [_ pattern]
+    (let [[e a v] pattern]
+      (search* handle e a v)))
+
+  db/IIndexAccess
+  (-datoms [_ index c0 c1 c2 _c3]
+    (case index
+      :eavt (search* handle c0 c1 c2)
+      :aevt (search* handle c1 c0 c2)
+      :avet (search* handle c2 c0 c1)
+      (throw (ex-info "unsupported index" {:index index}))))
+  (-seek-datoms [_ index c0 _c1 _c2 _c3]
+    (when-not (= index :eavt)
+      (throw (ex-info "seek supports :eavt only" {:index index})))
+    (letfn [(walk [from]
+              (lazy-seq
+                (when-some [e (native/next-eid handle from)]
+                  (concat (search* handle e nil nil)
+                          (walk (inc e))))))]
+      (walk (or c0 0))))
+  (-rseek-datoms [_ _index _c0 _c1 _c2 _c3]
+    (throw (ex-info "rseek is not supported on a durable db" {})))
+  (-index-range [_ _attr _start _end]
+    (throw (ex-info "index-range is not supported on a durable db" {}))))
+
+(defn open
+  "Open (creating if needed) a durable db in the directory at PATH."
+  [path]
+  (->DurableDB (native/open (str path)) (lru/cache 100) (lru/cache 100)))
+
+(defn set-attr!
+  "Declare attribute properties: {:cardinality-many bool, :ref bool}."
+  [ddb attr props]
+  (native/set-attr! (:handle ddb) attr props))
+
+(defn transact!
+  "Apply OPS, each [:add e attr v] or [:retract e attr v]. Returns the
+  op count. Cardinality-one adds replace; tempids and maps are not
+  resolved here."
+  [ddb ops]
+  (native/transact! (:handle ddb) (vec ops)))
+
+(defn count-datoms
+  "O(log n) count of datoms matching the e/a/v pattern (nil = wildcard)."
+  [ddb e a v]
+  (native/count (:handle ddb) e a v))
+
+(defn sample
+  "Up to N datoms rank-sampled across ATTR's value range."
+  [ddb attr n]
+  (map ->datom (native/sample (:handle ddb) attr n)))
+
+(defn max-eid [ddb]
+  (native/max-eid (:handle ddb)))
+
+;; The vendored engine entry points work on a DurableDB directly; these
+;; aliases keep call sites in one namespace.
+(def q dq/q)
+(def pull dpa/pull)

@@ -469,8 +469,7 @@ impl<'e> RoTxn<'e> {
             Some((found, _)) => {
                 let found = found.to_vec();
                 drop(cursor);
-                self.key_rank(dbi, &found)?
-                    .ok_or(Error(sys::MDB_NOTFOUND))
+                self.key_rank(dbi, &found)?.ok_or(Error(sys::MDB_NOTFOUND))
             }
         }
     }

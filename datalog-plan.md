@@ -153,6 +153,17 @@ default, and it stays contained inside the store crate.
    Ten tests. Remaining for phase 4 wiring: the exact IStore-shaped
    surface the ported Clojure calls (thin adapter over this API) and
    giant garbage collection.
+   **Native boundary wired 2026-08-23**: `cljrs.dstore.native` exposes
+   the store to Clojure (attr-aware value conversion, refs coerced for
+   ref-typed attrs, dual long/ref search merge), and `cljrs.dstore`'s
+   DurableDB satisfies datascript's IDB/ISearch/IIndexAccess, so the
+   vendored engine runs q and pull against disk unmodified: joins,
+   predicates, vae ref-joins, nested pull, O(log n) counts, and reopen
+   persistence (conformance case 080). dlmdb's exported symbols are
+   compile-time prefixed (dlmdb_*) so it links beside the stock LMDB
+   already in cljrsh's tree via heed. The datalevin optimizer port now
+   proceeds against a live durable target; -rseek/-index-range and the
+   entity facade remain unsupported on DurableDB until then.
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

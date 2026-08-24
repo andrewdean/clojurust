@@ -87,28 +87,39 @@ pub const MDB_SET_KEY: c_int = 16;
 pub const MDB_SET_RANGE: c_int = 17;
 
 unsafe extern "C" {
+    #[link_name = "dlmdb_env_create"]
     pub fn mdb_env_create(env: *mut *mut MDB_env) -> c_int;
+    #[link_name = "dlmdb_env_open"]
     pub fn mdb_env_open(
         env: *mut MDB_env,
         path: *const c_char,
         flags: c_uint,
         mode: c_uint,
     ) -> c_int;
+    #[link_name = "dlmdb_env_close"]
     pub fn mdb_env_close(env: *mut MDB_env);
+    #[link_name = "dlmdb_env_set_mapsize"]
     pub fn mdb_env_set_mapsize(env: *mut MDB_env, size: usize) -> c_int;
+    #[link_name = "dlmdb_env_set_maxdbs"]
     pub fn mdb_env_set_maxdbs(env: *mut MDB_env, dbs: MDB_dbi) -> c_int;
+    #[link_name = "dlmdb_env_sync"]
     pub fn mdb_env_sync(env: *mut MDB_env, force: c_int) -> c_int;
+    #[link_name = "dlmdb_strerror"]
     pub fn mdb_strerror(err: c_int) -> *const c_char;
 
+    #[link_name = "dlmdb_txn_begin"]
     pub fn mdb_txn_begin(
         env: *mut MDB_env,
         parent: *mut MDB_txn,
         flags: c_uint,
         txn: *mut *mut MDB_txn,
     ) -> c_int;
+    #[link_name = "dlmdb_txn_commit"]
     pub fn mdb_txn_commit(txn: *mut MDB_txn) -> c_int;
+    #[link_name = "dlmdb_txn_abort"]
     pub fn mdb_txn_abort(txn: *mut MDB_txn);
 
+    #[link_name = "dlmdb_dbi_open"]
     pub fn mdb_dbi_open(
         txn: *mut MDB_txn,
         name: *const c_char,
@@ -116,12 +127,14 @@ unsafe extern "C" {
         dbi: *mut MDB_dbi,
     ) -> c_int;
 
+    #[link_name = "dlmdb_get"]
     pub fn mdb_get(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
         key: *const MDB_val,
         data: *mut MDB_val,
     ) -> c_int;
+    #[link_name = "dlmdb_put"]
     pub fn mdb_put(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
@@ -129,26 +142,34 @@ unsafe extern "C" {
         data: *mut MDB_val,
         flags: c_uint,
     ) -> c_int;
+    #[link_name = "dlmdb_del"]
     pub fn mdb_del(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
         key: *const MDB_val,
         data: *const MDB_val,
     ) -> c_int;
+    #[link_name = "dlmdb_cmp"]
     pub fn mdb_cmp(txn: *mut MDB_txn, dbi: MDB_dbi, a: *const MDB_val, b: *const MDB_val) -> c_int;
 
+    #[link_name = "dlmdb_cursor_open"]
     pub fn mdb_cursor_open(txn: *mut MDB_txn, dbi: MDB_dbi, cursor: *mut *mut MDB_cursor) -> c_int;
+    #[link_name = "dlmdb_cursor_close"]
     pub fn mdb_cursor_close(cursor: *mut MDB_cursor);
+    #[link_name = "dlmdb_cursor_get"]
     pub fn mdb_cursor_get(
         cursor: *mut MDB_cursor,
         key: *mut MDB_val,
         data: *mut MDB_val,
         op: c_int,
     ) -> c_int;
+    #[link_name = "dlmdb_cursor_count"]
     pub fn mdb_cursor_count(cursor: *mut MDB_cursor, countp: *mut usize) -> c_int;
 
     // ── dlmdb counted-database extensions ─────────────────────────────────────
+    #[link_name = "dlmdb_count_all"]
     pub fn mdb_count_all(txn: *mut MDB_txn, dbi: MDB_dbi, flags: c_uint, out: *mut u64) -> c_int;
+    #[link_name = "dlmdb_count_range"]
     pub fn mdb_count_range(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
@@ -157,6 +178,7 @@ unsafe extern "C" {
         flags: c_uint,
         out: *mut u64,
     ) -> c_int;
+    #[link_name = "dlmdb_range_count_keys"]
     pub fn mdb_range_count_keys(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
@@ -165,6 +187,7 @@ unsafe extern "C" {
         flags: c_uint,
         out: *mut u64,
     ) -> c_int;
+    #[link_name = "dlmdb_get_rank"]
     pub fn mdb_get_rank(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
@@ -172,6 +195,7 @@ unsafe extern "C" {
         key: *mut MDB_val,
         data: *mut MDB_val,
     ) -> c_int;
+    #[link_name = "dlmdb_get_key_rank"]
     pub fn mdb_get_key_rank(
         txn: *mut MDB_txn,
         dbi: MDB_dbi,
