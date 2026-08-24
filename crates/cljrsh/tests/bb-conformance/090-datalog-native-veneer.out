@@ -1,0 +1,11 @@
+(["x"] ["y"])
+"sqlite"
+{-2 2} 9
+#{["Ivan" 20] ["Oleg" 40] ["Petr" 30]}
+#{["Oleg" "Ivan"] ["Oleg" "Petr"] ["Petr" "Ivan"]}
+{:friend [{:name "Ivan"} {:name "Petr"}], :name "Oleg"}
+{:db/id 1, :name "Ivan", :age 20}
+nil
+#{[2 1] [3 1] [3 2]}
+:admin
+"Oleg"

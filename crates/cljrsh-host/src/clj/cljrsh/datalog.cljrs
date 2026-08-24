@@ -1,62 +1,41 @@
 ;; cljrsh.datalog — Datomic-flavored Datalog for scripts.
 ;;
-;; Three tiers:
+;; Everything runs on the native engines; there is no pod and nothing
+;; is fetched:
 ;;
 ;;   - `q` over plain collections (vectors of tuples, maps via `facts`)
-;;     runs on the NATIVE engine (vendored datascript on cljrs): no pod,
-;;     no network, nothing fetched.
-;;   - `q` and `pull` over a durable `cljrs.dstore` db run natively too;
-;;     open one with cljrs.dstore/open.
-;;   - `conn`/`transact!`/`db`: the datalevin pod's durable store, kept
-;;     for scripts already using it (fetched from the pod registry on
-;;     first use, cached under ~/.cache/cljrsh). `q` falls back to the
-;;     pod only when an input is a pod database value.
+;;     and over in-memory / `cljrs.dstore` dbs runs on the vendored
+;;     datascript engine.
+;;   - `conn`/`transact!`/`db`/`q`/`pull` over a durable datalevin db
+;;     run on the vendored datalevin engine against the native LMDB
+;;     store (cost-based planner included).
+;;
+;; The native durable format is cljrs-datalog-store's own; databases
+;; created by the retired datalevin pod are a different on-disk format
+;; and need a re-import (q the old data out, transact! it in).
 (ns cljrsh.datalog
-  (:require [cljrsh.pods]
+  (:require [datalevin.db :as ddb]
+            [datalevin.datom :as dd]
+            [datalevin.pull-api :as dpa]
+            [datalevin.query :as dq]
+            [datalevin.storage :as dst]
+            [datalevin.util :refer [raise]]
             [datascript.db]
             [datascript.query]))
 
-(def ^:private pod-version "1.0.2")
-
-(defonce ^:private pod
-  (delay
-    (cljrsh.pods/load-pod 'huahaiy/datalevin pod-version)
-    ;; The pod returns Datom values under a custom transit tag; read them
-    ;; as [e a v] vectors. (The handler registry lives in the babashka.pods
-    ;; compat ns because the native transit decoder consults that var.)
-    (require 'babashka.pods 'pod.huahaiy.datalevin)
-    ((resolve 'babashka.pods/add-transit-read-handler!) "datalevin/Datom" vec)
-    true))
-
-(defn- pod-fn [name*]
-  (force pod)
-  (or (resolve (symbol "pod.huahaiy.datalevin" name*))
-      (throw (ex-info (str "datalevin pod does not expose " name*) {:fn name*}))))
-
-(defn- native-input?
-  "True when the native engine can consume X directly: plain data, a
-  collection of tuples, or anything satisfying the db protocols. Pod
-  database values are opaque handles and fail all of these."
-  [x]
-  (or (nil? x)
-      (coll? x)
-      (string? x)
-      (number? x)
-      (keyword? x)
-      (symbol? x)
-      (boolean? x)
-      (datascript.db/db? x)))
+(defn- datalevin-db? [x] (ddb/-searchable? x))
 
 (defn q
-  "Run a Datomic-style query. Inputs may be plain collections of tuples,
-  durable cljrs.dstore dbs, or datalevin pod database values:
+  "Run a Datomic-style query. Inputs may be plain collections of
+  tuples, durable datalevin dbs (see `conn`/`db`), cljrs.dstore dbs,
+  or datascript dbs:
     (q '[:find ?n :where [?e :name ?n]] [[1 :name \"x\"]])
-  Collection and dstore inputs run on the native engine; a pod database
-  value routes the query to the pod."
+  Durable datalevin inputs run on the datalevin engine (with its
+  cost-based planner); everything else runs on the datascript engine."
   [query & inputs]
-  (if (every? native-input? inputs)
-    (apply datascript.query/q query inputs)
-    (apply @(pod-fn "q") query inputs)))
+  (if (some datalevin-db? inputs)
+    (apply dq/q query inputs)
+    (apply datascript.query/q query inputs)))
 
 (defn facts
   "Turn maps into [entity attr value] triples with generated entity ids,
@@ -70,23 +49,141 @@
                (range 1 (inc (count maps)))
                maps)))
 
+;; ── durable connections ──────────────────────────────────────────────
+
 (defn conn
-  "Open (creating if needed) a durable pod connection at dir, with an
-  optional datalevin schema map. For a native durable db see
-  cljrs.dstore/open."
-  ([dir] (@(pod-fn "get-conn") dir))
-  ([dir schema] (@(pod-fn "get-conn") dir schema)))
+  "Open (creating if needed) a durable native connection at DIR, with
+  an optional datalevin schema map:
+    (conn \"/tmp/db\" {:friend {:db/cardinality :db.cardinality/many
+                                :db/valueType :db.type/ref}})
+  Returns an atom holding the current db value."
+  ([dir] (conn dir nil))
+  ([dir schema] (atom (ddb/empty-db dir schema))))
 
-(defn db [conn] (@(pod-fn "db") conn))
+(defn db
+  "The current database value of a connection."
+  [conn]
+  @conn)
 
-(defn transact! [conn txs] (@(pod-fn "transact!") conn txs))
+(defn- tempid? [x]
+  (or (and (integer? x) (neg? (long x)))
+      (string? x)
+      (keyword? x)))
 
-(defn close [conn] (@(pod-fn "close") conn))
+(defn- resolve-eid
+  "Resolve E to an entity id, allocating for tempids. Returns
+  [eid tempids next-eid]."
+  [e tempids next-eid]
+  (cond
+    (and (integer? e) (not (neg? (long e))))
+    [(long e) tempids next-eid]
+
+    (tempid? e)
+    (if-some [known (get tempids e)]
+      [known tempids next-eid]
+      [next-eid (assoc tempids e next-eid) (inc (long next-eid))])
+
+    :else
+    (raise "Expected an entity id or tempid, got " e {:value e})))
+
+(defn- entity-ops
+  "[eid attr value add?] tuples for one map entity. Cardinality-many
+  attrs accept collection values; nested entity maps are not supported
+  (transact refs by id or tempid)."
+  [d0 eid m]
+  (into []
+        (mapcat
+          (fn [[a v]]
+            (when-not (identical? a :db/id)
+              (when (map? v)
+                (raise "Nested entity maps are not supported; use explicit ids"
+                       {:attr a :value v}))
+              (if (and (ddb/multival? d0 a) (coll? v) (not (map? v)))
+                (map (fn [v1] [eid a v1 true]) v)
+                [[eid a v true]]))))
+        m))
+
+(defn- tx->datoms
+  "Translate Datomic-style TX-DATA into datoms against D0. Supports
+  [:db/add e a v], [:db/retract e a v], and entity maps; tempids
+  (negative ints, strings, keywords) resolve in entity positions and
+  in ref-attribute value positions. Returns {:datoms [..] :tempids {..}}."
+  [d0 tx-data]
+  (let [{:keys [ops tempids]}
+        (loop [txs      (seq tx-data)
+               tempids  {}
+               next-eid (inc (long (or (ddb/max-eid d0) 0)))
+               acc      []]
+          (if txs
+            (let [tx (first txs)]
+              (cond
+                (map? tx)
+                (let [id (get tx :db/id)
+                      [eid tempids next-eid]
+                      (if (nil? id)
+                        [next-eid tempids (inc (long next-eid))]
+                        (resolve-eid id tempids next-eid))]
+                  (recur (next txs) tempids (long next-eid)
+                         (into acc (entity-ops d0 eid tx))))
+
+                (sequential? tx)
+                (let [[op e a v] tx
+                      [eid tempids next-eid] (resolve-eid e tempids next-eid)]
+                  (case op
+                    :db/add
+                    (recur (next txs) tempids (long next-eid)
+                           (conj acc [eid a v true]))
+                    :db/retract
+                    (recur (next txs) tempids (long next-eid)
+                           (conj acc [eid a v false]))
+                    (raise "Unsupported tx op " op
+                           {:op op :supported [:db/add :db/retract]})))
+
+                :else
+                (raise "Unsupported tx form " tx {:tx tx})))
+            {:ops acc :tempids tempids}))
+        resolve-v (fn [a v]
+                    (if (and (ddb/ref? d0 a) (tempid? v))
+                      (or (get tempids v)
+                          (raise "Unresolved tempid in ref value " v
+                                 {:attr a :value v}))
+                      v))]
+    {:datoms (mapv (fn [[e a v add?]]
+                     (let [datom (dd/datom e a (resolve-v a v))]
+                       (if add? datom (dd/delete datom))))
+                   ops)
+     :tempids tempids}))
+
+(defn transact!
+  "Apply Datomic-style TX-DATA ([:db/add e a v], [:db/retract e a v],
+  entity maps with tempid allocation) to a connection. Returns
+  {:db-before .. :db-after .. :tx-data .. :tempids ..}."
+  [conn tx-data]
+  (let [d0 @conn
+        {:keys [datoms tempids]} (tx->datoms d0 tx-data)
+        store (:store d0)]
+    (dst/load-datoms store datoms)
+    (let [d1 (ddb/new-db store)]
+      (reset! conn d1)
+      {:db-before d0 :db-after d1 :tx-data datoms :tempids tempids})))
+
+(defn close
+  "Close a connection (the native store needs no explicit teardown)."
+  [conn]
+  (dst/close (:store @conn))
+  nil)
+
+(defn pull
+  "Pull PATTERN for entity EID from a durable datalevin db:
+    (pull (db conn) [:name {:friend [:name]}] 1)"
+  [db pattern eid]
+  (dpa/pull db pattern eid))
 
 (defn entity
-  "Pull a whole entity map by id (via q; the pod's entity handle does not
-  cross the pod boundary)."
+  "Pull a whole entity map by id."
   [db eid]
-  (into {:db/id eid}
-        (map (fn [[a v]] [a v]))
-        (q '[:find ?a ?v :in $ ?e :where [?e ?a ?v]] db eid)))
+  (if (datalevin-db? db)
+    (dpa/pull db '[*] eid)
+    (into {:db/id eid}
+          (map (fn [[a v]] [a v]))
+          (q '[:find ?a ?v :in $ ?e :where [?e ?a ?v]] db eid))))
