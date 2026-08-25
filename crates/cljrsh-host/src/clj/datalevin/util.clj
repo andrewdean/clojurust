@@ -75,7 +75,9 @@
    (defn seqable?
      [x]
      (and (not (string? x))
-          (or (seq? x) (nil? x) (coll? x) (array? x))))
+          (or (seq? x) (nil? x) (coll? x) (array? x)
+              ;; java.util collection shims answer the seq family
+              (native-coll? x))))
    :clj
    (defn seqable?
      ^Boolean [x]

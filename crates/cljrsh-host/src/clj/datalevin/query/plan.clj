@@ -1173,7 +1173,9 @@
   (let [minimum (long c/query-partition-min-step-count)]
     (and context
          c/query-partitioned-execution?
-         (not (writing? db))
+         ;; writing? is pinned TRUE on cljrsh to collapse thread-pool
+         ;; pipelines, but partitioned execution has a sequential arm.
+         #?(:cljrsh true :clj (not (writing? db)))
          (pos? (long c/query-partition-target-size))
          (pos? (long c/query-partition-min-input-size))
          (pos? minimum)
@@ -1188,6 +1190,14 @@
         useful-work       (max 1 (quot (+ n (dec target-size)) target-size))]
     (long (min cpu-capacity executor-capacity useful-work))))
 
+#?(:cljrsh
+(defn- partition-participant-count
+  "Single-threaded runtime: partitioning without parallelism is pure
+  overhead, so the default is one participant (tests redef this to
+  exercise the partitioned path)."
+  ^long [^long _n]
+  1)
+:clj
 (defn- partition-participant-count
   ^long [^long n]
   (if (< n (long c/query-partition-min-input-size))
@@ -1203,7 +1213,7 @@
                              parallelism)]
       (partition-participant-capacity
         n (.availableProcessors (Runtime/getRuntime)) pool-slots
-        (long c/query-partition-target-size)))))
+        (long c/query-partition-target-size))))))
 
 (defn- copy-tuple-partition
   ^FastList [^List tuples ^long start ^long end]
@@ -1229,6 +1239,28 @@
                    (conj counts (.size ^List result)))))
         {:tuples tuples :counts counts}))))
 
+#?(:cljrsh
+(defn- execute-partitioned-steps
+  "Sequential partition execution: each partition runs the step segment
+  in order and results merge in partition order (no thread pool)."
+  [db steps ^List tuples ^long participants]
+  (let [n           (.size tuples)
+        partitions  (mapv (fn [^long i]
+                            (let [start (quot (* i n) participants)
+                                  end   (quot (* (inc i) n) participants)]
+                              (copy-tuple-partition tuples start end)))
+                          (range participants))
+        results     (mapv #(execute-step-partition db steps %) partitions)
+        total-count (reduce + 0
+                            (map (fn [r] (.size ^List (:tuples r))) results))
+        out         (FastList. (int total-count))
+        counts      (long-array (count steps))]
+    (doseq [{part-tuples :tuples part-counts :counts} results]
+      (.addAll out ^Collection part-tuples)
+      (doseq [[idx cnt] (map-indexed vector part-counts)]
+        (aset-long counts idx (+ (aget counts idx) (long cnt)))))
+    {:tuples out :counts (vec counts)}))
+:clj
 (defn- execute-partitioned-steps
   [db steps ^List tuples ^long participants]
   (let [n          (.size tuples)
@@ -1271,7 +1303,7 @@
       (catch Throwable e
         (dotimes [i (.size futures)]
           (.cancel ^Future (.get futures i) true))
-        (throw e)))))
+        (throw e))))))
 
 (defn- execute-partition-segment
   [db steps segment-start segment-end ^List source]

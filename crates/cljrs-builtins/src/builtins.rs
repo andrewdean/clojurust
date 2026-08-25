@@ -1609,6 +1609,9 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("Math/ceil", Arity::Fixed(1), builtin_ceil),
         ("Math/addExact", Arity::Fixed(2), builtin_math_add_exact),
         ("UUID/randomUUID", Arity::Fixed(0), builtin_random_uuid),
+        ("Double/isFinite", Arity::Fixed(1), builtin_double_is_finite),
+        ("Long/compare", Arity::Fixed(2), builtin_long_compare),
+        ("Long/rotateLeft", Arity::Fixed(2), builtin_long_rotate_left),
         (
             "Math/multiplyExact",
             Arity::Fixed(2),
@@ -1655,6 +1658,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("record?", Arity::Fixed(1), builtin_record_q),
         ("instance?", Arity::Fixed(2), builtin_instance_q),
         // Native objects (Phase 9 interop)
+        ("native-coll?", Arity::Fixed(1), builtin_native_coll_q),
         ("native-object?", Arity::Fixed(1), builtin_native_object_q),
         ("native-type", Arity::Fixed(1), builtin_native_type),
         // Dynamic variables (Phase 9)
@@ -3860,6 +3864,32 @@ fn builtin_conj(args: &[Value]) -> ValueResult<Value> {
                 tail: result,
             })),
             Value::Queue(q) => Value::Queue(GcPtr::new(q.get().conj(v.clone()))),
+            // Records conj map entries like maps do (clojure.walk relies on
+            // (reduce conj record record) rebuilding the record).
+            rec @ Value::TypeInstance(_) => match v.unwrap_meta() {
+                Value::Vector(_) => {
+                    let seq_v = builtin_seq(std::slice::from_ref(v))?;
+                    let k = builtin_first(std::slice::from_ref(&seq_v))?;
+                    let rest_v = builtin_rest(std::slice::from_ref(&seq_v))?;
+                    let val = builtin_first(std::slice::from_ref(&rest_v))?;
+                    builtin_assoc(&[rec, k, val])?
+                }
+                Value::Map(other) => {
+                    let mut merged = rec;
+                    let mut pairs: Vec<(Value, Value)> = Vec::new();
+                    other.for_each(|k, val| pairs.push((k.clone(), val.clone())));
+                    for (k, val) in pairs {
+                        merged = builtin_assoc(&[merged, k, val])?;
+                    }
+                    merged
+                }
+                other => {
+                    return Err(ValueError::WrongType {
+                        expected: "map-entry",
+                        got: other.type_name().to_string(),
+                    });
+                }
+            },
             _ => {
                 return Err(ValueError::WrongType {
                     expected: "collection",
@@ -3983,6 +4013,10 @@ fn builtin_get(args: &[Value]) -> ValueResult<Value> {
         Value::Map(m) => Ok(m.get(&args[1]).unwrap_or(default)),
         Value::TransientMap(m) => Ok(m.get().find(&args[1]).map(|(_, v)| v).unwrap_or(default)),
         Value::TypeInstance(ti) => Ok(ti.get().fields.get(&args[1]).unwrap_or(default)),
+        // java.util.Map/Set shims answer get like the JVM's RT.get does.
+        v @ Value::NativeObject(_) => {
+            Ok(crate::javamap::native_coll_get(v, &args[1]).unwrap_or(default))
+        }
         Value::Vector(v) => {
             if let Value::Long(idx) = &args[1] {
                 Ok(v.get().nth(*idx as usize).cloned().unwrap_or(default))
@@ -5383,6 +5417,44 @@ fn builtin_make_array(args: &[Value]) -> ValueResult<Value> {
         Value::Nil;
         n
     ]))))
+}
+
+/// `(Double/isFinite d)` — neither infinite nor NaN.
+fn builtin_double_is_finite(args: &[Value]) -> ValueResult<Value> {
+    match &args[0] {
+        Value::Double(d) => Ok(Value::Bool(d.is_finite())),
+        Value::Long(_) => Ok(Value::Bool(true)),
+        other => Err(ValueError::Other(format!(
+            "Double/isFinite requires a number, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `(Long/compare a b)` — three-way long comparison.
+fn builtin_long_compare(args: &[Value]) -> ValueResult<Value> {
+    match (&args[0], &args[1]) {
+        (Value::Long(a), Value::Long(b)) => Ok(Value::Long(match a.cmp(b) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        })),
+        _ => Err(ValueError::Other(
+            "Long/compare requires two integers".to_string(),
+        )),
+    }
+}
+
+/// `(Long/rotateLeft n distance)` — 64-bit rotation.
+fn builtin_long_rotate_left(args: &[Value]) -> ValueResult<Value> {
+    match (&args[0], &args[1]) {
+        (Value::Long(n), Value::Long(d)) => {
+            Ok(Value::Long((*n as u64).rotate_left((*d as u32) & 63) as i64))
+        }
+        _ => Err(ValueError::Other(
+            "Long/rotateLeft requires two integers".to_string(),
+        )),
+    }
 }
 
 /// `(Math/addExact a b)` — checked long addition; raises on overflow.
@@ -9136,6 +9208,8 @@ fn builtin_instance_q(args: &[Value]) -> ValueResult<Value> {
             val,
             Value::Promise(_) | Value::Future(_) | Value::Delay(_) | Value::LazySeq(_)
         ),
+        "clojure.lang.Delay" | "Delay" => matches!(val, Value::Delay(_)),
+        "clojure.lang.Atom" | "Atom" => matches!(val, Value::Atom(_) | Value::SharedAtom(_)),
         "clojure.lang.IEditableCollection" => match val {
             Value::List(_) | Value::Set(_) | Value::Map(_) | Value::Vector(_) => true,
             Value::WithMeta(inner, _) => matches!(
@@ -9621,6 +9695,14 @@ fn builtin_random_uuid(_args: &[Value]) -> ValueResult<Value> {
 /// `(native-object? x)` — true if x is a NativeObject.
 fn builtin_native_object_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(args[0], Value::NativeObject(_))))
+}
+
+/// `(native-coll? x)` — true if x is a java.util collection shim
+/// (ArrayList/HashSet/HashMap family) that the seq family understands.
+fn builtin_native_coll_q(args: &[Value]) -> ValueResult<Value> {
+    Ok(Value::Bool(
+        crate::javamap::native_coll_count(&args[0]).is_some(),
+    ))
 }
 
 /// `(native-type x)` — returns the type tag string of a NativeObject, or nil.

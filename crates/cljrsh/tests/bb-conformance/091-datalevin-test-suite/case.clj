@@ -4,6 +4,7 @@
 ;; suite; any failure or error fails the case.
 (require '[clojure.test :as t]
          '[datalevin.query-resolve-test]
+         '[datalevin.query-not-test]
          '[datalevin.test.index])
 (defn gate [sym]
   (let [res (t/run-tests sym)]
@@ -12,5 +13,6 @@
              (:fail res) "failures," (:error res) "errors")
     (+ (:fail res) (:error res))))
 (def bad (+ (gate 'datalevin.query-resolve-test)
+            (gate 'datalevin.query-not-test)
             (gate 'datalevin.test.index)))
 (when (pos? bad) (System/exit 1))

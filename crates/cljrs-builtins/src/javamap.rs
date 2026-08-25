@@ -5,7 +5,12 @@
 //! Constructed by the `HashMap.` / `java.util.HashMap.` builtins; methods
 //! dispatch through `cljrs-interp`'s `dispatch_method` NativeObject arm.
 
-use std::collections::HashMap;
+// Insertion-ordered maps/sets: java.util collections iterate
+// deterministically for a given insertion sequence, and vendored code
+// (datalevin's aggregation sinks in particular) relies on two identical
+// runs producing identical iteration order. std's randomized hashing
+// breaks that, so the shims are backed by indexmap.
+use indexmap::{IndexMap, IndexSet};
 use std::sync::Mutex;
 
 use cljrs_value::error::ValueError;
@@ -13,7 +18,7 @@ use cljrs_value::{NativeObject, NativeObjectBox, Value, ValueResult};
 
 #[derive(Debug)]
 pub struct JavaHashMap {
-    pub inner: Mutex<HashMap<Value, Value>>,
+    pub inner: Mutex<IndexMap<Value, Value>>,
 }
 
 impl NativeObject for JavaHashMap {
@@ -39,7 +44,7 @@ impl cljrs_gc::Trace for JavaHashMap {
 pub fn builtin_hashmap_new(_args: &[Value]) -> ValueResult<Value> {
     Ok(Value::NativeObject(cljrs_value::gc_native_object(
         JavaHashMap {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(IndexMap::new()),
         },
     )))
 }
@@ -101,7 +106,7 @@ pub fn dispatch(map: &JavaHashMap, method: &str, args: &[Value]) -> Option<Value
         }
         "remove" => Ok(args
             .first()
-            .and_then(|k| inner.remove(k))
+            .and_then(|k| inner.shift_remove(k))
             .unwrap_or(Value::Nil)),
         "size" => Ok(Value::Long(inner.len() as i64)),
         "isEmpty" => Ok(Value::Bool(inner.is_empty())),
@@ -372,7 +377,7 @@ fn dispatch_array_list(
 
 #[derive(Debug)]
 pub struct JavaHashSet {
-    pub items: Mutex<std::collections::HashSet<Value>>,
+    pub items: Mutex<IndexSet<Value>>,
 }
 
 impl NativeObject for JavaHashSet {
@@ -398,7 +403,7 @@ impl cljrs_gc::Trace for JavaHashSet {
 // an element while it sits in a HashSet is undefined behavior for the set.
 #[allow(clippy::mutable_key_type)]
 pub fn builtin_hash_set_new(args: &[Value]) -> ValueResult<Value> {
-    let items: std::collections::HashSet<Value> = match args.first().map(Value::unwrap_meta) {
+    let items: IndexSet<Value> = match args.first().map(Value::unwrap_meta) {
         None | Some(Value::Nil) | Some(Value::Long(_)) => Default::default(),
         Some(other) => crate::builtins::value_to_seq(other)?.into_iter().collect(),
     };
@@ -437,7 +442,9 @@ fn dispatch_hash_set(s: &JavaHashSet, method: &str, args: &[Value]) -> Option<Va
             Ok(Value::Bool(changed))
         }
         "contains" => Ok(Value::Bool(args.first().is_some_and(|v| items.contains(v)))),
-        "remove" => Ok(Value::Bool(args.first().is_some_and(|v| items.remove(v)))),
+        "remove" => Ok(Value::Bool(
+            args.first().is_some_and(|v| items.shift_remove(v)),
+        )),
         "size" => Ok(Value::Long(items.len() as i64)),
         "isEmpty" => Ok(Value::Bool(items.is_empty())),
         "clear" => {
@@ -792,4 +799,45 @@ fn dispatch_string_builder(
             ))));
         }
     })
+}
+
+/// `get` semantics for the shims, mirroring the JVM's `RT.get` on
+/// `java.util.Map` (key lookup) and set membership for `HashSet`.
+/// None = not a shim the caller should fall through on.
+pub fn native_coll_get(v: &Value, key: &Value) -> Option<Value> {
+    let Value::NativeObject(obj) = v else {
+        return None;
+    };
+    let o = obj.get();
+    if let Some(m) = o.downcast_ref::<JavaHashMap>() {
+        return Some(
+            m.inner
+                .lock()
+                .unwrap()
+                .get(key)
+                .cloned()
+                .unwrap_or(Value::Nil),
+        );
+    }
+    if let Some(s) = o.downcast_ref::<JavaHashSet>() {
+        return Some(if s.items.lock().unwrap().contains(key) {
+            key.clone()
+        } else {
+            Value::Nil
+        });
+    }
+    if let Some(l) = o.downcast_ref::<JavaArrayList>() {
+        if let Value::Long(i) = key {
+            return Some(
+                l.items
+                    .lock()
+                    .unwrap()
+                    .get(*i as usize)
+                    .cloned()
+                    .unwrap_or(Value::Nil),
+            );
+        }
+        return Some(Value::Nil);
+    }
+    None
 }

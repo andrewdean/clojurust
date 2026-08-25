@@ -1322,6 +1322,7 @@ dependencies = [
  "cljrs-types",
  "cljrs-value",
  "fancy-regex 0.16.2",
+ "indexmap",
  "num-bigint",
  "num-rational",
  "num-traits",

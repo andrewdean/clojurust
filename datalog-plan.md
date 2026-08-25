@@ -289,11 +289,28 @@ default, and it stays contained inside the store crate.
    on the datalevin engine; transact! translates Datomic tx-data with
    two-pass tempid resolution (entity + ref-value positions); the pod
    is retired (pod-era databases need re-import; noted in ns doc).
-   Conformance case 090. Remaining: phase 5 (port the datalevin test
-   suite as the conformance gate) and the deferred features (result
-   caching with invalidation hooks, the datalevin tx pipeline with
-   uniqueness/component semantics, fulltext/vector/idoc, entity
-   facade, giant GC, perf promotion of hot scan loops into Rust).
+   Conformance case 090. Pod-era migration shipped 2026-08-24
+   (7da4ff10): cljrsh.datalog/migrate-pod-db! loads the retired pod
+   one last time (cached dtlv), reads schema + eav datoms, and writes
+   them natively with entity ids preserved; verified end to end (no
+   live pod databases existed on this machine — the helper is for
+   anyone who has one). Phase 5 in progress 2026-08-24 (4fe28544):
+   conformance case 091 vendors datalevin's own test suites (pinned
+   78b199e8) and runs them under clojure.test against the native
+   engine — datalevin.core facade vendored (query family re-exports +
+   conn/tx over the minimal translator, moved from the veneer);
+   query-resolve and index suites fully green and gating; query-not
+   green pending final verification; query-optimizer vendored, first
+   run pending. Engine gaps the suites surfaced and fixed: nil-as-
+   empty-set in clojure.set, populated? nil contract, end-scan gated
+   to pipes, :db/unique flags in the native store + lookup-ref
+   resolution, ordered tuple (vector) values in the codec, conj onto
+   records (clojure.walk/explain), sequential partitioned execution
+   (:cljrsh arms), use-fixtures in clojure.test. Remaining: the
+   deferred features (result caching with invalidation hooks, the
+   datalevin tx pipeline with uniqueness/component semantics,
+   fulltext/vector/idoc, entity facade, giant GC, perf promotion of
+   hot scan loops into Rust).
 4. **Port the query family** (~20k lines: parser, optimizer, resolve,
    plan, execute, rules, built-ins, db, conn, datom, entity, pull)
    against a pinned datalevin tag, with the FastList shim and utl

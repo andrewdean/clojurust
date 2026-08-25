@@ -1586,6 +1586,9 @@
         (d/close conn)
         (u/delete-files dir)))))
 
+;; cljrs port: idoc (JSON document) access is not ported — the built-in
+;; is a stub that raises. Both idoc explain tests stay JVM-only.
+#?(:cljrsh nil :clj
 (deftest adaptive-limit-access-explain-test
   (let [conn  (d/create-conn
                 nil
@@ -1629,8 +1632,9 @@
           (is (false? (:exhausted? batch)))
           (is (= [:residual] (mapv :phase (:subqueries plan))))))
       (finally
-        (d/close conn)))))
+        (d/close conn))))))
 
+#?(:cljrsh nil :clj
 (deftest complete-access-explain-test
   (let [conn  (d/create-conn
                 nil
@@ -1676,7 +1680,7 @@
           (is (true? (:exhausted? batch)))
           (is (= [:residual] (mapv :phase (:subqueries plan))))))
       (finally
-        (d/close conn)))))
+        (d/close conn))))))
 
 (deftest dominated-projection-base-sample-test
   (let [dir    (u/tmp-dir (str "dominated-projection-root-"

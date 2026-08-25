@@ -400,6 +400,14 @@ pub fn value_to_form(val: &Value, span: Span) -> EvalResult<Form> {
 
         Value::Pattern(p) => FormKind::Regex(p.get().as_str().to_string()),
 
+        Value::Instant(ms) => FormKind::TaggedLiteral(
+            "inst".to_string(),
+            Box::new(Form::new(
+                FormKind::Str(cljrs_types::instant::format_rfc3339_millis(*ms)),
+                span.clone(),
+            )),
+        ),
+
         // Non-data types: wrap in a symbol placeholder (best effort).
         other => FormKind::Symbol(format!("#<{}>", other.type_name())),
     };

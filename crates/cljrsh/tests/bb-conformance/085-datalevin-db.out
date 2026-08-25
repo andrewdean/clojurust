@@ -6,7 +6,7 @@
 [4 3 9 2]
 [[1 :age 20] [2 :age 30] [3 :age 40]]
 [[3 :age 40] [2 :age 30]]
-true false
+true nil
 2 2
 [[2 :age 30] [3 :age 40]]
 [[2 30] [3 40]]

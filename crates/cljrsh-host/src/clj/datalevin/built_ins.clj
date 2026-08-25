@@ -18,7 +18,7 @@
                             println-str prn-str subs get re-find re-matches
                             re-seq re-pattern distinct])
   (:require
-   #?(:cljrsh nil :clj [datalevin.db :as db])
+   [datalevin.db :as db]
    [datalevin.datom :as dd]
    #?(:cljrsh nil :clj [datalevin.storage :as st])
    #?(:cljrsh nil :clj [datalevin.idoc :as idoc])

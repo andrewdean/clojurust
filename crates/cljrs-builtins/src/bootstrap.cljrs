@@ -796,7 +796,8 @@
 (defn seqable?
   "Returns true if seq can be called on x."
   [x]
-  (or (nil? x) (seq? x) (vector? x) (map? x) (set? x) (string? x) (array? x)))
+  (or (nil? x) (seq? x) (vector? x) (map? x) (set? x) (string? x) (array? x)
+      (native-coll? x)))
 
 (defn nthrest [coll n]
   (when-not (number? n) (throw (str "n must be a number, got: " (type n))))

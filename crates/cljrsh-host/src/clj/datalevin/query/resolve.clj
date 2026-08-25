@@ -324,7 +324,11 @@
 ;; Match the storage scan's target chunk size. Below this point individual
 ;; probes avoid sorting and projecting an input batch; at and above it one EAV
 ;; merge scan can also use the storage layer's CPU-aware parallel chunking.
-(def ^:const ^:private ^long merged-eav-lookup-threshold 4000)
+;; The cljrs value is lower: the crossover tunes JIT-compiled JVM probes,
+;; and a smaller threshold keeps the merged-scan path (and the test that
+;; sizes itself from this constant) cheap on the interpreted runtime.
+(def ^:const ^:private ^long merged-eav-lookup-threshold
+  #?(:cljrsh 400 :clj 4000))
 
 (defn- estimate-multi-lookup-output
   ^long [^long bound-count ^long scan-count]
