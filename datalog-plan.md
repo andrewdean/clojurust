@@ -302,10 +302,12 @@ default, and it stays contained inside the store crate.
    query-resolve and index suites fully green and gating; query-not
    fully green and gating (18 tests, 127 assertions; the case takes
    ~6 minutes); query-optimizer vendored with idoc tests gated, not
-   yet gating — remaining: a runtime panic in
-   sampled-late-expansion-cost-test under diagnosis, and cost-model
-   divergences (guardrail budget fields, base-sample selection,
-   indexed-union order). The suites caught a real silent-wrong-results
+   yet gating — blocked on a runtime GC bug (an in-flight closure is
+   freed during builtin callback re-entry under carried-over heap
+   pressure; see docs/gc-inflight-rooting-bug.md and its repro
+   script — plan/parsed-q caches were ruled out), plus cost-model
+   divergences to re-triage once the GC bug is fixed (guardrail
+   budget fields, base-sample selection, indexed-union order). The suites caught a real silent-wrong-results
    bug: core get on java.util.Map shims returned nil, so or-join
    linked joins through the pipe path returned empty. Engine gaps the suites surfaced and fixed: nil-as-
    empty-set in clojure.set, populated? nil contract, end-scan gated

@@ -1,0 +1,38 @@
+(require '[datalevin.core :as d]
+         '[datalevin.db :as db]
+         '[babashka.fs :as fs])
+(def dir (str (fs/create-temp-dir) "/db"))
+(def conn (d/get-conn dir {:start/id   {:db/valueType :db.type/long
+                                        :db/unique :db.unique/identity}
+                           :item/id    {:db/valueType :db.type/long
+                                        :db/unique :db.unique/identity}
+                           :item/score {:db/valueType :db.type/long}
+                           :link/from  {:db/valueType :db.type/ref}
+                           :link/to    {:db/valueType :db.type/ref}}))
+(d/transact! conn
+  (into [{:db/id 1 :start/id 1}]
+        (mapcat (fn [i]
+                  [{:db/id (+ 10000 i) :item/id i :item/score i}
+                   {:db/id (+ 100000 i) :link/from 1 :link/to (+ 10000 i)}])
+                (range 2000))))
+(def q '[:find ?id ?score
+         :where
+         [?start :start/id 1]
+         (or-join [?start ?item]
+           (and [?link :link/from ?start]
+                [?link :link/to ?item])
+           (and [?link1 :link/from ?start]
+                [?link1 :link/to ?mid]
+                [?link2 :link/from ?mid]
+                [?link2 :link/to ?item]))
+         [?item :item/id ?id]
+         [?item :item/score ?score]
+         [(< ?score 3000)]
+         :order-by [?score :desc ?id :asc]
+         :limit 5])
+(def dbv (db/-clear-tx-cache (d/db conn)))
+(println :first-q (d/q q dbv))
+(println :second-q (try (d/q q dbv) (catch Exception e (str "ERR " (ex-message e)))))
+(def expl (d/explain {:run? false} q dbv))
+(println :q-after-explain (try (d/q q dbv) (catch Exception e (str "ERR " (ex-message e)))))
+(d/close conn)
