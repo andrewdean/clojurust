@@ -36,6 +36,9 @@ pub fn safepoint() {
 /// Returns a [`MutatorGuard`] that unregisters on drop.
 pub fn register_mutator() -> MutatorGuard {
     CONFIG_CANCELLATION.register_thread();
+    // Mutators register at thread start, so this marks the ceiling for the
+    // conservative stack scan: every frame that can hold a Value is below.
+    crate::stack_scan::record_stack_base();
     MutatorGuard { _private: () }
 }
 

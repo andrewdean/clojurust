@@ -167,7 +167,7 @@ pub fn force_collect(env: &Env) {
         return;
     };
 
-    cljrs_gc::HEAP.collect(|visitor| {
+    cljrs_gc::HEAP.collect_with_stack_scan(|visitor| {
         cljrs_gc::HEAP.trace_registered_roots(visitor);
         trace_env_roots(env, visitor);
         trace_thread_env_roots(visitor);
@@ -217,7 +217,7 @@ pub fn gc_safepoint(env: &Env) {
 
     // All other threads are now parked. Collect with registered roots
     // plus ALL of this thread's active environments and dynamic bindings.
-    cljrs_gc::HEAP.collect(|visitor| {
+    cljrs_gc::HEAP.collect_with_stack_scan(|visitor| {
         // Trace globally registered roots (GlobalEnv, etc.)
         cljrs_gc::HEAP.trace_registered_roots(visitor);
         // Trace the current (innermost) env
@@ -355,7 +355,7 @@ pub fn async_gc_collect() {
         cljrs_gc::safepoint();
         return;
     };
-    cljrs_gc::HEAP.collect(|visitor| {
+    cljrs_gc::HEAP.collect_with_stack_scan(|visitor| {
         cljrs_gc::HEAP.trace_registered_roots(visitor);
         trace_thread_env_roots(visitor);
         trace_value_roots(visitor);

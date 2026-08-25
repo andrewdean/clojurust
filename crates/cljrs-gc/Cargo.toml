@@ -22,3 +22,7 @@ cljrs-logging = { workspace = true }
 # uses a fixed 64 MB heap limit instead.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 system-memory = "0.1.7"
+
+# Exact per-thread stack bounds for the conservative stack scan.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

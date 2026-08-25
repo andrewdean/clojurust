@@ -1473,6 +1473,7 @@ dependencies = [
  "bigdecimal",
  "cljrs-logging",
  "fancy-regex 0.16.2",
+ "libc",
  "num-bigint",
  "num-rational",
  "regex",

@@ -15,6 +15,7 @@ pub mod config;
 
 #[cfg(feature = "no-gc")]
 pub mod alloc_ctx;
+pub mod stack_scan;
 #[cfg(feature = "no-gc")]
 pub mod static_arena;
 
@@ -683,6 +684,18 @@ mod gc_full {
         }
 
         pub fn collect<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F) {
+            self.collect_inner(trace_roots, false)
+        }
+
+        /// Collect with the conservative stack scan as an additional root
+        /// source (see `stack_scan`).  The interpreter's production
+        /// collection paths use this entry; plain `collect` stays
+        /// precise-only so tests asserting exact free behavior hold.
+        pub fn collect_with_stack_scan<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F) {
+            self.collect_inner(trace_roots, crate::stack_scan::conservative_enabled())
+        }
+
+        fn collect_inner<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F, stack_scan: bool) {
             let pre_count = self.inner.lock().unwrap().count;
             let pre_memory = self.memory_in_use.load(Ordering::Relaxed);
             cljrs_logging::feat_debug!(
@@ -709,6 +722,32 @@ mod gc_full {
                 visitor.grey.len()
             );
             visitor.drain();
+            if stack_scan {
+                // Precise marking is complete, so every hit here is an object
+                // precise rooting missed: a Value held only in a Rust local
+                // across a re-entrant call.  Mark it (and its children) too.
+                let mut objects: Vec<*mut GcBoxHeader> = {
+                    let inner = self.inner.lock().unwrap();
+                    let mut v = Vec::with_capacity(inner.count);
+                    let mut current = inner.head;
+                    while !current.is_null() {
+                        v.push(current);
+                        current = unsafe { (*current).next.get() };
+                    }
+                    v
+                };
+                objects.sort_unstable();
+                let rescued = crate::stack_scan::scan_and_mark(&objects, &mut visitor);
+                if rescued > 0 {
+                    visitor.drain();
+                    cljrs_logging::feat_debug!(
+                        "gc",
+                        "conservative stack scan rescued {} in-flight objects",
+                        rescued
+                    );
+                    crate::stats::GC_STATS.record_conservative_rescues(rescued as u64);
+                }
+            }
             let mark_elapsed = mark_start.elapsed();
 
             let sweep_start = std::time::Instant::now();
@@ -883,6 +922,10 @@ mod gc_full {
             ISOLATE_HEAP.with(|h| h.collect(trace_roots));
         }
 
+        pub fn collect_with_stack_scan<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F) {
+            ISOLATE_HEAP.with(|h| h.collect_with_stack_scan(trace_roots));
+        }
+
         pub fn collect_auto(&self) -> bool {
             ISOLATE_HEAP.with(|h| h.collect_auto())
         }
@@ -986,6 +1029,7 @@ mod nogc_stubs {
             0
         }
         pub fn collect<F: FnOnce(&mut MarkVisitor)>(&self, _: F) {}
+        pub fn collect_with_stack_scan<F: FnOnce(&mut MarkVisitor)>(&self, _: F) {}
         pub fn collect_auto(&self) -> bool {
             false
         }
@@ -1137,6 +1181,47 @@ mod tests {
         heap.collect(|vis| vis.visit(&p));
         assert_eq!(heap.count(), 1);
         assert!(!*dropped.lock().unwrap());
+    }
+
+    /// A GcPtr held only in a Rust local (no shadow-stack root, no alloc
+    /// frame, no env) must survive collections when the conservative stack
+    /// scan is on: this is the in-flight rooting class from
+    /// docs/gc-inflight-rooting-bug.md. Linux-only: other hosts without a
+    /// recorded stack base skip the scan.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn conservative_scan_keeps_rust_local_alive() {
+        crate::stack_scan::set_conservative(true);
+        let heap = fresh_heap();
+        let dropped = Arc::new(Mutex::new(false));
+        let p = std::hint::black_box(heap.alloc(Tracked {
+            value: 7,
+            dropped: dropped.clone(),
+        }));
+        // Three unrooted collections: enough to exhaust the lives grace
+        // (initial 1, then 0, then freed) if the scan misses the local.
+        for _ in 0..3 {
+            heap.collect_with_stack_scan(|_vis| {});
+        }
+        assert!(
+            !*dropped.lock().unwrap(),
+            "stack-held GcPtr was freed despite the conservative scan"
+        );
+        assert_eq!(p.get().value, 7);
+        // Control: with the scan disabled the same shape is freed, proving
+        // the survival above came from the scan, not from another root.
+        crate::stack_scan::set_conservative(false);
+        let dropped2 = Arc::new(Mutex::new(false));
+        let q = std::hint::black_box(heap.alloc(Tracked {
+            value: 8,
+            dropped: dropped2.clone(),
+        }));
+        drop(q);
+        for _ in 0..3 {
+            heap.collect_with_stack_scan(|_vis| {});
+        }
+        assert!(*dropped2.lock().unwrap(), "control object was not freed");
+        crate::stack_scan::set_conservative(true);
     }
 
     #[test]

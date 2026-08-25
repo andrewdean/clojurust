@@ -39,6 +39,7 @@ pub struct GcStats {
     boundary_crossings: AtomicU64,
     boundary_bytes_copied: AtomicU64,
     boundary_copy_total_nanos: AtomicU64,
+    conservative_rescues: AtomicU64,
 }
 
 impl GcStats {
@@ -56,6 +57,7 @@ impl GcStats {
             boundary_crossings: AtomicU64::new(0),
             boundary_bytes_copied: AtomicU64::new(0),
             boundary_copy_total_nanos: AtomicU64::new(0),
+            conservative_rescues: AtomicU64::new(0),
         }
     }
 
@@ -108,6 +110,16 @@ impl GcStats {
             .fetch_add(copy_time.as_nanos() as u64, Ordering::Relaxed);
     }
 
+    /// Record objects the conservative stack scan rescued in one
+    /// collection: values precise rooting missed (held only in Rust locals
+    /// across a re-entrant call).  A nonzero total is the audit signal from
+    /// docs/gc-inflight-rooting-bug.md.
+    #[inline]
+    pub fn record_conservative_rescues(&self, count: u64) {
+        self.conservative_rescues
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
     /// Take a point-in-time snapshot of all counters.
     pub fn snapshot(&self) -> GcStatsSnapshot {
         GcStatsSnapshot {
@@ -123,6 +135,7 @@ impl GcStats {
             boundary_crossings: self.boundary_crossings.load(Ordering::Relaxed),
             boundary_bytes_copied: self.boundary_bytes_copied.load(Ordering::Relaxed),
             boundary_copy_total_nanos: self.boundary_copy_total_nanos.load(Ordering::Relaxed),
+            conservative_rescues: self.conservative_rescues.load(Ordering::Relaxed),
         }
     }
 }
@@ -148,6 +161,7 @@ pub struct GcStatsSnapshot {
     pub boundary_crossings: u64,
     pub boundary_bytes_copied: u64,
     pub boundary_copy_total_nanos: u64,
+    pub conservative_rescues: u64,
 }
 
 impl GcStatsSnapshot {
@@ -185,11 +199,12 @@ impl fmt::Display for GcStatsSnapshot {
             "  Boundary crossings:    {} ({} bytes copied)",
             self.boundary_crossings, self.boundary_bytes_copied
         )?;
-        write!(
+        writeln!(
             f,
             "  Boundary copy time:    {:.3?}",
             self.total_boundary_copy()
-        )
+        )?;
+        write!(f, "  Conservative rescues:  {}", self.conservative_rescues)
     }
 }
 
@@ -301,6 +316,7 @@ mod tests {
             boundary_crossings: 4,
             boundary_bytes_copied: 8192,
             boundary_copy_total_nanos: 2_000_000,
+            conservative_rescues: 1,
         };
         let s = format!("{snap}");
         assert!(s.contains("GC allocations:"));
@@ -309,6 +325,7 @@ mod tests {
         assert!(s.contains("GC collections:"));
         assert!(s.contains("Total GC pause time:"));
         assert!(s.contains("Objects freed by GC:"));
+        assert!(s.contains("Conservative rescues:"));
         assert!(s.contains("Bytes freed by GC:"));
         assert!(s.contains("Boundary crossings:"));
         assert!(s.contains("Boundary copy time:"));
