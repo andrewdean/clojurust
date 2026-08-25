@@ -1,8 +1,11 @@
 # GC: in-flight closure freed during builtin callback re-entry
 
-Status: open. Found 2026-08-25 by the datalevin query-optimizer test
-suite (conformance case 091 work); blocks that suite from joining the
-conformance gate.
+Status: FIXED (580eec7d) for the known paths — callback::invoke now
+roots its callee and args on the Fn fast path, and into/reduce/sort/
+sort-by/merge_sort root the Values they hold in Rust locals across
+re-entry. The repro below runs clean. Kept for the record and for the
+open audit question at the bottom. Found 2026-08-25 by the datalevin
+query-optimizer test suite (conformance case 091 work).
 
 ## Symptom
 
@@ -73,3 +76,12 @@ re-entry, or callback re-entry needs to pin its callee.
 
 The suites that do gate (query-resolve, query-not, index) pass green;
 their runs evidently do not hit the vulnerable collection window.
+
+## Open audit question
+
+The fix covers callback::invoke and the builtins that were implicated.
+Any OTHER native code that (a) holds a `Value` in a Rust local, then
+(b) re-enters evaluation (callback::invoke, apply_value, or realizing
+a lazy seq via ValueIter) has the same exposure. A systematic audit —
+or a debug-build assertion that flags unrooted GcPtrs reachable from
+the C stack at collection time — would close the class for good.
