@@ -24,6 +24,7 @@ fn search_covers_the_pattern_case_tree() {
             AttrProps {
                 cardinality_many: true,
                 ref_type: false,
+                ..AttrProps::default()
             },
         )
         .expect("schema");
@@ -111,6 +112,7 @@ fn cardinality_one_replaces_and_many_accumulates() {
             AttrProps {
                 cardinality_many: true,
                 ref_type: false,
+                ..AttrProps::default()
             },
         )
         .expect("schema");
@@ -263,6 +265,7 @@ fn store_persists_across_reopen() {
                 AttrProps {
                     cardinality_many: true,
                     ref_type: false,
+                    ..AttrProps::default()
                 },
             )
             .expect("schema");
@@ -276,6 +279,7 @@ fn store_persists_across_reopen() {
         Some(AttrProps {
             cardinality_many: true,
             ref_type: false,
+            ..AttrProps::default()
         }),
         "schema must survive reopen"
     );
@@ -326,6 +330,7 @@ fn ref_typed_attrs_and_next_eid() {
             AttrProps {
                 cardinality_many: false,
                 ref_type: true,
+                ..AttrProps::default()
             },
         )
         .expect("schema");

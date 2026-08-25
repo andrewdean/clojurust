@@ -222,7 +222,10 @@
     (s/set-attr! (:store @conn) attr
                  {:cardinality-many (= :db.cardinality/many
                                        (:db/cardinality props))
-                  :ref (= :db.type/ref (:db/valueType props))}))
+                  :ref (= :db.type/ref (:db/valueType props))
+                  :unique-identity (= :db.unique/identity
+                                      (:db/unique props))
+                  :unique-value (= :db.unique/value (:db/unique props))}))
   (reset! conn (db/new-db (:store @conn)))
   (schema conn))
 

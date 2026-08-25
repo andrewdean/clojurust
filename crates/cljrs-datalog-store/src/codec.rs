@@ -23,6 +23,9 @@ pub enum StoreValue {
     /// An entity id, indexed in `vae` for reverse lookup.
     Ref(u64),
     Bytes(Vec<u8>),
+    /// A heterogeneous tuple (datalevin's :db.type/tuple family); sorts
+    /// element-wise, shorter prefixes first.
+    Vec(Vec<StoreValue>),
 }
 
 pub const TAG_BOOL: u8 = 0x10;
@@ -34,6 +37,10 @@ pub const TAG_KEYWORD: u8 = 0x60;
 pub const TAG_UUID: u8 = 0x70;
 pub const TAG_REF: u8 = 0x80;
 pub const TAG_BYTES: u8 = 0x90;
+pub const TAG_VEC: u8 = 0xA0;
+/// Vector terminator: below every element tag so `[1 2]` sorts before
+/// `[1 2 3]`.
+pub const TAG_VEC_END: u8 = 0x01;
 /// Values whose encoding exceeds [`GIANT_THRESHOLD`]: the key holds the
 /// tag, a fixed-length prefix of the inner encoding, and the giant id;
 /// the full value lives in the giants DBI. Giants of one type sort after
@@ -86,6 +93,13 @@ pub fn encode_inline(v: &StoreValue, out: &mut Vec<u8>) {
         StoreValue::Bytes(b) => {
             out.push(TAG_BYTES);
             push_escaped(b, out);
+        }
+        StoreValue::Vec(items) => {
+            out.push(TAG_VEC);
+            for item in items {
+                encode_inline(item, out);
+            }
+            out.push(TAG_VEC_END);
         }
     }
 }
@@ -144,6 +158,25 @@ pub fn decode(bytes: &[u8]) -> Result<(Decoded, usize), &'static str> {
         TAG_BYTES => {
             let (raw, used) = pop_escaped(rest)?;
             Ok((Decoded::Value(StoreValue::Bytes(raw)), 1 + used))
+        }
+        TAG_VEC => {
+            let mut items = Vec::new();
+            let mut at = 1;
+            loop {
+                match bytes.get(at) {
+                    None => return Err("unterminated vector encoding"),
+                    Some(&TAG_VEC_END) => {
+                        return Ok((Decoded::Value(StoreValue::Vec(items)), at + 1));
+                    }
+                    Some(_) => match decode(&bytes[at..])? {
+                        (Decoded::Value(v), used) => {
+                            items.push(v);
+                            at += used;
+                        }
+                        (Decoded::Giant { .. }, _) => return Err("giant inside vector encoding"),
+                    },
+                }
+            }
         }
         TAG_GIANT_STR | TAG_GIANT_BYTES => {
             // [tag][GIANT_PREFIX raw bytes][id:8]

@@ -52,6 +52,12 @@ pub struct AttrProps {
     /// Ref-typed attributes index their entity-id values in `vae`; the
     /// host layer coerces integer values to [`StoreValue::Ref`] for them.
     pub ref_type: bool,
+    /// `:db.unique/identity` — declared for lookup-ref resolution; the
+    /// store records the flag but does not yet enforce uniqueness on
+    /// write (that belongs to the tx pipeline above it).
+    pub unique_identity: bool,
+    /// `:db.unique/value` — declared only, like `unique_identity`.
+    pub unique_value: bool,
 }
 
 #[derive(Debug)]
@@ -88,6 +94,8 @@ const META_NEXT_GIANT: &[u8] = b"next-giant";
 
 const FLAG_CARD_MANY: u8 = 0x01;
 const FLAG_REF: u8 = 0x02;
+const FLAG_UNIQUE_IDENTITY: u8 = 0x04;
+const FLAG_UNIQUE_VALUE: u8 = 0x08;
 
 /// The triple store.
 pub struct Store {
@@ -165,6 +173,8 @@ impl Store {
                 let props = AttrProps {
                     cardinality_many: flags & FLAG_CARD_MANY != 0,
                     ref_type: flags & FLAG_REF != 0,
+                    unique_identity: flags & FLAG_UNIQUE_IDENTITY != 0,
+                    unique_value: flags & FLAG_UNIQUE_VALUE != 0,
                 };
                 attrs.insert(name.clone(), (aid, props));
                 attr_names.insert(aid, name);
@@ -233,6 +243,12 @@ impl Store {
         }
         if props.ref_type {
             flag_byte |= FLAG_REF;
+        }
+        if props.unique_identity {
+            flag_byte |= FLAG_UNIQUE_IDENTITY;
+        }
+        if props.unique_value {
+            flag_byte |= FLAG_UNIQUE_VALUE;
         }
         rec.push(flag_byte);
         txn.put(self.schema, name.as_bytes(), &rec)?;

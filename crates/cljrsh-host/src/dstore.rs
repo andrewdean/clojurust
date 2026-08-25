@@ -101,6 +101,14 @@ fn to_store_value(store: &Store, attr: Option<&str>, v: &Value) -> Result<StoreV
         Value::Keyword(k) => StoreValue::Keyword(k.get().full_name()),
         Value::Uuid(u) => StoreValue::Uuid(u.to_be_bytes()),
         Value::Instant(ms) => StoreValue::Instant(*ms),
+        seq @ (Value::Vector(_) | Value::List(_) | Value::Cons(_) | Value::LazySeq(_)) => {
+            StoreValue::Vec(
+                cljrs_value::value::value_to_seq_vec(seq)
+                    .iter()
+                    .map(|item| to_store_value(store, None, item))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
         other => {
             return Err(format!(
                 "unsupported datom value type: {}",
@@ -124,6 +132,9 @@ fn from_store_value(v: &StoreValue) -> Value {
             let signed: Vec<i8> = b.iter().map(|x| *x as i8).collect();
             Value::ByteArray(GcPtr::new(std::sync::Mutex::new(signed)))
         }
+        StoreValue::Vec(items) => Value::Vector(GcPtr::new(PersistentVector::from_iter(
+            items.iter().map(from_store_value),
+        ))),
     }
 }
 
@@ -165,6 +176,13 @@ fn props_from_map(v: &Value) -> Result<AttrProps, String> {
         }
         if let Some(Value::Bool(true)) = m.get(&Value::keyword(Keyword::simple("ref"))) {
             props.ref_type = true;
+        }
+        if let Some(Value::Bool(true)) = m.get(&Value::keyword(Keyword::simple("unique-identity")))
+        {
+            props.unique_identity = true;
+        }
+        if let Some(Value::Bool(true)) = m.get(&Value::keyword(Keyword::simple("unique-value"))) {
+            props.unique_value = true;
         }
     }
     Ok(props)
@@ -318,6 +336,8 @@ pub fn register(registry: &mut Registry) {
                         let mut pm = MapValue::empty();
                         pm = pm.assoc(kw("cardinality-many"), Value::Bool(props.cardinality_many));
                         pm = pm.assoc(kw("ref"), Value::Bool(props.ref_type));
+                        pm = pm.assoc(kw("unique-identity"), Value::Bool(props.unique_identity));
+                        pm = pm.assoc(kw("unique-value"), Value::Bool(props.unique_value));
                         pm = pm.assoc(kw("aid"), Value::Long(aid as i64));
                         m = m.assoc(Value::keyword(Keyword::parse(&name)), Value::Map(pm));
                     }

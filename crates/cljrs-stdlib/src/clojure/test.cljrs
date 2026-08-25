@@ -135,6 +135,28 @@
   `(binding [*testing-contexts* (conj *testing-contexts* ~string)]
      ~@body))
 
+;; ── Fixtures ──────────────────────────────────────────────────────────────────
+
+(defonce ^:private ns-fixtures (atom {}))
+
+(defn use-fixtures
+  "Register :each fixtures (wrap every test) or :once fixtures (wrap the
+  whole run) for the calling namespace."
+  [kind & fs]
+  (swap! ns-fixtures assoc-in [(ns-name *ns*) kind] (vec fs))
+  nil)
+
+(defn- default-fixture [f] (f))
+
+(defn compose-fixtures [f1 f2]
+  (fn [g] (f1 (fn [] (f2 g)))))
+
+(defn join-fixtures [fixtures]
+  (reduce compose-fixtures default-fixture fixtures))
+
+(defn- fixtures-for [ns kind]
+  (join-fixtures (get-in @ns-fixtures [(ns-name ns) kind] [])))
+
 ;; ── Test definition ───────────────────────────────────────────────────────────
 
 (defmacro deftest [name & body]
@@ -164,10 +186,14 @@
    (binding [*report-counters* {:test 0 :pass 0 :fail 0 :error 0}]
      (report {:type :begin-test-ns :ns ns})
      (let [test-vars (filter (fn [v] (get (meta v) :test))
-                             (vals (ns-publics ns)))]
-       (doseq [v test-vars]
-         (set! *report-counters* (update *report-counters* :test inc))
-         (test-var v)))
+                             (vals (ns-publics ns)))
+           once-fixt (fixtures-for ns :once)
+           each-fixt (fixtures-for ns :each)]
+       (once-fixt
+         (fn []
+           (doseq [v test-vars]
+             (set! *report-counters* (update *report-counters* :test inc))
+             (each-fixt (fn [] (test-var v)))))))
      (report {:type :end-test-ns :ns ns})
      (report {:type  :summary
               :test  (:test *report-counters*)

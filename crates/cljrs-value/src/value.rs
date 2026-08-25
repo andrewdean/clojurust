@@ -594,7 +594,7 @@ fn seq_equal(a: &Value, b: &Value) -> bool {
     a_items.len() == b_items.len() && a_items.iter().zip(b_items.iter()).all(|(x, y)| x == y)
 }
 
-fn value_to_seq_vec(v: &Value) -> Vec<Value> {
+pub fn value_to_seq_vec(v: &Value) -> Vec<Value> {
     // Iteratively unwrap lazy seqs.
     let mut v = v.clone();
     while let Value::LazySeq(ls) = &v {

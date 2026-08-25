@@ -1,0 +1,12 @@
+
+Testing datalevin.query-resolve-test
+
+Ran 1 tests containing 4 assertions.
+0 failures, 0 errors.
+datalevin.query-resolve-test: 1 tests, 4 assertions, 0 failures, 0 errors
+
+Testing datalevin.test.index
+
+Ran 7 tests containing 46 assertions.
+0 failures, 0 errors.
+datalevin.test.index: 7 tests, 46 assertions, 0 failures, 0 errors

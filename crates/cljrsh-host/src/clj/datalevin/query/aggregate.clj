@@ -49,7 +49,8 @@
 
 (defn- add-sum-values
   [a b]
-  (clojure.lang.Numbers/add a b))
+  #?(:cljrsh (+ a b)
+     :clj (clojure.lang.Numbers/add a b)))
 
 (defn- sums-relation
   [group-vars value-var ^HashMap sums]

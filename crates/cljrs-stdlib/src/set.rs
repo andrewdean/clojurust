@@ -25,9 +25,13 @@ pub fn register(globals: &Arc<cljrs_eval::GlobalEnv>, ns: &str) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-fn get_set(v: &Value) -> ValueResult<&SetValue> {
+fn get_set(v: &Value) -> ValueResult<SetValue> {
     match v {
-        Value::Set(s) => Ok(s),
+        Value::Set(s) => Ok(s.clone()),
+        // The JVM implementations are built on seq/count/contains?, all of
+        // which treat nil as empty — (subset? nil s) is true, (difference
+        // nil s) is empty. Mirror that instead of raising.
+        Value::Nil => Ok(SetValue::Hash(GcPtr::new(PersistentHashSet::empty()))),
         other => Err(ValueError::WrongType {
             expected: "set",
             got: other.type_name().to_string(),

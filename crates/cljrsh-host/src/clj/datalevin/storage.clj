@@ -72,22 +72,31 @@
                            :db/cardinality (if (:cardinality-many props)
                                              :db.cardinality/many
                                              :db.cardinality/one)}
-                    (:ref props) (assoc :db/valueType :db.type/ref))]))
+                    (:ref props) (assoc :db/valueType :db.type/ref)
+                    (:unique-identity props)
+                    (assoc :db/unique :db.unique/identity)
+                    (:unique-value props)
+                    (assoc :db/unique :db.unique/value))]))
         (native-attrs store)))
 
 (defn rschema
   "property -> #{attrs}."
   [store]
-  (let [sch (schema store)]
+  (let [sch (schema store)
+        uniq (fn [kind]
+               (set (keep (fn [[a p]] (when (= kind (:db/unique p)) a))
+                          sch)))
+        identity* (uniq :db.unique/identity)
+        value*    (uniq :db.unique/value)]
     {:db.cardinality/many
      (set (keep (fn [[a p]] (when (= :db.cardinality/many
                                     (:db/cardinality p)) a)) sch))
      :db.type/ref
      (set (keep (fn [[a p]] (when (= :db.type/ref (:db/valueType p)) a))
                 sch))
-     :db/unique #{}
-     :db.unique/identity #{}
-     :db.unique/value #{}}))
+     :db/unique (into identity* value*)
+     :db.unique/identity identity*
+     :db.unique/value value*}))
 
 (defn attrs
   "aid -> attr."
@@ -160,8 +169,11 @@
                         (datom-bound index high-datom))))
 
 (defn populated?
+  "Truthy when the range holds datoms, nil otherwise (upstream returns
+  nil for an empty range, and callers test for it)."
   [store index low-datom high-datom]
-  (pos? (long (size store index low-datom high-datom))))
+  (when (pos? (long (size store index low-datom high-datom)))
+    true))
 
 (defn head
   [store index low-datom high-datom]
@@ -335,7 +347,7 @@
   ([store out attr val-ranges vpred get-v? indices]
    (p/add-batch out (ave-tuples-list store attr val-ranges vpred get-v?
                                      indices))
-   (p/add-one out :datalevin/end-scan)
+   (when (p/pipe? out) (p/add-one out :datalevin/end-scan))
    out))
 
 (defn sample-ave-tuples-list
@@ -352,7 +364,7 @@
   (when-some [tuples (sample-ave-tuples-list store attr mcount val-ranges
                                              vpred get-v?)]
     (p/add-batch out tuples)
-    (p/add-one out :datalevin/end-scan)
+    (when (p/pipe? out) (p/add-one out :datalevin/end-scan))
     out))
 
 (defn e-sample
@@ -411,7 +423,7 @@
                  (if t (recur (p/produce in) (conj acc t)) acc))]
     (when (seq attrs-v)
       (p/add-batch out (eav-scan-v-list store tuples eid-idx attrs-v))
-      (p/add-one out :datalevin/end-scan))
+      (when (p/pipe? out) (p/add-one out :datalevin/end-scan)))
     out))
 
 (defn eav-filter-presence-list
@@ -453,14 +465,14 @@
                   (if t (recur (p/produce in) (conj acc t)) acc))]
      (when attr
        (p/add-batch out (val-eq-scan-e-list store tuples v-idx attr))
-       (p/add-one out :datalevin/end-scan))
+       (when (p/pipe? out) (p/add-one out :datalevin/end-scan)))
      out))
   ([store in out v-idx attr bound]
    (let [tuples (loop [t (p/produce in), acc []]
                   (if t (recur (p/produce in) (conj acc t)) acc))]
      (when attr
        (p/add-batch out (val-eq-scan-e-list store tuples v-idx attr bound))
-       (p/add-one out :datalevin/end-scan))
+       (when (p/pipe? out) (p/add-one out :datalevin/end-scan)))
      out)))
 
 (defn val-eq-filter-e-list
@@ -481,7 +493,7 @@
                  (if t (recur (p/produce in) (conj acc t)) acc))]
     (when attr
       (p/add-batch out (val-eq-filter-e-list store tuples v-idx attr f-idx))
-      (p/add-one out :datalevin/end-scan))
+      (when (p/pipe? out) (p/add-one out :datalevin/end-scan)))
     out))
 
 ;; ── search-tuples helpers (db's case tree) ───────────────────────────

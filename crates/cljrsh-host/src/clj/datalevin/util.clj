@@ -13,6 +13,7 @@
   (:require
    [clojure.walk :as walk]
    [clojure.string :as s]
+   #?@(:cljrsh [[babashka.fs :as fs]] :clj [])
    [clojure.java.io :as io])
   (:import
    [datalevin.utl LRUCache]
@@ -120,14 +121,22 @@
 
 (defn list-files [f] (.listFiles (io/file f)))
 
-(defn delete-files
-  "Recursively delete file"
-  [& fs]
-  (when-let [f (first fs)]
-    (if-let [cs (seq (list-files f))]
-      (recur (concatv cs fs))
-      (do (io/delete-file f)
-          (recur (rest fs))))))
+#?(:cljrsh
+   (defn delete-files
+     "Recursively delete file"
+     [& paths]
+     (doseq [f paths]
+       (when (fs/exists? f)
+         (fs/delete-tree f))))
+   :clj
+   (defn delete-files
+     "Recursively delete file"
+     [& fs]
+     (when-let [f (first fs)]
+       (if-let [cs (seq (list-files f))]
+         (recur (concatv cs fs))
+         (do (io/delete-file f)
+             (recur (rest fs)))))))
 
 (defn delete-on-exit
   "Recursively register file to be deleted. NB. new files in
@@ -211,7 +220,8 @@
   "Given a directory name as a string, returns an platform
    neutral temporary directory path."
   ([] +tmp+)
-  ([dir] (str +tmp+ (s/escape dir char-escape-string))))
+  ([dir] #?(:cljrsh (str +tmp+ dir)
+            :clj (str +tmp+ (s/escape dir char-escape-string)))))
 
 (defn dump-bytes
   [^String path ^bytes bs]

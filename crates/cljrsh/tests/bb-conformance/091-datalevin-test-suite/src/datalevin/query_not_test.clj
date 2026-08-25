@@ -596,6 +596,8 @@
                (mapv vec (db/-eav-filter-presence-list
                            database input 1 :item/tags)))
             "matching duplicates survive and missing duplicates are removed")
+        ;; cljrs port: scans are single-threaded — no parallel chunking.
+        #?(:cljrsh nil :clj
         (testing "parallel chunks preserve duplicates split across boundaries"
           (let [parallel-chunks
                 (ns-resolve 'datalevin.storage
@@ -616,7 +618,7 @@
                             database % 1 :item/tags))]
             (is (= [[:one-a 1] [:one-b 1] [:one-c 1] [:one-d 1] [:one-e 1]
                     [:three-a 3] [:three-b 3]]
-                   (mapv vec result))))))
+                   (mapv vec result)))))))
       (finally
         (d/close conn)
         (u/delete-files dir)))))

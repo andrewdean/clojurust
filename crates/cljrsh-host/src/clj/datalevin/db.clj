@@ -350,7 +350,10 @@
     (s/set-attr! store attr
                  {:cardinality-many (= :db.cardinality/many
                                        (:db/cardinality props))
-                  :ref (= :db.type/ref (:db/valueType props))}))
+                  :ref (= :db.type/ref (:db/valueType props))
+                  :unique-identity (= :db.unique/identity
+                                      (:db/unique props))
+                  :unique-value (= :db.unique/value (:db/unique props))}))
   store)
 
 (defn empty-db
