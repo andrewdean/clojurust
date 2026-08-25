@@ -85,3 +85,45 @@ Any OTHER native code that (a) holds a `Value` in a Rust local, then
 a lazy seq via ValueIter) has the same exposure. A systematic audit —
 or a debug-build assertion that flags unrooted GcPtrs reachable from
 the C stack at collection time — would close the class for good.
+
+## Proposed class fix (2026-08-25, cljrsh-rust-shell session)
+
+Sizing the exposed surface: ~33 `callback::invoke` call sites (18 of
+them in `rt_abi.rs`, so AOT-compiled binaries share the class and got
+no spot fixes), 28 `ValueIter::new` sites, plus the comparator paths.
+One instance survives inside the fixed builtins themselves: `into`
+roots its reducing fn and accumulator but not `ValueIter`'s internals,
+and each freshly realized rest of a lazy seq lives only in the
+iterator's Rust field, unrooted across the next invoke.
+
+Three layers, in implementation order:
+
+1. **Conservative stack scanning as an additional root source.** Sound
+   because the heap is non-moving mark-sweep and `GcPtr` is `!Send`: a
+   false positive retains garbage for one extra cycle, never corrupts.
+   Record each mutator's stack bounds at `register_mutator` and its SP
+   at `park_thread`; the collector spills its own callee-saved
+   registers through a small shim, then scans every word-aligned slot
+   of each `[SP, base]` range against the set of live object addresses
+   (built from the allocation list the sweep already walks; sorted vec
+   plus binary search). Hits get marked. After this no Rust local can
+   be freed under a native frame, builtin authors need zero rooting
+   discipline, and `GC_INITIAL_LIVES` can eventually drop to 1,
+   recovering the memory the one-cycle grace retains.
+
+2. **The same scanner as a debug-mode detector.** In debug builds run
+   the scan after precise marking and flag any stack word that points
+   at a live-but-unmarked object: panic with the address and the
+   object's `trace_fn` type. Every remaining audit miss (`rt_abi.rs`
+   first) becomes a deterministic test failure under the optimizer
+   suite, and new builtins cannot silently lean on the conservative
+   layer.
+
+3. **Root the re-entry choke points themselves.** `callback::invoke`
+   is done (580eec7d). Give `ValueIter` a self-root: an internal boxed
+   slot registered on the shadow stack for the iterator's lifetime,
+   updated in place as it advances, covering all 28 sites without
+   local audits.
+
+Exit criterion: the datalevin optimizer suite runs green under the
+debug detector, then case 091 admits it to the conformance gate.
