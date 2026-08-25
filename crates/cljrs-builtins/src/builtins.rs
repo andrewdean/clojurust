@@ -1995,15 +1995,23 @@ pub const CLOJURE_REPL_SOURCE: &str = include_str!("clojure_repl.cljrs");
 /// Finite collections (List, Vector, Set, Map, Str) are converted to a List
 /// on first access, which is fine since they are already fully in memory.
 struct ValueIter {
-    current: Value,
+    /// Boxed so the slot has a stable heap address: it is registered on the
+    /// value shadow stack for the iterator's lifetime, keeping each freshly
+    /// allocated rest chain alive across collections triggered by
+    /// re-entrant callers (callback::invoke, lazy-seq realization).
+    current: Box<Value>,
     error: Option<String>,
+    _root: cljrs_env::gc_roots::ValueRootGuard,
 }
 
 impl ValueIter {
     fn new(v: Value) -> Self {
+        let current = Box::new(v);
+        let root = cljrs_env::gc_roots::root_value(&current);
         ValueIter {
-            current: v,
+            current,
             error: None,
+            _root: root,
         }
     }
 
@@ -2018,33 +2026,32 @@ impl Iterator for ValueIter {
 
     fn next(&mut self) -> Option<Value> {
         loop {
-            match &self.current {
+            match &*self.current {
                 Value::Nil => return None,
                 Value::WithMeta(inner, _) => {
-                    self.current = inner.as_ref().clone();
+                    *self.current = inner.as_ref().clone();
                 }
                 Value::LazySeq(ls) => {
                     let ls = ls.clone();
-                    // Root self.current so the LazySeq (and the entire chain
-                    // it's part of) survives any GC triggered during realize().
-                    let _current_root = cljrs_env::gc_roots::root_value(&self.current);
-                    self.current = ls.get().realize();
+                    // The iterator's self-root keeps the chain alive across
+                    // the GC that realize() can trigger.
+                    *self.current = ls.get().realize();
                     if let Some(err) = ls.get().error() {
                         self.error = Some(err);
-                        self.current = Value::Nil;
+                        *self.current = Value::Nil;
                         return None;
                     }
                 }
                 Value::Cons(c) => {
                     let cell = c.get();
                     let head = cell.head.clone();
-                    self.current = cell.tail.clone();
+                    *self.current = cell.tail.clone();
                     return Some(head);
                 }
                 Value::List(l) => {
                     return if let Some(first) = l.get().first() {
                         let head = first.clone();
-                        self.current = Value::List(GcPtr::new((*l.get().rest()).clone()));
+                        *self.current = Value::List(GcPtr::new((*l.get().rest()).clone()));
                         Some(head)
                     } else {
                         None
@@ -2052,26 +2059,26 @@ impl Iterator for ValueIter {
                 }
                 Value::Vector(v) => {
                     let items: Vec<Value> = v.get().iter().cloned().collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::Set(s) => {
                     let items: Vec<Value> = s.iter().cloned().collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::Map(m) => {
                     let mut pairs = Vec::new();
                     m.for_each(|k, v| {
                         pairs.push(Value::map_entry(k.clone(), v.clone()));
                     });
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
                 }
                 Value::Str(s) => {
                     let chars: Vec<Value> = s.get().chars().map(Value::Char).collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(chars)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(chars)));
                 }
                 Value::ObjectArray(a) => {
                     let items = a.get().0.lock().unwrap().clone();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::IntArray(a) => {
                     let items: Vec<Value> = a
@@ -2081,7 +2088,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::LongArray(a) => {
                     let items: Vec<Value> = a
@@ -2091,7 +2098,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::ShortArray(a) => {
                     let items: Vec<Value> = a
@@ -2101,7 +2108,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::ByteArray(a) => {
                     let items: Vec<Value> = a
@@ -2111,7 +2118,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::FloatArray(a) => {
                     let items: Vec<Value> = a
@@ -2121,7 +2128,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Double(*v as f64))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::DoubleArray(a) => {
                     let items: Vec<Value> = a
@@ -2131,7 +2138,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Double(*v))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::BooleanArray(a) => {
                     let items: Vec<Value> = a
@@ -2141,7 +2148,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Bool(*v))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::CharArray(a) => {
                     let items: Vec<Value> = a
@@ -2151,19 +2158,19 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Char(*v))
                         .collect();
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::TypeInstance(ti) => {
                     let mut pairs = Vec::new();
                     ti.get().fields.for_each(|k, v| {
                         pairs.push(Value::map_entry(k.clone(), v.clone()));
                     });
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
                 }
                 other => {
                     // Java-shim mutable collections iterate as snapshots.
                     let items = crate::javamap::native_coll_items(other)?;
-                    self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
             }
         }
