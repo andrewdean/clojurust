@@ -153,6 +153,12 @@ pub fn invoke(f: &Value, args: Vec<Value>) -> ValueResult<Value> {
     // Unwrap metadata so a WithMeta-wrapped fn is callable.
     let f = f.unwrap_meta();
     let result = if let Value::Fn(cljx_fn) = f {
+        // Root the callee and args for the duration of the call: `f` often
+        // lives only in a caller's Rust local (a derived reducing fn, a
+        // claimed future thunk), which the collector cannot see. The
+        // apply_value branch roots its own inputs.
+        let _f_root = crate::gc_roots::root_value(f);
+        let _args_root = crate::gc_roots::root_values(&args);
         // Honor `^:async` dispatch (spawn the body, return a Future) just like
         // `apply_value` — otherwise a compiled/native caller invoking an async
         // fn would run its body synchronously and never get a Future.

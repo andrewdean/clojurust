@@ -5008,8 +5008,12 @@ fn builtin_into(args: &[Value]) -> ValueResult<Value> {
         )));
         // Apply xform to conj
         let xf_rf = cljrs_env::callback::invoke(xform, vec![conj_rf])?;
-        // Reduce over from with xf_rf
+        // Root the derived reducing fn and the accumulator: both live only
+        // in Rust locals across the re-entrant reduction calls, and a
+        // collection triggered inside one call must not free them.
+        let _rf_root = cljrs_env::gc_roots::root_value(&xf_rf);
         let mut acc = to.clone();
+        let _acc_root = cljrs_env::gc_roots::root_value(&acc);
         let mut iter = ValueIter::new(from.clone());
         for item in iter.by_ref() {
             acc = cljrs_env::callback::invoke(&xf_rf, vec![acc, item])?;
@@ -5080,6 +5084,9 @@ fn builtin_reduce(args: &[Value]) -> ValueResult<Value> {
                 return cljrs_env::callback::invoke(f, vec![]);
             };
             let mut acc = first;
+            // The accumulator lives only in this Rust local between calls;
+            // root it so an in-call collection cannot free it.
+            let _acc_root = cljrs_env::gc_roots::root_value(&acc);
             for item in iter.by_ref() {
                 acc = cljrs_env::callback::invoke(f, vec![acc, item])?;
                 if let Value::Reduced(inner) = acc {
@@ -5094,6 +5101,7 @@ fn builtin_reduce(args: &[Value]) -> ValueResult<Value> {
         3 => {
             // (reduce f init coll)
             let mut acc = args[1].clone();
+            let _acc_root = cljrs_env::gc_roots::root_value(&acc);
             let mut iter = ValueIter::new(args[2].clone());
             for item in iter.by_ref() {
                 acc = cljrs_env::callback::invoke(f, vec![acc, item])?;
@@ -8452,9 +8460,13 @@ where
     let mid = len / 2;
     merge_sort(&mut items[..mid], compare)?;
     merge_sort(&mut items[mid..], compare)?;
-    // Merge into temp buffer
+    // Merge into temp buffer. Root both halves: once a slot in `items` is
+    // overwritten, the temp vec may hold the only reference, and the
+    // comparator can trigger a collection.
     let left = items[..mid].to_vec();
     let right = items[mid..].to_vec();
+    let _left_root = cljrs_env::gc_roots::root_values(&left);
+    let _right_root = cljrs_env::gc_roots::root_values(&right);
     let (mut i, mut j, mut k) = (0, 0, 0);
     while i < left.len() && j < right.len() {
         if compare(&left[i], &right[j])? != std::cmp::Ordering::Greater {
@@ -8484,6 +8496,7 @@ fn builtin_sort(args: &[Value]) -> ValueResult<Value> {
         // (sort comp coll)
         let comp = args[0].clone();
         let mut items = value_to_seq(&args[1])?;
+        let _items_root = cljrs_env::gc_roots::root_values(&items);
         merge_sort(&mut items, &|a, b| invoke_compare(&comp, a, b))?;
         match &args[1] {
             Value::Nil => Ok(Value::List(GcPtr::new(PersistentList::Empty))),
@@ -8628,11 +8641,17 @@ fn builtin_sort_by(args: &[Value]) -> ValueResult<Value> {
         (None, &args[1])
     };
     let items = value_to_seq(coll)?;
-    // Pre-compute keys to avoid calling keyfn O(n log n) times
+    let _items_root = cljrs_env::gc_roots::root_values(&items);
+    // Pre-compute keys to avoid calling keyfn O(n log n) times. Capacity is
+    // reserved up front so the vec never reallocates; the per-iteration
+    // guard keeps the keys computed so far alive across the next keyfn call
+    // (which can trigger a collection).
     let mut keys: Vec<Value> = Vec::with_capacity(items.len());
     for item in &items {
+        let _keys_root = cljrs_env::gc_roots::root_values(&keys);
         keys.push(cljrs_env::callback::invoke(keyfn, vec![item.clone()])?);
     }
+    let _keys_root = cljrs_env::gc_roots::root_values(&keys);
     // Build index array and sort by keys
     let mut indices: Vec<usize> = (0..items.len()).collect();
     let mut sort_error: Option<ValueError> = None;
