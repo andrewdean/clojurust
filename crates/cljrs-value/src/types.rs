@@ -37,7 +37,8 @@ pub(crate) fn value_gcptr_is_static(value: &Value) -> bool {
         | Value::Long(_)
         | Value::Double(_)
         | Value::Char(_)
-        | Value::Uuid(_) => true,
+        | Value::Uuid(_)
+        | Value::Instant(_) => true,
         // Arc-managed — not GcPtr; always considered static.
         Value::Resource(_) | Value::SharedAtom(_) | Value::ByteBlob(_) => true,
         // GcPtr variants.
@@ -56,10 +57,12 @@ pub(crate) fn value_gcptr_is_static(value: &Value) -> bool {
             MapValue::Array(p) => p.is_static_alloc(),
             MapValue::Hash(p) => p.is_static_alloc(),
             MapValue::Sorted(p) => p.is_static_alloc(),
+            MapValue::SortedBy(p) => p.is_static_alloc(),
         },
         Value::Set(s) => match s {
             SetValue::Hash(p) => p.is_static_alloc(),
             SetValue::Sorted(p) => p.is_static_alloc(),
+            SetValue::SortedBy(p) => p.is_static_alloc(),
         },
         Value::NativeFunction(p) => p.is_static_alloc(),
         Value::Fn(p) | Value::Macro(p) => p.is_static_alloc(),
