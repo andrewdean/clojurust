@@ -300,8 +300,14 @@ default, and it stays contained inside the store crate.
    engine — datalevin.core facade vendored (query family re-exports +
    conn/tx over the minimal translator, moved from the veneer);
    query-resolve and index suites fully green and gating; query-not
-   green pending final verification; query-optimizer vendored, first
-   run pending. Engine gaps the suites surfaced and fixed: nil-as-
+   fully green and gating (18 tests, 127 assertions; the case takes
+   ~6 minutes); query-optimizer vendored with idoc tests gated, not
+   yet gating — remaining: a runtime panic in
+   sampled-late-expansion-cost-test under diagnosis, and cost-model
+   divergences (guardrail budget fields, base-sample selection,
+   indexed-union order). The suites caught a real silent-wrong-results
+   bug: core get on java.util.Map shims returned nil, so or-join
+   linked joins through the pipe path returned empty. Engine gaps the suites surfaced and fixed: nil-as-
    empty-set in clojure.set, populated? nil contract, end-scan gated
    to pipes, :db/unique flags in the native store + lookup-ref
    resolution, ordered tuple (vector) values in the codec, conj onto

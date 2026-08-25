@@ -142,6 +142,13 @@
 (defn- plan-cache []
   *plan-cache*)
 
+(defn clear-plan-cache!
+  "Empty the plan cache (tests use this between explain runs)."
+  []
+  #?(:cljrsh (vreset! *plan-cache* (lru/cache c/query-result-cache-size))
+     :clj (.clear ^LRUCache *plan-cache*))
+  nil)
+
 (declare access-clause-deps access-clause-ready?
          build-plan estimate-hash-join-cost estimate-link-cost plan-not-joins)
 

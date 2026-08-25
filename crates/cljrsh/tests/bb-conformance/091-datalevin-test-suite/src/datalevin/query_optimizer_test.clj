@@ -1173,7 +1173,8 @@
               (is (= :eager (:selected planning)))
               (is (= [:membership/date]
                      (get-in planning [:groups 0 :attrs]))))))
-        (.clear ^datalevin.utl.LRUCache qo/*plan-cache*)
+        #?(:cljrsh (qo/clear-plan-cache!)
+           :clj (.clear ^datalevin.utl.LRUCache qo/*plan-cache*))
         (with-bindings (assoc common-bindings
                               #'c/deferred-eav-min-cost-improvement 0.0)
           (let [explain  (d/explain {:run? true}
@@ -1237,7 +1238,8 @@
                   {:db/id (+ 300000 (* i 20) j)
                    :post/person (+ 1000 i)
                    :post/forum (+ 2000 j)}))))
-      (.clear ^datalevin.utl.LRUCache qo/*plan-cache*)
+      #?(:cljrsh (qo/clear-plan-cache!)
+         :clj (.clear ^datalevin.utl.LRUCache qo/*plan-cache*))
       (binding [c/init-exec-size-threshold 5
                 c/hash-join-min-input-size 1
                 c/magic-cost-hash-join 0.1]
