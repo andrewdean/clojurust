@@ -831,7 +831,10 @@ pub fn eval_loop(args: &[Form], env: &mut Env) -> EvalResult {
 
     // Separate pattern forms and initial values.
     let patterns: Vec<Form> = bindings.iter().step_by(2).cloned().collect();
-    let mut current_vals: Vec<Value> = Vec::new();
+    // Rooted owned vec: earlier init values must survive GC triggered while
+    // evaluating later ones, and each recur iteration's values must survive
+    // until bound into the env frame.
+    let mut current_vals = cljrs_env::gc_roots::RootedValueVec::new(Vec::new());
 
     // Evaluate initial values.
     for i in (1..bindings.len()).step_by(2) {
@@ -839,9 +842,6 @@ pub fn eval_loop(args: &[Form], env: &mut Env) -> EvalResult {
     }
 
     loop {
-        // Root current_vals so they survive GC — they're not yet bound in env.
-        let _vals_root = cljrs_env::gc_roots::root_values(&current_vals);
-
         // GC safepoint on every loop iteration so tight recur loops
         // don't starve the collector.
         cljrs_env::gc_roots::gc_safepoint(env);
@@ -866,7 +866,7 @@ pub fn eval_loop(args: &[Form], env: &mut Env) -> EvalResult {
         let _iter_frame = cljrs_gc::push_alloc_frame();
 
         env.push_frame();
-        for (pat, val) in patterns.iter().zip(current_vals.iter()) {
+        for (pat, val) in patterns.iter().zip(current_vals.as_slice().iter()) {
             if let Err(e) = bind_pattern(pat, val.clone(), env) {
                 env.pop_frame();
                 return Err(e);
@@ -896,7 +896,7 @@ pub fn eval_loop(args: &[Form], env: &mut Env) -> EvalResult {
                 }
                 // new_vals were evaluated in the caller's context (scratch was
                 // popped before the tail form), so they survive the reset.
-                current_vals = new_vals;
+                current_vals = cljrs_env::gc_roots::RootedValueVec::new(new_vals);
             }
             Err(e) => return Err(e),
         }

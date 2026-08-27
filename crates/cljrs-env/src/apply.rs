@@ -155,7 +155,11 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
     // Root the callee and args so they survive any GC triggered at the safepoint.
     // These values are on the Rust stack but not yet in any Env frame.
     let _callee_root = crate::gc_roots::root_value(callee);
-    let _args_root = crate::gc_roots::root_values(&args);
+    // Rooting handoff: this guard is dropped just before any arm that MOVES
+    // `args` into a recursive apply — the callee re-roots the same buffer
+    // before its first safepoint, and holding the guard across the move
+    // would leave a dangling entry once the moved Vec is eventually dropped.
+    let args_root = crate::gc_roots::root_values(&args);
 
     // GC safepoint at function application boundary — blocks if collection is in progress,
     // and initiates collection if one was requested (memory pressure).
@@ -186,6 +190,7 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
             // This means captured bindings take priority over the caller's,
             // but vars not in the capture fall through to the caller's frames.
             let _guard = crate::dynamics::push_frame(bf_ref.captured_bindings.clone());
+            drop(args_root);
             apply_value(&bf_ref.wrapped, args, env)
         }
         Value::ProtocolFn(pf) => {
@@ -216,6 +221,7 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                 ));
                 if let Some(impl_fn) = m.get(&method_sym) {
                     let _impl_root = crate::gc_roots::root_value(&impl_fn);
+                    drop(args_root);
                     return apply_value(&impl_fn, args, env);
                 }
             }
@@ -239,6 +245,7 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                 })?;
             drop(impls);
             let _impl_root = crate::gc_roots::root_value(&impl_fn);
+            drop(args_root);
             apply_value(&impl_fn, args, env)
         }
         Value::MultiFn(mf) => {
@@ -260,6 +267,7 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                 })?;
             drop(methods);
             let _impl_root = crate::gc_roots::root_value(&impl_fn);
+            drop(args_root);
             apply_value(&impl_fn, args, env)
         }
         Value::Keyword(_kw) => {
@@ -318,7 +326,10 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
             }
             None => Ok(Value::Nil),
         },
-        Value::WithMeta(inner, _) => apply_value(inner, args, env),
+        Value::WithMeta(inner, _) => {
+            drop(args_root);
+            apply_value(inner, args, env)
+        }
         Value::Var(v) => {
             // Vars in function position are transparently deref'd (IFn on Var).
             // The IR interpreter uses DefVar to create per-call mutable cells for
@@ -331,6 +342,7 @@ pub fn apply_value(callee: &Value, args: Vec<Value>, env: &mut Env) -> EvalResul
                     v.get().name,
                 ))
             })?;
+            drop(args_root);
             apply_value(&inner, args, env)
         }
         other => Err(EvalError::NotCallable(format!(

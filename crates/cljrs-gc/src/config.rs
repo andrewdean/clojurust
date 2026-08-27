@@ -153,7 +153,11 @@ fn default_hard_limit() -> usize {
 /// as a 42 GiB widget process).  Workloads that genuinely need a bigger heap
 /// set limits explicitly via `--gc-soft-limit-mb` / `--gc-hard-limit-mb` or
 /// `CLJRS_GC_SOFT_LIMIT_MB` / `CLJRS_GC_HARD_LIMIT_MB`.
+#[cfg(target_pointer_width = "64")]
 const DEFAULT_HARD_LIMIT_CAP: usize = 4 * 1024 * 1024 * 1024;
+// 4 GiB overflows a 32-bit usize (wasm32); the whole address space is the cap.
+#[cfg(not(target_pointer_width = "64"))]
+const DEFAULT_HARD_LIMIT_CAP: usize = usize::MAX;
 
 // sysctlbyname for macOS
 #[cfg(target_os = "macos")]

@@ -1168,3 +1168,36 @@ fn fs_delete_removes_symlink_to_directory_not_target() {
     assert_eq!(r.stdout, "true", "the target dir must survive");
     assert!(!link.exists() && link.symlink_metadata().is_err());
 }
+
+/// Under GC stress plus quarantine, re-associng freshly allocated keyword
+/// keys must never leave a freed key instance inside the map's lookup index
+/// (the 2026-08-27 optimizer-suite use-after-free).  Stress forces a
+/// collection at every safepoint; quarantine turns any use-after-free into a
+/// deterministic panic instead of a silent read of reused memory.
+#[test]
+fn map_reassoc_survives_gc_stress_with_quarantine() {
+    let expr = "(println :ok (loop [i 0 m {}] (if (= i 60) (get m :k3) (recur (inc i) (assoc m (keyword (str \"k\" (mod i 12))) i)))))";
+    let r = run(
+        &["-e", expr],
+        None,
+        &[("CLJRS_GC_STRESS", "1"), ("CLJRS_GC_QUARANTINE", "1")],
+    );
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert_eq!(r.stdout.trim(), ":ok 51");
+}
+
+/// Primitive arrays are GcPtr allocations with no interior Values; their
+/// Value::trace arms were once empty, so any array surviving a collection
+/// while referenced only from Clojure data or locals was swept (aget on a
+/// freed IntArray, 2026-08-27 optimizer-suite panic).
+#[test]
+fn primitive_array_survives_gc_stress_with_quarantine() {
+    let expr = "(let [a (int-array [1 2 3]) v [a]] (dotimes [i 50] (str i)) (println :ok (aget (first v) 2) (aget a 0)))";
+    let r = run(
+        &["-e", expr],
+        None,
+        &[("CLJRS_GC_STRESS", "1"), ("CLJRS_GC_QUARANTINE", "1")],
+    );
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert_eq!(r.stdout.trim(), ":ok 3 1");
+}

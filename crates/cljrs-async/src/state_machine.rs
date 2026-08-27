@@ -44,7 +44,6 @@ use std::task::{Context, Poll};
 
 use cljrs_env::env::GlobalEnv;
 use cljrs_env::error::{EvalError, EvalResult};
-use cljrs_env::gc_roots::{ValueRootGuard, root_value, root_values};
 use cljrs_value::{FutureState, Value};
 
 use crate::eval_async::spawn_future;
@@ -157,27 +156,26 @@ pub fn check_ready(val: &Value) -> Readiness {
 /// `LocalSet`, keeping its state machine GC-rooted while suspended.
 pub struct CompiledAsyncTask {
     sm: Box<CljxStateMachine>,
-    // Root guards keep `sm.slots` and `sm.pending` reachable to the collector
-    // across every `.await`.  Held for the whole task; dropped on completion.
-    _slots_root: ValueRootGuard,
-    _pending_root: ValueRootGuard,
 }
 
 impl CompiledAsyncTask {
     /// Wrap a state machine.  The machine is boxed so its slot buffer and
-    /// `pending` field have stable addresses for the root guards.
+    /// `pending` field have stable addresses; both are registered as roots
+    /// here and unregistered in Drop (self-rooting container: `slots` is
+    /// fixed-length by contract, so the registered pointers stay valid for
+    /// the task's whole lifetime, across every `.await`).
     pub fn new(sm: CljxStateMachine) -> Self {
         let sm = Box::new(sm);
-        // The Vec buffer (slots) and the boxed `pending` field both live behind
-        // the box's stable heap allocation, so these raw-pointer roots remain
-        // valid even as the `CompiledAsyncTask` (and thus the box pointer) moves.
-        let slots_root = root_values(&sm.slots);
-        let pending_root = root_value(&sm.pending);
-        Self {
-            sm,
-            _slots_root: slots_root,
-            _pending_root: pending_root,
-        }
+        cljrs_env::gc_roots::register_value_root_slice(&sm.slots);
+        cljrs_env::gc_roots::register_value_root_slice(std::slice::from_ref(&sm.pending));
+        Self { sm }
+    }
+}
+
+impl Drop for CompiledAsyncTask {
+    fn drop(&mut self) {
+        cljrs_env::gc_roots::unregister_value_root_slice(std::slice::from_ref(&self.sm.pending));
+        cljrs_env::gc_roots::unregister_value_root_slice(&self.sm.slots);
     }
 }
 

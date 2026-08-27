@@ -78,12 +78,9 @@ impl ClojureHash for TransientSet {
 
 impl cljrs_gc::Trace for TransientSet {
     fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
-        {
-            let set = self.set.lock().unwrap();
-            for v in set.iter() {
-                v.trace(visitor);
-            }
-        }
+        // Delegate to the inner set's trace: it covers index-only
+        // instances that iter() (order-only) misses.
+        self.set.lock().unwrap().trace(visitor);
     }
 
     fn gc_size_extra(&self) -> usize {

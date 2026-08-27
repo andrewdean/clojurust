@@ -1995,23 +1995,19 @@ pub const CLOJURE_REPL_SOURCE: &str = include_str!("clojure_repl.cljrs");
 /// Finite collections (List, Vector, Set, Map, Str) are converted to a List
 /// on first access, which is fine since they are already fully in memory.
 struct ValueIter {
-    /// Boxed so the slot has a stable heap address: it is registered on the
-    /// value shadow stack for the iterator's lifetime, keeping each freshly
-    /// allocated rest chain alive across collections triggered by
-    /// re-entrant callers (callback::invoke, lazy-seq realization).
-    current: Box<Value>,
+    /// The cursor lives in a [`BoxedValueRoot`]: a rooted slot that OWNS its
+    /// heap storage (the registration cannot outlive the memory), keeping
+    /// each freshly allocated rest chain alive across collections triggered
+    /// by re-entrant callers (callback::invoke, lazy-seq realization).
+    current: cljrs_env::gc_roots::BoxedValueRoot,
     error: Option<String>,
-    _root: cljrs_env::gc_roots::ValueRootGuard,
 }
 
 impl ValueIter {
     fn new(v: Value) -> Self {
-        let current = Box::new(v);
-        let root = cljrs_env::gc_roots::root_value(&current);
         ValueIter {
-            current,
+            current: cljrs_env::gc_roots::BoxedValueRoot::new(v),
             error: None,
-            _root: root,
         }
     }
 
@@ -2026,32 +2022,35 @@ impl Iterator for ValueIter {
 
     fn next(&mut self) -> Option<Value> {
         loop {
-            match &*self.current {
+            // Clone the cursor (a cheap GcPtr copy) so the arms can write
+            // the slot while pattern bindings are alive.
+            let cur = self.current.get().clone();
+            match &cur {
                 Value::Nil => return None,
                 Value::WithMeta(inner, _) => {
-                    *self.current = inner.as_ref().clone();
+                    *self.current.get_mut() = inner.as_ref().clone();
                 }
                 Value::LazySeq(ls) => {
                     let ls = ls.clone();
                     // The iterator's self-root keeps the chain alive across
                     // the GC that realize() can trigger.
-                    *self.current = ls.get().realize();
+                    *self.current.get_mut() = ls.get().realize();
                     if let Some(err) = ls.get().error() {
                         self.error = Some(err);
-                        *self.current = Value::Nil;
+                        *self.current.get_mut() = Value::Nil;
                         return None;
                     }
                 }
                 Value::Cons(c) => {
                     let cell = c.get();
                     let head = cell.head.clone();
-                    *self.current = cell.tail.clone();
+                    *self.current.get_mut() = cell.tail.clone();
                     return Some(head);
                 }
                 Value::List(l) => {
                     return if let Some(first) = l.get().first() {
                         let head = first.clone();
-                        *self.current = Value::List(GcPtr::new((*l.get().rest()).clone()));
+                        *self.current.get_mut() = Value::List(GcPtr::new((*l.get().rest()).clone()));
                         Some(head)
                     } else {
                         None
@@ -2059,26 +2058,26 @@ impl Iterator for ValueIter {
                 }
                 Value::Vector(v) => {
                     let items: Vec<Value> = v.get().iter().cloned().collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::Set(s) => {
                     let items: Vec<Value> = s.iter().cloned().collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::Map(m) => {
                     let mut pairs = Vec::new();
                     m.for_each(|k, v| {
                         pairs.push(Value::map_entry(k.clone(), v.clone()));
                     });
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
                 }
                 Value::Str(s) => {
                     let chars: Vec<Value> = s.get().chars().map(Value::Char).collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(chars)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(chars)));
                 }
                 Value::ObjectArray(a) => {
                     let items = a.get().0.lock().unwrap().clone();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::IntArray(a) => {
                     let items: Vec<Value> = a
@@ -2088,7 +2087,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::LongArray(a) => {
                     let items: Vec<Value> = a
@@ -2098,7 +2097,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::ShortArray(a) => {
                     let items: Vec<Value> = a
@@ -2108,7 +2107,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::ByteArray(a) => {
                     let items: Vec<Value> = a
@@ -2118,7 +2117,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Long(*v as i64))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::FloatArray(a) => {
                     let items: Vec<Value> = a
@@ -2128,7 +2127,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Double(*v as f64))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::DoubleArray(a) => {
                     let items: Vec<Value> = a
@@ -2138,7 +2137,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Double(*v))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::BooleanArray(a) => {
                     let items: Vec<Value> = a
@@ -2148,7 +2147,7 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Bool(*v))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::CharArray(a) => {
                     let items: Vec<Value> = a
@@ -2158,19 +2157,19 @@ impl Iterator for ValueIter {
                         .iter()
                         .map(|v| Value::Char(*v))
                         .collect();
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
                 Value::TypeInstance(ti) => {
                     let mut pairs = Vec::new();
                     ti.get().fields.for_each(|k, v| {
                         pairs.push(Value::map_entry(k.clone(), v.clone()));
                     });
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(pairs)));
                 }
                 other => {
                     // Java-shim mutable collections iterate as snapshots.
                     let items = crate::javamap::native_coll_items(other)?;
-                    *self.current = Value::List(GcPtr::new(PersistentList::from_iter(items)));
+                    *self.current.get_mut() = Value::List(GcPtr::new(PersistentList::from_iter(items)));
                 }
             }
         }
@@ -5019,13 +5018,17 @@ fn builtin_into(args: &[Value]) -> ValueResult<Value> {
         // in Rust locals across the re-entrant reduction calls, and a
         // collection triggered inside one call must not free them.
         let _rf_root = cljrs_env::gc_roots::root_value(&xf_rf);
-        let mut acc = to.clone();
-        let _acc_root = cljrs_env::gc_roots::root_value(&acc);
+        // The accumulator lives in a rooted, owned slot: it is reassigned on
+        // every reduction step, and the slot keeps whichever value it holds
+        // alive across the re-entrant invoke.
+        let mut acc = cljrs_env::gc_roots::BoxedValueRoot::new(to.clone());
         let mut iter = ValueIter::new(from.clone());
         for item in iter.by_ref() {
-            acc = cljrs_env::callback::invoke(&xf_rf, vec![acc, item])?;
-            if let Value::Reduced(inner) = acc {
-                acc = *inner;
+            let next = cljrs_env::callback::invoke(&xf_rf, vec![acc.get().clone(), item])?;
+            acc.set(next);
+            if let Value::Reduced(inner) = acc.get() {
+                let inner = inner.as_ref().clone();
+                acc.set(inner);
                 break;
             }
         }
@@ -5033,11 +5036,13 @@ fn builtin_into(args: &[Value]) -> ValueResult<Value> {
             return Err(ValueError::Other(err));
         }
         // Call completion arity
-        acc = cljrs_env::callback::invoke(&xf_rf, vec![acc])?;
-        if let Value::Reduced(inner) = acc {
-            acc = *inner;
+        let done = cljrs_env::callback::invoke(&xf_rf, vec![acc.get().clone()])?;
+        acc.set(done);
+        if let Value::Reduced(inner) = acc.get() {
+            let inner = inner.as_ref().clone();
+            acc.set(inner);
         }
-        return Ok(acc);
+        return Ok(acc.get().clone());
     }
     let meta = args[0].get_meta().cloned();
     let mut result = args[0].unwrap_meta().clone();
@@ -5090,36 +5095,37 @@ fn builtin_reduce(args: &[Value]) -> ValueResult<Value> {
                 // empty coll: call (f) for init
                 return cljrs_env::callback::invoke(f, vec![]);
             };
-            let mut acc = first;
-            // The accumulator lives only in this Rust local between calls;
-            // root it so an in-call collection cannot free it.
-            let _acc_root = cljrs_env::gc_roots::root_value(&acc);
+            // The accumulator lives only in Rust locals between calls; the
+            // rooted owned slot keeps each intermediate alive across the
+            // re-entrant invoke.
+            let mut acc = cljrs_env::gc_roots::BoxedValueRoot::new(first);
             for item in iter.by_ref() {
-                acc = cljrs_env::callback::invoke(f, vec![acc, item])?;
-                if let Value::Reduced(inner) = acc {
+                let next = cljrs_env::callback::invoke(f, vec![acc.get().clone(), item])?;
+                if let Value::Reduced(inner) = next {
                     return Ok(*inner);
                 }
+                acc.set(next);
             }
             if let Some(err) = iter.take_error() {
                 return Err(ValueError::Other(err));
             }
-            Ok(acc)
+            Ok(acc.get().clone())
         }
         3 => {
             // (reduce f init coll)
-            let mut acc = args[1].clone();
-            let _acc_root = cljrs_env::gc_roots::root_value(&acc);
+            let mut acc = cljrs_env::gc_roots::BoxedValueRoot::new(args[1].clone());
             let mut iter = ValueIter::new(args[2].clone());
             for item in iter.by_ref() {
-                acc = cljrs_env::callback::invoke(f, vec![acc, item])?;
-                if let Value::Reduced(inner) = acc {
+                let next = cljrs_env::callback::invoke(f, vec![acc.get().clone(), item])?;
+                if let Value::Reduced(inner) = next {
                     return Ok(*inner);
                 }
+                acc.set(next);
             }
             if let Some(err) = iter.take_error() {
                 return Err(ValueError::Other(err));
             }
-            Ok(acc)
+            Ok(acc.get().clone())
         }
         n => Err(ValueError::Other(format!(
             "reduce requires 2 or 3 args, got {n}"
@@ -8502,12 +8508,13 @@ fn builtin_sort(args: &[Value]) -> ValueResult<Value> {
     if args.len() == 2 {
         // (sort comp coll)
         let comp = args[0].clone();
-        let mut items = value_to_seq(&args[1])?;
-        let _items_root = cljrs_env::gc_roots::root_values(&items);
-        merge_sort(&mut items, &|a, b| invoke_compare(&comp, a, b))?;
+        // The rooted owned vec keeps every element alive across comparator
+        // re-entry; the buffer is permuted in place, never grown.
+        let mut items = cljrs_env::gc_roots::RootedValueVec::new(value_to_seq(&args[1])?);
+        merge_sort(items.as_mut_slice(), &|a, b| invoke_compare(&comp, a, b))?;
         match &args[1] {
             Value::Nil => Ok(Value::List(GcPtr::new(PersistentList::Empty))),
-            _ => Ok(cons_from_iter(items)),
+            _ => Ok(cons_from_iter(items.into_vec())),
         }
     } else {
         // (sort coll)
@@ -8649,16 +8656,15 @@ fn builtin_sort_by(args: &[Value]) -> ValueResult<Value> {
     };
     let items = value_to_seq(coll)?;
     let _items_root = cljrs_env::gc_roots::root_values(&items);
-    // Pre-compute keys to avoid calling keyfn O(n log n) times. Capacity is
-    // reserved up front so the vec never reallocates; the per-iteration
-    // guard keeps the keys computed so far alive across the next keyfn call
-    // (which can trigger a collection).
-    let mut keys: Vec<Value> = Vec::with_capacity(items.len());
+    // Pre-compute keys to avoid calling keyfn O(n log n) times.  The rooted
+    // owned vec keeps the keys computed so far alive across the next keyfn
+    // call (which can trigger a collection), re-registering itself around
+    // any growth.
+    let mut keys = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(items.len()));
     for item in &items {
-        let _keys_root = cljrs_env::gc_roots::root_values(&keys);
         keys.push(cljrs_env::callback::invoke(keyfn, vec![item.clone()])?);
     }
-    let _keys_root = cljrs_env::gc_roots::root_values(&keys);
+    let keys = keys.as_slice();
     // Build index array and sort by keys
     let mut indices: Vec<usize> = (0..items.len()).collect();
     let mut sort_error: Option<ValueError> = None;

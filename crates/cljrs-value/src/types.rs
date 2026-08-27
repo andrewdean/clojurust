@@ -165,11 +165,26 @@ pub fn bump_protocol_generation() {
 
 type InteropMethodMap = std::collections::HashMap<(Arc<str>, Arc<str>), crate::Value>;
 
-// Thread-local: evaluation is single-threaded, and the entries are
-// duplicate pointers to impls the protocol objects already keep traced.
+// Thread-local: evaluation is single-threaded.  Entries usually duplicate
+// impls the protocol objects keep traced, but a redefined protocol or a
+// replaced impl can orphan an entry, so the registry is traced as a GC
+// root in its own right via [`trace_interop_methods`].
 thread_local! {
     static INTEROP_METHODS: std::cell::RefCell<InteropMethodMap> =
         std::cell::RefCell::new(InteropMethodMap::new());
+}
+
+/// Trace every registered interop impl fn.  Called from the collector's
+/// root set (cljrs-env gc_roots): entries whose owning protocol object was
+/// redefined or dropped would otherwise dangle at the next `(.method x)`
+/// dispatch.
+pub fn trace_interop_methods(visitor: &mut cljrs_gc::MarkVisitor) {
+    use cljrs_gc::Trace as _;
+    INTEROP_METHODS.with(|m| {
+        for f in m.borrow().values() {
+            f.trace(visitor);
+        }
+    });
 }
 
 /// Record a protocol method impl for interop dispatch.
@@ -642,6 +657,12 @@ pub struct NativeFn {
     pub name: Arc<str>,
     pub arity: Arity,
     pub func: NativeFnFunc,
+    /// Values captured by `func` when it is a compiled-closure wrapper.
+    /// `func` is an opaque `dyn Fn`, so any GC values it closes over MUST
+    /// also be stored here for the tracer; a closure whose captures live
+    /// only inside `func` gets them swept out from under it (JIT tier).
+    /// Empty for ordinary builtins.
+    pub captured: Vec<Value>,
 }
 
 impl NativeFn {
@@ -651,6 +672,7 @@ impl NativeFn {
             name: name.into(),
             arity,
             func: Arc::new(func),
+            captured: Vec::new(),
         }
     }
 
@@ -664,6 +686,7 @@ impl NativeFn {
             name: name.into(),
             arity,
             func: Arc::new(func),
+            captured: Vec::new(),
         }
     }
 }
@@ -679,7 +702,12 @@ impl std::fmt::Debug for NativeFn {
 }
 
 impl cljrs_gc::Trace for NativeFn {
-    fn trace(&self, _: &mut cljrs_gc::MarkVisitor) {}
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        // `func` is opaque; `captured` mirrors any GC values it closes over.
+        for v in &self.captured {
+            v.trace(visitor);
+        }
+    }
 }
 
 // ── CljxFnArity ───────────────────────────────────────────────────────────────

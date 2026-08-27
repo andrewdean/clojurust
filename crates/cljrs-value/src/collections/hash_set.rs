@@ -105,6 +105,13 @@ impl cljrs_gc::Trace for PersistentHashSet {
         for (_, v) in self.order.iter() {
             v.trace(visitor);
         }
+        // Defense in depth against the PersistentHashMap index-desync bug:
+        // conj currently guarantees index keys alias order values, but any
+        // future replace-on-insert would leave index-only instances that
+        // must still be traced.
+        for (k, _) in self.index.iter() {
+            k.trace(visitor);
+        }
     }
 
     fn gc_size_extra(&self) -> usize {

@@ -137,6 +137,7 @@ fn pinned_native_dylib_end_to_end() {
 
     // Host's own (HEAD) implementation — must remain untouched.
     let head_fn = cljrs_value::NativeFn {
+        captured: Vec::new(),
         name: Arc::from("build-tag"),
         arity: cljrs_value::Arity::Fixed(0),
         func: Arc::new(|_args| Ok(Value::Long(99))),

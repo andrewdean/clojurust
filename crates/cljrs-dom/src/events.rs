@@ -124,6 +124,10 @@ pub struct DomListener {
     event_type: String,
     callback: js_sys::Function,
     capture: bool,
+    /// The Clojure handler fn, held (and traced) here because the copy
+    /// captured inside `_closure` is opaque to the GC: without this field
+    /// the handler's CljxFn could be swept while the listener is live.
+    handler: Value,
     // Kept alive so the Rust closure is not freed while the listener is active.
     _closure: Closure<dyn FnMut(web_sys::Event)>,
 }
@@ -139,7 +143,9 @@ unsafe impl Send for DomListener {}
 unsafe impl Sync for DomListener {}
 
 impl Trace for DomListener {
-    fn trace(&self, _visitor: &mut MarkVisitor) {}
+    fn trace(&self, visitor: &mut MarkVisitor) {
+        self.handler.trace(visitor);
+    }
 }
 
 impl NativeObject for DomListener {
@@ -173,6 +179,7 @@ pub fn create_listener(
     handler: Value,
     opts: ListenerOptions,
 ) -> Result<Value, String> {
+    let handler_root = handler.clone();
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
         let ptr = NonNull::from(&event);
         ACTIVE_EVENT.with(|ae| *ae.borrow_mut() = Some(ptr));
@@ -208,6 +215,7 @@ pub fn create_listener(
         event_type,
         callback,
         capture: opts.capture,
+        handler: handler_root,
         _closure: closure,
     })))
 }
@@ -242,6 +250,9 @@ pub fn remove_listener(val: &Value) -> ValueResult<()> {
 /// Attach an event handler for use inside `dom/render!` (handler is leaked via
 /// `Closure::forget` since `render!` does not return a listener handle).
 pub fn attach_render_listener(target: &web_sys::EventTarget, event_type: String, handler: Value) {
+    // The closure below is leaked (Closure::forget), so the GC can never see
+    // the captured handler; root a copy for the page lifetime to match.
+    root_render_handler(handler.clone());
     let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
         let ptr = NonNull::from(&event);
         ACTIVE_EVENT.with(|ae| *ae.borrow_mut() = Some(ptr));
@@ -262,6 +273,30 @@ pub fn attach_render_listener(target: &web_sys::EventTarget, event_type: String,
     let _ = target.add_event_listener_with_callback(&event_type, js_fn);
     // Intentionally leak — the event handler remains active for the page lifetime.
     closure.forget();
+}
+
+thread_local! {
+    /// Handlers captured by leaked render-listener closures.  The closure is
+    /// forgotten (page lifetime), so these Values must stay rooted forever;
+    /// a single registered root tracer walks this list.
+    static RENDER_HANDLER_ROOTS: std::cell::RefCell<Vec<Value>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn root_render_handler(handler: Value) {
+    RENDER_HANDLER_ROOTS.with(|roots| {
+        let mut roots = roots.borrow_mut();
+        if roots.is_empty() {
+            cljrs_gc::HEAP.register_root_tracer(|visitor| {
+                RENDER_HANDLER_ROOTS.with(|roots| {
+                    for h in roots.borrow().iter() {
+                        h.trace(visitor);
+                    }
+                });
+            });
+        }
+        roots.push(handler);
+    });
 }
 
 // ── DomEventChan ─────────────────────────────────────────────────────────────
@@ -285,7 +320,11 @@ unsafe impl Send for DomEventChan {}
 unsafe impl Sync for DomEventChan {}
 
 impl Trace for DomEventChan {
-    fn trace(&self, _visitor: &mut MarkVisitor) {}
+    fn trace(&self, visitor: &mut MarkVisitor) {
+        // The wrapped channel's queue holds event-map Values; without this
+        // delegation, queued-but-untaken events are invisible to the GC.
+        self.0.trace(visitor);
+    }
 }
 
 impl NativeObject for DomEventChan {

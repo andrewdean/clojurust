@@ -37,11 +37,24 @@ struct Registers {
     values: Box<[Option<Value>]>,
 }
 
+impl Drop for Registers {
+    fn drop(&mut self) {
+        cljrs_env::gc_roots::unregister_option_value_root(&self.values);
+    }
+}
+
 impl Registers {
+    /// The register file self-roots: the fixed Box<[Option<Value>]> buffer
+    /// is registered on the option-value shadow stack at construction and
+    /// unregistered on Drop, so every register value stays alive across GC
+    /// safepoints for exactly the file's lifetime.  Element writes through
+    /// `set` never move the buffer.
     fn new(capacity: u32) -> Self {
-        Self {
+        let this = Self {
             values: vec![None; capacity as usize].into_boxed_slice(),
-        }
+        };
+        cljrs_env::gc_roots::register_option_value_root(&this.values);
+        this
     }
 
     fn get(&self, id: VarId) -> &Value {
@@ -306,11 +319,8 @@ fn interpret_ir_inner(
     // GC safepoint at function entry.
     cljrs_env::gc_roots::gc_safepoint(env);
 
+    // The register file self-roots (see Registers::new).
     let mut regs = Registers::new(ir_func.next_var);
-    // Keep all values in the register file alive across GC safepoints.
-    // The Box<[Option<Value>]> slice address is stable; this guard pops the
-    // root entry when interpret_ir returns (or unwinds).
-    let _regs_root = cljrs_env::gc_roots::root_option_values(&regs.values);
     let mut region_frame = RegionFrame {
         inherited: inherited_region,
         ..RegionFrame::default()
@@ -932,6 +942,7 @@ fn alloc_closure(
 
     // Create a native function that dispatches to the IR interpreter.
     let nf = NativeFn {
+        captured: Vec::new(),
         name: fn_name.as_deref().unwrap_or("<ir-closure>").into(),
         arity: if param_counts.len() == 1 && !is_variadic[0] {
             cljrs_value::Arity::Fixed(param_counts[0])

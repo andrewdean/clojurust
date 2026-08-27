@@ -258,12 +258,11 @@ fn eval_call_inner(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalR
         }
     }
 
-    // Evaluate arguments one-at-a-time, rooting partial results so that
-    // previously-evaluated args survive any GC triggered during later evals.
-    let mut args: Vec<Value> = Vec::with_capacity(arg_forms.len());
+    // Evaluate arguments one-at-a-time into a rooted owned vec, so that
+    // previously-evaluated args survive any GC triggered during later evals
+    // (the vec re-registers itself around growth).
+    let mut args = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(arg_forms.len()));
     for f in arg_forms {
-        // Root the already-evaluated args before each eval that could trigger GC.
-        let _args_root = cljrs_env::gc_roots::root_values(&args);
         args.push(eval(f, env)?);
     }
 
@@ -278,16 +277,18 @@ fn eval_call_inner(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalR
     if let Value::Fn(f) = &callee {
         // `^:async` functions dispatch through the async runtime (when one is
         // registered), spawning the body and returning a Future immediately.
-        if let Some(fut) = cljrs_env::apply::dispatch_if_async(&callee, &args, env) {
+        if let Some(fut) = cljrs_env::apply::dispatch_if_async(&callee, args.as_slice(), env) {
             return Ok(fut);
         }
-        let _args_root = cljrs_env::gc_roots::root_values(&args);
+        // `args` is itself a rooted vec — no extra guard needed.
         cljrs_env::gc_roots::gc_safepoint(env);
         let call_fn = env.globals.call_cljrs_fn;
-        return call_fn(f.get(), &args, env);
+        return call_fn(f.get(), args.as_slice(), env);
     }
 
-    cljrs_env::apply::apply_value(&callee, args, env)
+    // Rooting handoff: apply_value re-roots the buffer before its first
+    // safepoint.
+    cljrs_env::apply::apply_value(&callee, args.into_vec(), env)
 }
 
 // ── Interop method calls ─────────────────────────────────────────────────────
@@ -631,12 +632,11 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
     // This ensures macros qualify symbols relative to their definition site.
     let mut env = Env::with_closure(caller_env.globals.clone(), &f.defining_ns, f);
 
-    let mut current_args = Vec::from(args);
+    // The rooted owned vec keeps the args alive until they are bound into
+    // the (rooted) env frame; reassignment on recur swaps in a fresh rooted
+    // vec, unregistering the old one with its buffer.
+    let mut current_args = cljrs_env::gc_roots::RootedValueVec::new(Vec::from(args));
     loop {
-        // Root current_args on the shadow stack so they survive GC.
-        // They haven't been bound into the env yet.
-        let _args_root = cljrs_env::gc_roots::root_values(&current_args);
-
         // GC safepoint before entering function body
         cljrs_env::gc_roots::gc_safepoint(&env);
 
@@ -672,7 +672,7 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
         }
 
         // Bind params.
-        bind_fn_params(arity, &current_args, &mut env)?;
+        bind_fn_params(arity, current_args.as_slice(), &mut env)?;
 
         // Eval body, catching Recur.
         // Under no-gc: push a scratch region; evaluate all-but-last in it,
@@ -710,12 +710,12 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
                                 flat.extend(rest_items);
                             }
                         }
-                        current_args = flat;
+                        current_args = cljrs_env::gc_roots::RootedValueVec::new(flat);
                     } else {
-                        current_args = new_args;
+                        current_args = cljrs_env::gc_roots::RootedValueVec::new(new_args);
                     }
                 } else {
-                    current_args = new_args;
+                    current_args = cljrs_env::gc_roots::RootedValueVec::new(new_args);
                 }
             }
             Err(e) => return Err(e),
@@ -879,9 +879,8 @@ fn macro_apply(
 
 /// Handle `(apply f arg1 ... last-coll)` — spread the last arg.
 fn handle_apply_call(arg_forms: &[Form], env: &mut Env) -> EvalResult {
-    let mut evaled: Vec<Value> = Vec::with_capacity(arg_forms.len());
+    let mut evaled = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(arg_forms.len()));
     for f in arg_forms {
-        let _root = cljrs_env::gc_roots::root_values(&evaled);
         evaled.push(eval(f, env)?);
     }
 
@@ -893,16 +892,20 @@ fn handle_apply_call(arg_forms: &[Form], env: &mut Env) -> EvalResult {
         });
     }
 
+    // Briefly unrooted for the split; no eval/alloc happens before f, last,
+    // and the remaining args are re-rooted below.
+    let mut evaled = evaled.into_vec();
     let f = evaled.remove(0);
     let last = evaled.pop().unwrap();
-    // Root f, last, and remaining evaled args during spread (which may realize lazy seqs).
     let _f_root = cljrs_env::gc_roots::root_value(&f);
     let _last_root = cljrs_env::gc_roots::root_value(&last);
-    let _evaled_root = cljrs_env::gc_roots::root_values(&evaled);
-    // Spread last arg.
-    let spread = value_to_seq_vec(&last);
-    evaled.extend(spread);
-    cljrs_env::apply::apply_value(&f, evaled, env)
+    let mut rest = cljrs_env::gc_roots::RootedValueVec::new(evaled);
+    // Spread the last arg (which may realize lazy seqs and trigger GC —
+    // the rooted vec keeps every already-collected arg alive).
+    for v in value_to_seq_vec(&last) {
+        rest.push(v);
+    }
+    cljrs_env::apply::apply_value(&f, rest.into_vec(), env)
 }
 
 /// Handle `(make-lazy-seq f)` — wraps a zero-arg fn in a lazy sequence.

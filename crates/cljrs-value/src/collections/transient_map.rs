@@ -95,13 +95,9 @@ impl ClojureHash for TransientMap {
 
 impl cljrs_gc::Trace for TransientMap {
     fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
-        {
-            let map = self.map.lock().unwrap();
-            for (k, v) in map.iter() {
-                k.trace(visitor);
-                v.trace(visitor);
-            }
-        }
+        // Delegate to the inner map's trace: it covers index-only key
+        // instances that iter() (order-only) misses.
+        self.map.lock().unwrap().trace(visitor);
     }
 
     fn gc_size_extra(&self) -> usize {

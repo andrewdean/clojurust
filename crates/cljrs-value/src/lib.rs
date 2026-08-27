@@ -44,6 +44,6 @@ pub use types::{
     Agent, Arity, Atom, BoundFn, CljxCons, CljxFn, CljxFnArity, CljxFuture, CljxPromise, Delay,
     DelayState, FutureState, LazySeq, MultiFn, Namespace, NativeFn, NativeFnFunc, NativeFnPtr,
     Protocol, ProtocolFn, ProtocolMethod, Thunk, Var, Volatile, bump_protocol_generation,
-    lookup_interop_method, protocol_generation, register_interop_method,
+    lookup_interop_method, protocol_generation, register_interop_method, trace_interop_methods,
 };
 pub use value::{MapValue, ObjectArray, SetValue, TypeInstance, Value};

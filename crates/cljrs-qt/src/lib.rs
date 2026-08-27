@@ -134,6 +134,7 @@ fn register_qml_ns(globals: &Arc<cljrs_eval::GlobalEnv>, slot: CallbackSlot) {
         "qml",
         Arc::from("set!"),
         Value::NativeFunction(GcPtr::new(NativeFn {
+            captured: Vec::new(),
             name: "qml/set!".into(),
             arity: Arity::Fixed(2),
             func: Arc::new(func),

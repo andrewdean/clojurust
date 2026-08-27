@@ -1918,6 +1918,7 @@ pub unsafe extern "C" fn rt_make_fn(
     let native_fn = cljrs_value::NativeFn {
         name: name.clone(),
         arity: cljrs_value::Arity::Fixed(param_count),
+        captured: captured_values.clone(),
         func: Arc::new(move |args: &[Value]| {
             if args.len() != param_count {
                 return Err(cljrs_value::ValueError::ArityError {
@@ -1994,6 +1995,7 @@ pub unsafe extern "C" fn rt_make_fn_variadic(
     let native_fn = cljrs_value::NativeFn {
         name: name.clone(),
         arity: cljrs_value::Arity::Variadic { min: fixed_count },
+        captured: captured_values.clone(),
         func: Arc::new(move |args: &[Value]| {
             if args.len() < fixed_count {
                 return Err(cljrs_value::ValueError::ArityError {
@@ -2099,6 +2101,7 @@ pub unsafe extern "C" fn rt_make_fn_multi(
     let native_fn = cljrs_value::NativeFn {
         name,
         arity,
+        captured: captured_values.clone(),
         func: Arc::new(move |args: &[Value]| {
             let argc = args.len();
             // Try exact match on fixed arities first.

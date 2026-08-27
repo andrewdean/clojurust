@@ -15,6 +15,7 @@ pub mod config;
 
 #[cfg(feature = "no-gc")]
 pub mod alloc_ctx;
+pub mod debug_modes;
 pub mod stack_scan;
 #[cfg(feature = "no-gc")]
 pub mod static_arena;
@@ -212,7 +213,15 @@ mod gc_header {
                 (*header).magic.set(GC_MAGIC_FREED);
             }
             let gc_box = header as *mut GcBox<T>;
-            drop(Box::from_raw(gc_box));
+            if crate::debug_modes::quarantine_enabled() {
+                // Quarantine: run the value's destructor but leak the box so
+                // the FREED poison outlives it and any later access panics
+                // deterministically instead of racing allocator reuse
+                // (see debug_modes).
+                std::ptr::drop_in_place(&raw mut (*gc_box).value);
+            } else {
+                drop(Box::from_raw(gc_box));
+            }
         }
     }
 }
@@ -376,32 +385,33 @@ impl<T: Trace + 'static> GcPtr<T> {
 
     pub fn get(&self) -> &T {
         #[cfg(all(debug_assertions, not(feature = "no-gc")))]
-        {
-            use gc_header::GC_MAGIC_ALIVE;
-            let header = unsafe { &(*self.raw()).header };
-            assert_eq!(
-                header.magic.get(),
-                GC_MAGIC_ALIVE,
-                "GcPtr::get() on freed object! magic={:#x}",
-                header.magic.get(),
-            );
-        }
+        self.assert_alive("GcPtr::get()");
         unsafe { &(*self.raw()).value }
     }
 
     pub fn get_mut(&mut self) -> &mut T {
         #[cfg(all(debug_assertions, not(feature = "no-gc")))]
-        {
-            use gc_header::GC_MAGIC_ALIVE;
-            let header = unsafe { &(*self.raw()).header };
-            assert_eq!(
-                header.magic.get(),
-                GC_MAGIC_ALIVE,
-                "GcPtr::get_mut() on freed object! magic={:#x}",
-                header.magic.get(),
-            );
-        }
+        self.assert_alive("GcPtr::get_mut()");
         unsafe { &mut (*self.raw()).value }
+    }
+
+    /// Panic with a diagnosis when the header magic says this object is no
+    /// longer alive.  A FREED magic means the sweep's poison is intact (the
+    /// access itself is the bug); anything else means the freed memory was
+    /// already reused or clobbered.  `CLJRS_GC_QUARANTINE=1` keeps the
+    /// poison intact so every use-after-free lands in the first branch.
+    #[cfg(all(debug_assertions, not(feature = "no-gc")))]
+    fn assert_alive(&self, who: &str) {
+        use gc_header::{GC_MAGIC_ALIVE, GC_MAGIC_FREED};
+        let magic = unsafe { (*self.raw()).header.magic.get() };
+        if magic != GC_MAGIC_ALIVE {
+            let state = if magic == GC_MAGIC_FREED {
+                "freed poison intact: object was swept by GC"
+            } else {
+                "header reused or corrupted; rerun with CLJRS_GC_QUARANTINE=1 for a stable report"
+            };
+            panic!("{who} on freed object! magic={magic:#x} ({state})");
+        }
     }
 
     pub fn ptr_eq(a: &Self, b: &Self) -> bool {
@@ -1234,6 +1244,29 @@ mod tests {
         heap.collect(|vis| vis.visit(&p));
         assert_eq!(heap.count(), 1);
         assert!(!*dropped.lock().unwrap());
+    }
+
+    /// Quarantine mode keeps the FREED poison intact after sweep, so a
+    /// use-after-free panics with a stable diagnosis instead of racing
+    /// allocator reuse.  The value's destructor must still run.
+    #[test]
+    #[should_panic(expected = "freed poison intact")]
+    fn quarantine_turns_use_after_free_into_poison_panic() {
+        crate::debug_modes::set_quarantine(true);
+        let heap = fresh_heap();
+        let dropped = Arc::new(Mutex::new(false));
+        let p = heap.alloc(Tracked {
+            value: 7,
+            dropped: dropped.clone(),
+        });
+        // Unrooted: two collections exhaust the grace period and sweep it.
+        heap.collect(|_| {});
+        heap.collect(|_| {});
+        assert!(
+            *dropped.lock().unwrap(),
+            "quarantine must still run the value's destructor"
+        );
+        let _ = p.get(); // must panic on the intact poison
     }
 
     /// A GcPtr held only in a Rust local (no shadow-stack root, no alloc

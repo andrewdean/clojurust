@@ -619,12 +619,13 @@ async fn eval_call_async_inner(
     }
 
     let _callee_root = cljrs_env::gc_roots::root_value(&callee);
-    let mut argv: Vec<Value> = Vec::with_capacity(args.len());
+    // Rooted owned vec: earlier args must survive collections triggered
+    // while evaluating (and awaiting) later ones.
+    let mut argv = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(args.len()));
     for a in args {
-        let _args_root = cljrs_env::gc_roots::root_values(&argv);
         argv.push(Box::pin(eval_async(a, env)).await?);
     }
-    cljrs_env::apply::apply_value(&callee, argv, env)
+    cljrs_env::apply::apply_value(&callee, argv.into_vec(), env)
 }
 
 /// Native functions that `cljrs_interp::eval_call` intercepts at the form level

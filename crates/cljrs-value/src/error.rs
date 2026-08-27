@@ -171,6 +171,15 @@ impl ExceptionInfo {
 
 impl Trace for ExceptionInfo {
     fn trace(&self, visitor: &mut MarkVisitor) {
+        // Every GC-bearing field: the ex-data map, a Thrown payload value,
+        // and the cause chain.  Skipping data/error swept a held exception's
+        // map out from under (ex-data e).
+        if let ValueError::Thrown(v) = &self.error {
+            v.trace(visitor);
+        }
+        if let Some(data) = self.data.as_ref() {
+            data.trace(visitor);
+        }
         if let Some(cause) = self.cause.as_ref() {
             visitor.visit(cause);
         }

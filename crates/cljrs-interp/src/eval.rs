@@ -71,12 +71,13 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             } else {
                 forms
             };
-            let mut vals: Vec<Value> = Vec::with_capacity(forms.len());
+            let mut vals = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
-                let _root = cljrs_env::gc_roots::root_values(&vals);
                 vals.push(eval(f, env)?);
             }
-            Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(vals))))
+            Ok(Value::Vector(GcPtr::new(PersistentVector::from_iter(
+                vals.into_vec(),
+            ))))
         }
         FormKind::Map(forms) => {
             // Expand any reader-conditional entries first — #?@ splices
@@ -96,25 +97,24 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
                     "map literal must have an even number of forms".into(),
                 ));
             }
-            let mut pairs: Vec<Value> = Vec::with_capacity(forms.len());
+            let mut pairs = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
-                let _root = cljrs_env::gc_roots::root_values(&pairs);
                 pairs.push(eval(f, env)?);
             }
             let kv_pairs: Vec<(Value, Value)> = pairs
+                .as_slice()
                 .chunks(2)
                 .map(|pair| (pair[0].clone(), pair[1].clone()))
                 .collect();
             Ok(Value::Map(MapValue::from_pairs(kv_pairs)))
         }
         FormKind::Set(forms) => {
-            let mut vals: Vec<Value> = Vec::with_capacity(forms.len());
+            let mut vals = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
-                let _root = cljrs_env::gc_roots::root_values(&vals);
                 vals.push(eval(f, env)?);
             }
             Ok(Value::Set(SetValue::Hash(GcPtr::new(
-                PersistentHashSet::from_iter(vals),
+                PersistentHashSet::from_iter(vals.into_vec()),
             ))))
         }
 
