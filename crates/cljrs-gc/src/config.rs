@@ -142,8 +142,21 @@ fn default_hard_limit() -> usize {
 
     // Fallback to 256MB if we can't determine system RAM
     let total_ram = get_total_ram().unwrap_or(256 * 1024 * 1024);
-    std::cmp::max(total_ram / 4, 256 * 1024 * 1024)
+    std::cmp::min(
+        std::cmp::max(total_ram / 4, 256 * 1024 * 1024),
+        DEFAULT_HARD_LIMIT_CAP,
+    )
 }
+
+/// Upper bound on the RAM-derived default hard limit.
+///
+/// Without a cap, "1/4 of RAM" on a large workstation (30 GiB on a 121 GiB
+/// machine) means small long-running scripts never reach the soft limit, so
+/// their garbage accumulates for hours before the first collection (observed
+/// as a 42 GiB widget process).  Workloads that genuinely need a bigger heap
+/// set limits explicitly via `--gc-soft-limit-mb` / `--gc-hard-limit-mb` or
+/// `CLJRS_GC_SOFT_LIMIT_MB` / `CLJRS_GC_HARD_LIMIT_MB`.
+const DEFAULT_HARD_LIMIT_CAP: usize = 4 * 1024 * 1024 * 1024;
 
 // sysctlbyname for macOS
 #[cfg(target_os = "macos")]

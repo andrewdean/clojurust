@@ -34,13 +34,15 @@ pub use config::{GC_CANCELLATION as CONFIG_CANCELLATION, GcConfig, GcParked};
 
 #[cfg(not(feature = "no-gc"))]
 pub use gc_full::{
-    AllocRootGuard, GcHeap, HEAP, HeapProxy, push_alloc_frame, trace_thread_alloc_roots,
+    AllocRootGuard, GcHeap, HEAP, HeapProxy, gc_config_from_env, push_alloc_frame,
+    thread_alloc_roots_len, trace_thread_alloc_roots, truncate_thread_alloc_roots,
 };
 #[cfg(feature = "no-gc")]
 pub use nogc_stubs::{
     AllocRootGuard, CONFIG_CANCELLATION, GcConfig, GcHeap, GcParked, HEAP, MutatorGuard, StwGuard,
-    begin_stw, check_cancellation, gc_requested, park_thread, push_alloc_frame, register_mutator,
-    registered_threads, request_gc, safepoint, take_gc_request, unpark_thread,
+    begin_stw, check_cancellation, gc_config_from_env, gc_requested, park_thread,
+    push_alloc_frame, register_mutator, registered_threads, request_gc, safepoint,
+    take_gc_request, thread_alloc_roots_len, truncate_thread_alloc_roots, unpark_thread,
     wait_for_threads_to_park,
 };
 
@@ -578,6 +580,31 @@ mod gc_full {
         }
     }
 
+    /// GC limits from `CLJRS_GC_SOFT_LIMIT_MB` / `CLJRS_GC_HARD_LIMIT_MB`.
+    ///
+    /// Unset variables fall back to [`GcConfig::new`]'s RAM-derived, capped
+    /// defaults (a fixed 64 MB soft limit on `wasm32`, where total RAM cannot
+    /// be consulted).  When only the soft limit is given, the hard limit is
+    /// the larger of the soft limit and the default hard limit.
+    pub fn gc_config_from_env() -> GcConfig {
+        #[cfg(not(target_arch = "wasm32"))]
+        let defaults = GcConfig::new();
+        #[cfg(target_arch = "wasm32")]
+        let defaults = GcConfig::with_limits(64 * 1024 * 1024, 64 * 1024 * 1024);
+
+        let soft_limit = parse_limit_mb(
+            "CLJRS_GC_SOFT_LIMIT_MB",
+            std::env::var("CLJRS_GC_SOFT_LIMIT_MB").ok().as_deref(),
+            defaults.soft_limit(),
+        );
+        let hard_limit = parse_limit_mb(
+            "CLJRS_GC_HARD_LIMIT_MB",
+            std::env::var("CLJRS_GC_HARD_LIMIT_MB").ok().as_deref(),
+            soft_limit.max(defaults.hard_limit()),
+        );
+        GcConfig::with_limits(soft_limit, hard_limit)
+    }
+
     impl GcHeap {
         pub const fn new() -> Self {
             Self {
@@ -597,25 +624,7 @@ mod gc_full {
         }
 
         pub fn set_config_from_env(&self) {
-            #[cfg(not(target_arch = "wasm32"))]
-            let default_soft_limit: usize = (system_memory::total() / 3) as usize;
-            #[cfg(target_arch = "wasm32")]
-            let default_soft_limit: usize = 64 * 1024 * 1024;
-
-            let soft_limit_mb = parse_limit_mb(
-                "CLJRS_GC_SOFT_LIMIT_MB",
-                std::env::var("CLJRS_GC_SOFT_LIMIT_MB").ok().as_deref(),
-                default_soft_limit,
-            );
-            let hard_limit_mb = parse_limit_mb(
-                "CLJRS_GC_HARD_LIMIT_MB",
-                std::env::var("CLJRS_GC_HARD_LIMIT_MB").ok().as_deref(),
-                soft_limit_mb,
-            );
-            self.set_config(Arc::new(GcConfig::with_limits(
-                soft_limit_mb,
-                hard_limit_mb,
-            )));
+            self.set_config(Arc::new(gc_config_from_env()));
         }
 
         pub fn register_root_tracer(&self, tracer: impl Fn(&mut MarkVisitor) + 'static) {
@@ -965,6 +974,36 @@ mod gc_full {
         ALLOC_ROOTS.with(|roots| roots.borrow_mut().push(header));
     }
 
+    /// Current length of this thread's in-flight alloc-root stack.
+    ///
+    /// Used as a watermark by evaluator loop back-edges: everything pushed
+    /// above the value returned here during a non-yielding loop iteration
+    /// belongs to that iteration (see [`truncate_thread_alloc_roots`]).
+    pub fn thread_alloc_roots_len() -> usize {
+        ALLOC_ROOTS.with(|roots| roots.borrow().len())
+    }
+
+    /// Truncate this thread's in-flight alloc-root stack to `len`.
+    ///
+    /// The entries removed stop being GC roots, so the caller must guarantee
+    /// that every allocation pushed above `len` is either dead or reachable
+    /// through another root (an `Env`, the value shadow stacks, globals, or a
+    /// Rust local covered by the conservative stack scan).  Evaluator loop
+    /// back-edges use this with a watermark from
+    /// [`thread_alloc_roots_len`] to release per-iteration intermediates —
+    /// without it a long-running `loop` pins every iteration's garbage and
+    /// collections reclaim nothing.
+    ///
+    /// A `len` at or above the current length is a no-op.
+    pub fn truncate_thread_alloc_roots(len: usize) {
+        ALLOC_ROOTS.with(|roots| {
+            let mut roots = roots.borrow_mut();
+            if len < roots.len() {
+                roots.truncate(len);
+            }
+        });
+    }
+
     pub fn trace_thread_alloc_roots(visitor: &mut MarkVisitor) {
         ALLOC_ROOTS.with(|roots| {
             let roots = roots.borrow();
@@ -983,6 +1022,19 @@ mod gc_full {
 mod nogc_stubs {
     use crate::MarkVisitor;
     use std::sync::Arc;
+
+    /// No-gc stub: memory limits are meaningless without a collector.
+    pub fn gc_config_from_env() -> GcConfig {
+        GcConfig
+    }
+
+    /// No-gc stub: there is no in-flight alloc-root stack.
+    pub fn thread_alloc_roots_len() -> usize {
+        0
+    }
+
+    /// No-gc stub: regions scope allocation lifetimes instead.
+    pub fn truncate_thread_alloc_roots(_len: usize) {}
 
     #[derive(Debug, Clone)]
     pub struct GcConfig;
@@ -1014,6 +1066,7 @@ mod nogc_stubs {
             Self
         }
         pub fn set_config(&self, _: Arc<GcConfig>) {}
+        pub fn set_config_from_env(&self) {}
         pub fn register_root_tracer(&self, _: impl Fn(&mut MarkVisitor) + 'static) {}
         pub fn trace_registered_roots(&self, _: &mut MarkVisitor) {}
         pub fn memory_in_use(&self) -> usize {

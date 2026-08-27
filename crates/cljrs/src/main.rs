@@ -326,7 +326,9 @@ enum DepsCommands {
     Status,
 }
 
-/// Build GC config from CLI flags, or use defaults if not specified.
+/// Build GC config from CLI flags; without flags, fall back to the
+/// `CLJRS_GC_SOFT_LIMIT_MB` / `CLJRS_GC_HARD_LIMIT_MB` environment variables
+/// and then to the RAM-derived defaults.
 fn build_gc_config(soft_limit_mb: Option<usize>, hard_limit_mb: Option<usize>) -> Arc<GcConfig> {
     match (soft_limit_mb, hard_limit_mb) {
         (Some(soft), Some(hard)) => Arc::new(GcConfig::with_limits(
@@ -335,7 +337,7 @@ fn build_gc_config(soft_limit_mb: Option<usize>, hard_limit_mb: Option<usize>) -
         )),
         (Some(soft), None) => Arc::new(GcConfig::with_hard_limit(soft * 1024 * 1024)),
         (None, Some(hard)) => Arc::new(GcConfig::with_hard_limit(hard * 1024 * 1024)),
-        (None, None) => Arc::new(GcConfig::new()),
+        (None, None) => Arc::new(cljrs_gc::gc_config_from_env()),
     }
 }
 

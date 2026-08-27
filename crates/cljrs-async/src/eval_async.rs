@@ -464,6 +464,23 @@ async fn eval_loop_async(args: &[Form], env: &mut Env) -> EvalResult {
 
     let body = &args[1..];
     loop {
+        {
+            // Root the pending loop values while they are not yet bound in
+            // env, and give tight recur loops a per-iteration safepoint
+            // (mirrors the sync `eval_loop`).  The guards drop before the
+            // body future exists, so no shadow-stack guard is held across an
+            // await — suspended sibling tasks on this LocalSet thread share
+            // the same thread-local stacks.
+            let _vals_root = cljrs_env::gc_roots::root_values(&current_vals);
+            cljrs_env::gc_roots::gc_safepoint(env);
+        }
+
+        // Watermark of the in-flight alloc-root stack (ALLOC_ROOTS) at
+        // iteration start: during a body that never yields, everything
+        // pushed above it belongs to this iteration.  (Under no-gc builds
+        // both alloc-root calls are no-op stubs; regions scope lifetimes.)
+        let alloc_watermark = cljrs_gc::thread_alloc_roots_len();
+
         env.push_frame();
         for (pat, val) in patterns.iter().zip(current_vals.iter()) {
             if let Err(e) = bind_pattern(pat, val.clone(), env) {
@@ -472,8 +489,38 @@ async fn eval_loop_async(args: &[Form], env: &mut Env) -> EvalResult {
             }
         }
 
-        let result = eval_body_async(body, env).await;
+        // Poll the body ourselves so we know whether it ever yielded.  On a
+        // current-thread LocalSet another task can only have run — and thus
+        // pushed onto this thread's alloc-root stack — if the body returned
+        // `Pending` at least once.
+        let mut yielded = false;
+        let result = {
+            let mut body_fut = Box::pin(eval_body_async(body, env));
+            std::future::poll_fn(|cx| match body_fut.as_mut().poll(cx) {
+                std::task::Poll::Pending => {
+                    yielded = true;
+                    std::task::Poll::Pending
+                }
+                ready => ready,
+            })
+            .await
+        };
         env.pop_frame();
+
+        // Release this iteration's intermediates, mirroring the sync
+        // eval_loop's per-iteration `AllocRootGuard`.  Without this, a
+        // long-running loop pins every iteration's allocations as GC roots
+        // and collections reclaim nothing (observed as unbounded RSS growth
+        // in perpetual widget loops).  The recur values (or return value)
+        // live in Rust locals until the next iteration re-roots them; no
+        // safepoint runs in that interval, and the conservative stack scan
+        // covers in-flight locals besides.  After a yielding body, entries
+        // above the watermark may belong to other tasks suspended on this
+        // thread, so the stack is left alone — those extents end when the
+        // enclosing top-level form's alloc frame drops.
+        if !yielded {
+            cljrs_gc::truncate_thread_alloc_roots(alloc_watermark);
+        }
 
         match result {
             Ok(v) => return Ok(v),

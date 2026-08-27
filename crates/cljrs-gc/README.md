@@ -172,12 +172,33 @@ pub fn static_alloc<T: 'static>(value: T) -> StaticGcPtr<T>;
 // always:
 pub fn static_alloc<T: 'static>(value: T) -> StaticGcPtr<T>;
 
+// always (no-op stubs under `no-gc`):
+pub fn push_alloc_frame() -> AllocRootGuard;         // scope in-flight alloc roots
+pub fn thread_alloc_roots_len() -> usize;            // ALLOC_ROOTS watermark
+pub fn truncate_thread_alloc_roots(len: usize);      // release roots above a watermark
+pub fn gc_config_from_env() -> GcConfig;             // CLJRS_GC_*_MB or capped defaults
+
 // no-gc only:
 pub fn static_arena() -> &'static StaticArena;
 
 // no-gc + debug_assertions only:
 pub fn is_static_addr(addr: usize) -> bool;  // checks the StaticArena chunk registry
 ```
+
+Every GC allocation registers itself on the thread-local `ALLOC_ROOTS` shadow
+stack so in-flight values survive a collection; `AllocRootGuard` truncates the
+stack back to its saved length on drop.  Evaluator loop back-edges instead
+take a watermark with `thread_alloc_roots_len` at iteration start and call
+`truncate_thread_alloc_roots` at the back-edge, releasing that iteration's
+intermediates — without this a long-running `loop` pins every iteration's
+garbage as roots and collections reclaim nothing.  The caller must guarantee
+nothing else pushed onto the stack in between (in the async evaluator: the
+body future completed on its first poll).
+
+`gc_config_from_env` reads `CLJRS_GC_SOFT_LIMIT_MB` / `CLJRS_GC_HARD_LIMIT_MB`
+and falls back to `GcConfig::new()`'s RAM-derived defaults, whose hard limit
+is capped at 4 GiB so small long-running scripts still reach the soft limit in
+reasonable time (on `wasm32`: a fixed 64 MB).
 
 ### `GcHeap`
 
