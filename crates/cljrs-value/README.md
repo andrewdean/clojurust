@@ -412,11 +412,26 @@ pub struct Delay { pub state: Mutex<DelayState> }  // Pending(Box<dyn Thunk>) | 
 pub struct CljxPromise {
     pub value: Mutex<Option<Value>>,
     pub cond: Condvar,
+    // + private wakers: Mutex<Vec<Waker>> — async waiters parked until delivery
+}
+impl CljxPromise {
+    /// Register an async waiter; woken by `deliver`. Callers must hold the
+    /// `value` lock (having observed `None`) so the wake cannot be missed.
+    pub fn register_waker(&self, waker: &std::task::Waker)
 }
 
 pub struct CljxFuture {
     pub state: Mutex<FutureState>,  // Running | Done(Value) | Failed(Value) | GasExhausted | Cancelled
     pub cond: Condvar,
+    // + private wakers: Mutex<Vec<Waker>> — async waiters parked until settled
+}
+impl CljxFuture {
+    /// Register an async waiter; woken by `notify_settled`. Callers must hold
+    /// the `state` lock (having observed `Running`) so the wake cannot be missed.
+    pub fn register_waker(&self, waker: &std::task::Waker)
+    /// Wake blocking (`cond`) and async (`wakers`) waiters. Every site that
+    /// writes a settled `FutureState` must call this, not bare `cond.notify_all()`.
+    pub fn notify_settled(&self)
 }
 
 pub struct Agent {

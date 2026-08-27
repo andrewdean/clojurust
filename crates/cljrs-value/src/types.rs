@@ -1065,6 +1065,10 @@ impl cljrs_gc::Trace for Delay {
 pub struct CljxPromise {
     pub value: Mutex<Option<Value>>,
     pub cond: Condvar,
+    /// Async waiters parked until delivery. Registered under the `value` lock
+    /// (see [`Self::register_waker`]) so a concurrent `deliver` cannot slip
+    /// between the emptiness check and the registration.
+    wakers: Mutex<Vec<std::task::Waker>>,
 }
 
 impl CljxPromise {
@@ -1072,6 +1076,7 @@ impl CljxPromise {
         Self {
             value: Mutex::new(None),
             cond: Condvar::new(),
+            wakers: Mutex::new(Vec::new()),
         }
     }
 
@@ -1084,6 +1089,22 @@ impl CljxPromise {
         if guard.is_none() {
             *guard = Some(v);
             self.cond.notify_all();
+            for w in self.wakers.lock().unwrap().drain(..) {
+                w.wake();
+            }
+        }
+    }
+
+    /// Park an async waiter: register `waker` to be woken by `deliver`.
+    ///
+    /// Callers must hold the `value` lock (proving the promise is still
+    /// undelivered) when registering — `deliver` writes the value under that
+    /// same lock before draining wakers, so a registration made under it can
+    /// never miss the wake.
+    pub fn register_waker(&self, waker: &std::task::Waker) {
+        let mut wakers = self.wakers.lock().unwrap();
+        if !wakers.iter().any(|w| w.will_wake(waker)) {
+            wakers.push(waker.clone());
         }
     }
 
@@ -1155,6 +1176,10 @@ pub struct CljxFuture {
     /// instead of deadlocking. The executor task and stealing deref race on
     /// `claim_thunk`; exactly one wins.
     thunk: Mutex<Option<Value>>,
+    /// Async waiters parked until the future settles. Registered under the
+    /// `state` lock (see [`Self::register_waker`]); drained by
+    /// [`Self::notify_settled`], which every state writer must call.
+    wakers: Mutex<Vec<std::task::Waker>>,
 }
 
 impl CljxFuture {
@@ -1164,6 +1189,7 @@ impl CljxFuture {
             cond: Condvar::new(),
             observed: std::sync::atomic::AtomicBool::new(false),
             thunk: Mutex::new(None),
+            wakers: Mutex::new(Vec::new()),
         }
     }
 
@@ -1174,6 +1200,32 @@ impl CljxFuture {
             cond: Condvar::new(),
             observed: std::sync::atomic::AtomicBool::new(false),
             thunk: Mutex::new(Some(thunk)),
+            wakers: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Park an async waiter: register `waker` to be woken when the future
+    /// settles.
+    ///
+    /// Callers must hold the `state` lock (having just observed `Running`)
+    /// when registering — every writer settles the state under that same lock
+    /// before calling [`Self::notify_settled`], so a registration made under
+    /// it can never miss the wake.
+    pub fn register_waker(&self, waker: &std::task::Waker) {
+        let mut wakers = self.wakers.lock().unwrap();
+        if !wakers.iter().any(|w| w.will_wake(waker)) {
+            wakers.push(waker.clone());
+        }
+    }
+
+    /// Wake everyone parked on this future — the blocking `deref` waiters on
+    /// `cond` and the async waiters registered via [`Self::register_waker`].
+    /// Every site that writes a settled `FutureState` must call this in place
+    /// of a bare `cond.notify_all()`.
+    pub fn notify_settled(&self) {
+        self.cond.notify_all();
+        for w in self.wakers.lock().unwrap().drain(..) {
+            w.wake();
         }
     }
 

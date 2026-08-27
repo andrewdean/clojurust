@@ -199,8 +199,31 @@ impl Future for CompiledAsyncTask {
         // FFI-provenance pointer is dereferenced here.
         match code {
             POLL_PENDING => {
-                // Cooperative re-poll, mirroring the tree-walker's `yield_now`:
-                // the GC service runs between polls at the LocalSet's yield.
+                // Park until the awaited value — left in `pending` by the
+                // readiness check — settles, mirroring `await_value`'s
+                // waker-registered wait. Registering under the future's
+                // `state` lock (promise's `value` lock) after re-observing
+                // it unsettled closes the settle race; if it settled between
+                // the poll function's readiness check and here, re-poll now.
+                // A `pending` that is neither (a suspend on a plain value)
+                // keeps the old cooperative re-poll.
+                match &this.sm.pending {
+                    Value::Future(f) => {
+                        let guard = f.get().state.lock().unwrap();
+                        if matches!(&*guard, FutureState::Running) {
+                            f.get().register_waker(cx.waker());
+                            return Poll::Pending;
+                        }
+                    }
+                    Value::Promise(p) => {
+                        let guard = p.get().value.lock().unwrap();
+                        if guard.is_none() {
+                            p.get().register_waker(cx.waker());
+                            return Poll::Pending;
+                        }
+                    }
+                    _ => {}
+                }
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }

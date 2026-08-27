@@ -34,9 +34,18 @@ Done (Phases A–H, A2, B1):
   (`tap!`/`untap!`/`untap-all!`). Clojure-level: `async-pmap`, `thread` macro, `merge`,
   `reduce`, `into`. `eval_loop_async` enables proper `await` yielding inside `loop/recur`.
 - Phase G: GC safepoints at async yield points via `cljrs_env::gc_roots::async_gc_collect()`,
-  called before each `yield_now().await` in `await_value`. Background GC-service task spawned
-  by `init()`. Explicit GC root guards for `task_future` in `spawn_future`, callee/env in
-  `run_async_fn`, and awaited futures/promises in `await_value`.
+  called at each suspension boundary in `await_value`. Background GC-service task spawned
+  by `init()` — a 100 ms timer tick, purely a backstop for requests raised while every task
+  is parked (running tasks hit safepoints inline). Explicit GC root guards for `task_future`
+  in `spawn_future`, callee/env in `run_async_fn`, and awaited futures/promises in
+  `await_value`.
+- Parked awaits (2026-08): `await_value` and the compiled `CompiledAsyncTask` poll path wait
+  on a pending future/promise by registering a `Waker` (`CljxFuture::register_waker` /
+  `CljxPromise::register_waker`, woken by `notify_settled` / `deliver`) instead of a
+  `yield_now` re-poll loop. A `yield_now` waiter is permanently runnable, so the executor
+  never sleeps — an idle daemon parked on `(await (a/timeout ...))` pinned a full core.
+  Every `FutureState` writer must settle via `CljxFuture::notify_settled`.
+  Regression: `tests/await_parks.rs`.
 - Phase A2: `WorkerPool` singleton — multi-thread Tokio runtime for `Send` byte-level tasks
   (`WorkerPool::global()`, `offload`, `handle`). Pool tasks carry only `Vec<u8>`, `String`, and
   `Send` channel types; `GcPtr`/`Value` construction is confined to LocalSet bridge tasks.
@@ -197,6 +206,8 @@ blocking bridge is a later phase.
 | `tests/async_fn.rs` | integration tests for dispatch, `await`, `deref` enforcement, `timeout`/`alts`/`alt`, channels, Phase F utilities, and `<!!`/`>!!` |
 | `tests/worker_pool.rs` | Phase A2 integration tests: offload, concurrent tasks, handle spawning, LocalSet context, singleton invariant, byte processing round-trip |
 | `tests/isolate_channel_clj.rs` | Clojure-level Phase B2 tests: `isolate-chan` pair, put/poll round-trip, FIFO order, located error on a non-shareable value, async `isolate-take!` |
+| `tests/loop_alloc_roots.rs` | regression: async `loop*` back-edges release per-iteration alloc roots (the 42 GiB inbox-watch leak) |
+| `tests/await_parks.rs` | regression: `await` on a pending future/promise parks (waker-registered) instead of spinning; idle-runtime CPU guard (the mised.cljrs pegged-core bug) |
 
 ## Public API
 
@@ -302,7 +313,8 @@ pub mod eval_async {
     pub async fn eval_async(form: &Form, env: &mut Env) -> Result<Value, EvalError>;
 
     /// Cooperatively await a Clojure value inside a LocalSet context.
-    /// Futures and promises yield until resolved; any other value is returned as-is.
+    /// Futures and promises park the task (waker-registered) until resolved;
+    /// any other value is returned as-is.
     /// Used by the WASM REPL for implicit top-level await.
     pub async fn await_value(val: Value) -> Result<Value, EvalError>;
 }

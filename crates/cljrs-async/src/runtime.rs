@@ -139,14 +139,25 @@ fn downcast_channel(val: &Value) -> EvalResult<&CljChannel> {
 }
 
 /// Spawn a long-lived background task on the current `LocalSet` that services
-/// GC requests between poll cycles.
+/// GC requests left pending while every task is suspended.
 ///
-/// At each cooperative yield the task calls [`cljrs_env::gc_roots::async_gc_collect`].
-/// Because `LocalSet` is single-threaded, no other tasks run while that function
-/// executes, making it safe to scan thread-local root stacks for all suspended tasks.
+/// The task ticks on a timer and calls
+/// [`cljrs_env::gc_roots::async_gc_collect`]. Because `LocalSet` is
+/// single-threaded, no other tasks run while that function executes, making it
+/// safe to scan thread-local root stacks for all suspended tasks.
 ///
-/// Must be called from within a Tokio `LocalSet` context (e.g., from `init`).
-/// On `wasm32` this is a no-op — see below.
+/// This is a backstop, not the primary collection path: running tasks hit
+/// safepoints inline (loop back-edges, `await_value` suspension points), so a
+/// request only lingers when everything is parked — and then nothing is
+/// allocating, so the tick interval bounds only how long already-requested
+/// garbage waits, not heap growth. A timer (rather than the pre-2026-08
+/// `yield_now` loop) matters because a `yield_now` task is permanently
+/// runnable: the executor never sleeps and an otherwise-idle daemon pins a
+/// full core.
+///
+/// Must be called from within a Tokio `LocalSet` context (e.g., from `init`)
+/// whose runtime has the time driver enabled. On `wasm32` this is a no-op —
+/// see below.
 pub(crate) fn spawn_gc_service() {
     // On native, `spawn_local` panics unless it is called inside a Tokio
     // runtime *and* a `LocalSet`.  Several callers invoke `init()` with no
@@ -165,7 +176,7 @@ pub(crate) fn spawn_gc_service() {
         let _ = std::panic::catch_unwind(|| {
             tokio::task::spawn_local(async {
                 loop {
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     cljrs_env::gc_roots::async_gc_collect();
                 }
             });

@@ -79,7 +79,7 @@ pub(crate) fn settle_future(future: &GcPtr<CljxFuture>, result: EvalResult) {
         Err(e) => FutureState::Failed(e.to_error_value()),
     };
     drop(state);
-    future.get().cond.notify_all();
+    future.get().notify_settled();
 }
 
 /// Run the body of an `^:async` function to completion, yielding at every
@@ -258,8 +258,9 @@ async fn eval_await_async(args: &[Form], env: &mut Env) -> EvalResult {
     await_value(val).await
 }
 
-/// Cooperatively await a Clojure value. Futures and promises yield to the
-/// executor until resolved; any other value is returned as-is.
+/// Cooperatively await a Clojure value. Futures and promises park the task
+/// (waker-registered, not polled) until resolved; any other value is returned
+/// as-is.
 pub async fn await_value(val: Value) -> EvalResult {
     match val {
         Value::Future(f) => {
@@ -289,8 +290,23 @@ pub async fn await_value(val: Value) -> EvalResult {
                         FutureState::Running => {}
                     }
                 }
+                // GC safepoint at the genuine suspension boundary, then park
+                // until a settle wakes us. Registering under the `state` lock
+                // after re-observing `Running` closes the settle race: writers
+                // settle under that lock before draining wakers, so a
+                // registration made here can never miss its wake. A spurious
+                // wake just re-runs the outer check.
                 cljrs_env::gc_roots::async_gc_collect();
-                tokio::task::yield_now().await;
+                std::future::poll_fn(|cx| {
+                    let guard = f.get().state.lock().unwrap();
+                    if matches!(&*guard, FutureState::Running) {
+                        f.get().register_waker(cx.waker());
+                        std::task::Poll::Pending
+                    } else {
+                        std::task::Poll::Ready(())
+                    }
+                })
+                .await;
             }
         }
         Value::Promise(p) => {
@@ -302,8 +318,20 @@ pub async fn await_value(val: Value) -> EvalResult {
                         return Ok(v.clone());
                     }
                 }
+                // Same park-until-delivered shape as the future arm above;
+                // `deliver` writes the value and drains wakers under the
+                // `value` lock we register beneath.
                 cljrs_env::gc_roots::async_gc_collect();
-                tokio::task::yield_now().await;
+                std::future::poll_fn(|cx| {
+                    let guard = p.get().value.lock().unwrap();
+                    if guard.is_none() {
+                        p.get().register_waker(cx.waker());
+                        std::task::Poll::Pending
+                    } else {
+                        std::task::Poll::Ready(())
+                    }
+                })
+                .await;
             }
         }
         other => Ok(other),

@@ -51,10 +51,9 @@ fn async_loop_backedge_releases_iteration_garbage() {
 
     let count_before = cljrs_gc::HEAP.count();
 
-    let result = block_on_local(async {
-        cljrs_async::eval_async::eval_async(&form, &mut env).await
-    })
-    .expect("loop evaluates");
+    let result =
+        block_on_local(async { cljrs_async::eval_async::eval_async(&form, &mut env).await })
+            .expect("loop evaluates");
     assert_eq!(result, Value::Nil);
 
     // 20k iterations allocate ~100k+ objects; with back-edge truncation they
@@ -62,7 +61,9 @@ fn async_loop_backedge_releases_iteration_garbage() {
     // heap hundreds of thousands of objects above the baseline.
     let count_after = cljrs_gc::HEAP.count();
     let growth = count_after.saturating_sub(count_before);
-    eprintln!("heap growth across loop: {growth} objects (before={count_before}, after={count_after})");
+    eprintln!(
+        "heap growth across loop: {growth} objects (before={count_before}, after={count_after})"
+    );
     assert!(
         growth < 150_000,
         "async loop retained {growth} heap objects past its back-edges \

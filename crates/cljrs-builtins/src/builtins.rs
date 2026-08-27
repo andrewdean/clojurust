@@ -6726,7 +6726,7 @@ fn builtin_deref(args: &[Value]) -> ValueResult<Value> {
                     };
                 }
                 drop(state);
-                f.get().cond.notify_all();
+                f.get().notify_settled();
             }
             if with_timeout {
                 let timeout_ms = match &args[1] {
@@ -9080,7 +9080,7 @@ fn builtin_future_cancel(args: &[Value]) -> ValueResult<Value> {
             let mut state = f.get().state.lock().unwrap();
             if matches!(&*state, FutureState::Running) {
                 *state = FutureState::Cancelled;
-                f.get().cond.notify_all();
+                f.get().notify_settled();
             }
             Ok(Value::Bool(true))
         }

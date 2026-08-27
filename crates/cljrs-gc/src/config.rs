@@ -142,10 +142,7 @@ fn default_hard_limit() -> usize {
 
     // Fallback to 256MB if we can't determine system RAM
     let total_ram = get_total_ram().unwrap_or(256 * 1024 * 1024);
-    std::cmp::min(
-        std::cmp::max(total_ram / 4, 256 * 1024 * 1024),
-        DEFAULT_HARD_LIMIT_CAP,
-    )
+    (total_ram / 4).clamp(256 * 1024 * 1024, DEFAULT_HARD_LIMIT_CAP)
 }
 
 /// Upper bound on the RAM-derived default hard limit.

@@ -147,7 +147,7 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
                     };
                 }
                 drop(state);
-                f.get().cond.notify_all();
+                f.get().notify_settled();
             }
             deref_value(v)
         }
