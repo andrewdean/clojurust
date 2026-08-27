@@ -255,7 +255,9 @@ impl RootedValueVec {
         self.unregister();
         self.vals.push(v);
         VALUE_ROOTS.with(|roots| {
-            roots.borrow_mut().push((self.vals.as_ptr(), self.vals.len()));
+            roots
+                .borrow_mut()
+                .push((self.vals.as_ptr(), self.vals.len()));
         });
     }
 

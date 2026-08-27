@@ -71,7 +71,8 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             } else {
                 forms
             };
-            let mut vals = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
+            let mut vals =
+                cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
                 vals.push(eval(f, env)?);
             }
@@ -97,7 +98,8 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
                     "map literal must have an even number of forms".into(),
                 ));
             }
-            let mut pairs = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
+            let mut pairs =
+                cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
                 pairs.push(eval(f, env)?);
             }
@@ -109,7 +111,8 @@ pub fn eval(form: &Form, env: &mut Env) -> EvalResult {
             Ok(Value::Map(MapValue::from_pairs(kv_pairs)))
         }
         FormKind::Set(forms) => {
-            let mut vals = cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
+            let mut vals =
+                cljrs_env::gc_roots::RootedValueVec::new(Vec::with_capacity(forms.len()));
             for f in forms {
                 vals.push(eval(f, env)?);
             }

@@ -41,10 +41,9 @@ pub use gc_full::{
 #[cfg(feature = "no-gc")]
 pub use nogc_stubs::{
     AllocRootGuard, CONFIG_CANCELLATION, GcConfig, GcHeap, GcParked, HEAP, MutatorGuard, StwGuard,
-    begin_stw, check_cancellation, gc_config_from_env, gc_requested, park_thread,
-    push_alloc_frame, register_mutator, registered_threads, request_gc, safepoint,
-    take_gc_request, thread_alloc_roots_len, truncate_thread_alloc_roots, unpark_thread,
-    wait_for_threads_to_park,
+    begin_stw, check_cancellation, gc_config_from_env, gc_requested, park_thread, push_alloc_frame,
+    register_mutator, registered_threads, request_gc, safepoint, take_gc_request,
+    thread_alloc_roots_len, truncate_thread_alloc_roots, unpark_thread, wait_for_threads_to_park,
 };
 
 /// Return `true` if `addr` was allocated by the global `StaticArena`.
