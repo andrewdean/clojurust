@@ -66,11 +66,14 @@ impl PersistentHashMap {
         if let Some(seq) = self.index.get(&key) {
             let seq = *seq;
             Self {
-                // Re-insert the key so the index holds the same instance as
-                // the order tree.  Keeping the old index entry leaves a key
-                // instance reachable only through the index, which trace
-                // must then cover (it does, as a second line of defense).
-                index: self.index.insert(key.clone(), seq),
+                // Keep the existing index entry: re-inserting to align key
+                // instances would cost a full HAMT insert (plus a key clone)
+                // on every re-assoc of a live key, and it buys nothing — the
+                // index keeps its own key instance alive because `trace`
+                // walks the index as well as the order tree.  See the note
+                // there; that coverage is the invariant, not instance
+                // alignment.
+                index: self.index.clone(),
                 order: self.order.insert(seq, (key, value)),
                 next_seq: self.next_seq,
             }
@@ -150,12 +153,13 @@ impl cljrs_gc::Trace for PersistentHashMap {
             k.trace(visitor);
             v.trace(visitor);
         }
-        // The index can hold key instances the order tree does not: rpds
-        // may keep an existing entry's key on insert, and historical maps
-        // built before assoc refreshed the index still share such tries.
-        // An index-only key that goes untraced is swept while the map
-        // lives, leaving a dangling GcPtr that the next lookup's equality
-        // probe dereferences (the 2026-08-27 optimizer-suite panic).
+        // The index holds key instances the order tree does not: `assoc`
+        // deliberately leaves an existing index entry in place (cheap), and
+        // rpds keeps an existing entry's key on insert.  An index-only key
+        // that goes untraced is swept while the map lives, leaving a
+        // dangling GcPtr that the next lookup's equality probe dereferences
+        // (the 2026-08-27 optimizer-suite panic).  Walking the index here is
+        // what makes the cheap assoc sound.
         for (k, _) in self.index.iter() {
             k.trace(visitor);
         }
@@ -290,32 +294,6 @@ mod tests {
         let keys = m.keys();
         assert_eq!(keys, vec![kw("a"), kw("b"), kw("c")]);
         assert_eq!(m.get(&kw("b")), Some(&int(99)));
-    }
-
-    /// Every key instance held by the index must be pointer-identical to
-    /// the instance at the same seq in the order tree.  A stale index
-    /// instance is reachable only through the index; before trace covered
-    /// the index, such keys were swept while the map lived, and the next
-    /// lookup dereferenced the freed key (2026-08-27 optimizer-suite panic).
-    #[test]
-    fn assoc_existing_key_keeps_index_and_order_instances_aligned() {
-        // Two distinct allocations of the same keyword: equal, not ptr-eq.
-        let m = PersistentHashMap::empty()
-            .assoc(kw("k"), int(1))
-            .assoc(kw("k"), int(2));
-        assert_eq!(m.get(&kw("k")), Some(&int(2)));
-        for (ik, seq) in m.index.iter() {
-            let (ok, _) = m.order.get(seq).expect("index seq present in order");
-            match (ik, ok) {
-                (Value::Keyword(a), Value::Keyword(b)) => {
-                    assert!(
-                        cljrs_gc::GcPtr::ptr_eq(a, b),
-                        "index key instance diverged from order instance"
-                    );
-                }
-                _ => panic!("expected keyword keys"),
-            }
-        }
     }
 
     #[test]

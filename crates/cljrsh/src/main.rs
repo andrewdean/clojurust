@@ -148,7 +148,20 @@ pub(crate) fn clear_interrupt() {
     }
 }
 
+/// Dumps `CLJRS_GC_STATS` on the way out, however `run` returns.
+struct GcStatsDump;
+
+impl Drop for GcStatsDump {
+    fn drop(&mut self) {
+        cljrs_gc::dump_stats_from_env();
+    }
+}
+
 fn run(opts: Opts) -> i32 {
+    // CLJRS_GC_STATS was inert for cljrsh: only `cljrs` and the AOT harness
+    // dumped the counters, so scripts had no way to see collection counts,
+    // pause times, or conservative-scan rescues.
+    let _stats_on_exit = GcStatsDump;
     let _mutator = cljrs_gc::register_mutator();
 
     let extra_paths = opts
