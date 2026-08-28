@@ -1,12 +1,12 @@
 [package]
 name = "cljrs-datalog-store"
-version = "0.1.0"
+version = "0.2.29"
 edition = "2024"
 license = "EPL-1.0"
 description = "Datalog triple store over cljrs-lmdb: EAV/AVE/VAE indexes with an order-preserving key codec, schema-lite attributes, giant-value overflow, and O(log n) statistics for the query optimizer"
 
 [dependencies]
-cljrs-lmdb = { path = "../cljrs-lmdb", version = "0.1.0" }
+cljrs-lmdb = { path = "../cljrs-lmdb", version = "0.2.29" }
 sha2 = "0.10"
 
 [dev-dependencies]
