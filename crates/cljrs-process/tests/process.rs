@@ -55,7 +55,12 @@ fn sh_honors_dir_and_env() {
     let Value::Str(s) = get_kw(&r, "out") else {
         panic!("expected string out")
     };
-    assert_eq!(s.get().trim(), "/tmp");
+    // pwd prints the physical path; on macOS /tmp is a symlink to
+    // /private/tmp, so compare canonicalized paths.
+    assert_eq!(
+        std::path::Path::new(s.get().trim()).canonicalize().unwrap(),
+        std::path::Path::new("/tmp").canonicalize().unwrap()
+    );
     let r = eval_in(
         &mut env,
         "(cljrs.process/sh \"sh\" \"-c\" \"printf %s $CLJRS_PROC_TEST\" :extra-env {\"CLJRS_PROC_TEST\" \"yes\"})",
