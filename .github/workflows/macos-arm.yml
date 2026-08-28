@@ -1,0 +1,52 @@
+name: macOS ARM
+
+# Full build & test on the self-hosted Apple Silicon runner (mac-studio).
+# release.yml already cross-builds aarch64-apple-darwin on macos-latest but
+# only smoke-tests it; this runs the same test surface as the ubuntu CI job
+# (minus fmt/clippy, which are platform-independent).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: Build & test (aarch64-apple-darwin, self-hosted)
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's pre-existing stable toolchain carries the removed
+      # wasm32-wasi target; rustup refuses to update stable while it's
+      # installed, so drop it before the toolchain action runs.
+      - name: Drop removed rustup targets
+        run: rustup target remove --toolchain stable wasm32-wasi 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No rust-cache: the runner is persistent, so the local target/
+      # dir survives between runs and the cache post-step alone cost ~10
+      # minutes per run.
+
+      - name: Check
+        run: cargo check --workspace
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Clojure Tests
+        run: cargo run -p cljrs compile -o test-suite --test ./clojure-test-suite/test && CLJRS_GC_STATS=- ./test-suite
+
+      - name: cljrsh smoke
+        run: |
+          cargo build -p cljrsh -p cljrs
+          test "$(target/debug/cljrsh -e '(+ 1 2)')" = "3"
+          target/debug/cljrsh --version
+          test "$(target/debug/cljrs eval '(+ 1 2)')" = "3"
+          target/debug/cljrs --version
