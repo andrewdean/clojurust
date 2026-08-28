@@ -1201,3 +1201,23 @@ fn primitive_array_survives_gc_stress_with_quarantine() {
     assert_eq!(r.code, 0, "stderr: {}", r.stderr);
     assert_eq!(r.stdout.trim(), ":ok 3 1");
 }
+
+/// A regex literal must stay a Pattern after a function tiers up to IR.
+/// It used to lower to a string constant, so at the 50-call threshold
+/// `str/split` started treating the escaped source text as a literal
+/// delimiter and silently stopped splitting — wrong results, no error.
+/// CLJRS_IR_THRESHOLD=1 forces the tier-up on the first call.
+#[test]
+fn regex_literal_survives_ir_tier_up() {
+    let expr = "(require '[clojure.string :as str]) \
+                (defn parse [i] (str/split (str \"k\" i \"\\tv\") #\"\\t\")) \
+                (defn lit [_] #\"\\t\") \
+                (dotimes [i 3] (lit i)) \
+                (println :bad (count (remove #(= 2 (count %)) (mapv parse (range 60)))) \
+                         :lit (type (lit 1)))";
+    let r = run(&["-e", expr], None, &[("CLJRS_IR_THRESHOLD", "1")]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    // Both were wrong before the fix: `:bad 59` (split stopped matching) and
+    // `:lit String` (the literal lowered to its escaped source text).
+    assert_eq!(r.stdout.trim(), ":bad 0 :lit Pattern");
+}

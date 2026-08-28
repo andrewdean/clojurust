@@ -246,7 +246,24 @@ fn lower_form(ctx: &mut LowerCtx, form: &Form) -> R {
         }
         FormKind::Char(c) => Ok(ctx.emit_const(Const::Char(*c))),
         FormKind::Str(s) => Ok(ctx.emit_const(Const::Str(Arc::from(s.as_str())))),
-        FormKind::Regex(s) => Ok(ctx.emit_const(Const::Str(Arc::from(s.as_str())))),
+        // A regex literal is NOT a string constant: lowering it to Const::Str
+        // handed `str/split` (and anything else that distinguishes a Pattern
+        // from a string delimiter) the escaped source text, so a hot function
+        // silently stopped matching once it tiered up to IR at 50 calls.
+        // Lower it the way `(re-pattern "…")` lowers, which every backend
+        // already compiles correctly; like the tree-walker, the pattern is
+        // compiled when the expression is evaluated.
+        FormKind::Regex(s) => {
+            let src = Form {
+                kind: FormKind::Str(s.clone()),
+                span: form.span.clone(),
+            };
+            let callee = Form {
+                kind: FormKind::Symbol("re-pattern".to_string()),
+                span: form.span.clone(),
+            };
+            lower_call(ctx, &callee, std::slice::from_ref(&src))
+        }
         FormKind::Symbolic(f) => Ok(ctx.emit_const(Const::Double(*f))),
         FormKind::Keyword(s) => Ok(ctx.emit_const(Const::Keyword(Arc::from(s.as_str())))),
         FormKind::AutoKeyword(s) => {
