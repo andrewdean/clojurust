@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-builtins"
-version = "0.1.0"
+version = "0.2.27"
 edition = "2024"
 description = "Built-in function implementations for clojurust (arithmetic, collections, I/O, regex)"
 license.workspace = true
@@ -13,7 +13,7 @@ no-gc = ["cljrs-gc/no-gc"]
 
 [dependencies]
 indexmap = "2"
-cljrs-env = { path = "../cljrs-env", version = "0.1.0", default-features = false }
+cljrs-env = { path = "../cljrs-env", version = "0.2.27", default-features = false }
 cljrs-value = { workspace = true }
 cljrs-types = { workspace = true }
 cljrs-gc = { workspace = true }
