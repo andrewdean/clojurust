@@ -3,12 +3,25 @@ name: Release
 # Builds cljrsh and cljrs distribution binaries for a tag and attaches
 # them to a GitHub Release. Both ship in one tarball per platform so the
 # asset set stays one-per-target — mise's github: backend then selects
-# unambiguously and its exe option picks the binary out of the archive
-# (separate cljrs-*/cljrsh-* assets would be prefix-ambiguous there). Tags are pushed by the Publish workflow with the
-# workflow's own GITHUB_TOKEN, and such pushes never trigger other
-# workflows — so Publish *calls* this workflow after a successful
-# crates.io publish. workflow_dispatch covers manual runs and backfills;
-# with no tag given it releases the newest v* tag.
+# the asset unambiguously (separate cljrs-*/cljrsh-* assets would be
+# prefix-ambiguous there) and shims every executable it finds inside,
+# so one tool entry serves both binaries: exe= only picks the install
+# binary, it never restricts shimming.
+#
+# Tags are pushed by the Publish workflow with the workflow's own
+# GITHUB_TOKEN, and such pushes never trigger other workflows — so
+# Publish *calls* this workflow after a successful crates.io publish.
+# workflow_dispatch covers manual runs and backfills; with no tag given
+# it releases the newest v* tag.
+#
+# TREAT PUBLISHED TAGS AS IMMUTABLE: re-dispatching against an
+# already-released tag with different build content replaces the assets
+# in place, and every installer that cached the old checksums (mise/ubi
+# record them from release metadata) fails closed with a misleading
+# "lockfile ... Checksum mismatch" until its HTTP cache is cleared
+# (~/.cache/mise on Linux, ~/Library/Caches/mise on macOS). Backfill an
+# existing tag only to repair a failed upload of the SAME content; for
+# content changes, cut a new tag.
 
 on:
   workflow_call:
