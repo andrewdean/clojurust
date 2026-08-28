@@ -301,13 +301,22 @@ default, and it stays contained inside the store crate.
    conn/tx over the minimal translator, moved from the veneer);
    query-resolve and index suites fully green and gating; query-not
    fully green and gating (18 tests, 127 assertions; the case takes
-   ~6 minutes); query-optimizer vendored with idoc tests gated, not
-   yet gating — blocked on a runtime GC bug (an in-flight closure is
-   freed during builtin callback re-entry under carried-over heap
-   pressure; see docs/gc-inflight-rooting-bug.md and its repro
-   script — plan/parsed-q caches were ruled out), plus cost-model
-   divergences to re-triage once the GC bug is fixed (guardrail
-   budget fields, base-sample selection, indexed-union order). The suites caught a real silent-wrong-results
+   ~6 minutes); query-optimizer vendored with idoc tests gated.
+   Phase 5 COMPLETE 2026-08-28: the optimizer suite is fully green
+   against the native engine (25 tests, 228 assertions, 0 failures,
+   0 errors) and gates as `datalevin_optimizer_suite` in
+   crates/cljrsh/tests/conformance.rs — marked #[ignore] because it
+   takes ~2h on a debug build; run with `-- --ignored`. Getting there
+   required fixing five GC use-after-free root causes (the in-flight
+   rooting class, docs/gc-inflight-rooting-bug.md, plus shadow-stack
+   and container-trace bugs) and seven cljrsh core-semantics bugs the
+   suite surfaced: ByteArray store codec, primitive-array identity
+   equality, byte-array ordering in compare-with-type, metadata-blind
+   record?/symbol?/fn?/seq?/ifn?, the hash-join cost constant missing
+   its availableProcessors factor (new (available-processors)
+   builtin), ns :import / cross-namespace dot-constructors, and
+   coll? being false for records (which disabled predicate pushdown
+   wholesale). The suites caught a real silent-wrong-results
    bug: core get on java.util.Map shims returned nil, so or-join
    linked joins through the pipe path returned empty. Engine gaps the suites surfaced and fixed: nil-as-
    empty-set in clojure.set, populated? nil contract, end-scan gated

@@ -190,3 +190,35 @@ fn bb_conformance_corpus() {
     }
     println!("all {} conformance cases passed", scripts.len());
 }
+
+/// Phase-5 exit criterion for the datalog port: datalevin's own
+/// query-optimizer suite (pinned 78b199e8, vendored under
+/// 091-datalevin-test-suite/src) runs fully green against the native
+/// engine.  ~2 hours on a debug build, so it is not part of the default
+/// corpus: run it with `cargo test -p cljrsh --test conformance -- --ignored`.
+#[test]
+#[ignore = "slow (~2h debug): datalevin optimizer suite, run with -- --ignored"]
+fn datalevin_optimizer_suite() {
+    let dir = corpus_dir().join("091-datalevin-test-suite");
+    let out = Command::new(env!("CARGO_BIN_EXE_cljrsh"))
+        .args([
+            "-e",
+            "(require '[clojure.test :as t] '[datalevin.query-optimizer-test]) \
+             (let [r (t/run-tests 'datalevin.query-optimizer-test)] \
+               (println \"SUMMARY\" (:test r) (:pass r) (:fail r) (:error r)) \
+               (when (pos? (+ (:fail r) (:error r))) (System/exit 1)))",
+        ])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn cljrsh");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "optimizer suite not green:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("SUMMARY 25"),
+        "unexpected suite shape:\n{stdout}"
+    );
+}
