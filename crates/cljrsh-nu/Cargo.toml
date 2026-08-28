@@ -1,6 +1,6 @@
 [package]
 name = "cljrsh-nu"
-version = "0.1.0"
+version = "0.2.26"
 edition = "2024"
 description = "Embedded nushell engine for cljrsh: (nu/eval \"ls | where size > 1kb\") runs pipelines in-process and returns Clojure data"
 license.workspace = true
