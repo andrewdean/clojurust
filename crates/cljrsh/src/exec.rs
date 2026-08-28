@@ -14,9 +14,13 @@ pub fn setup_globals(extra_paths: Vec<std::path::PathBuf>, args: &[String]) -> A
     // picks its :bb branch, cljrsh-specific code its :cljrsh branch.
     cljrs_builtins::form::set_reader_features(["bb", "cljrsh", "clj", "rust"]);
 
+    // gc_config_from_env, not GcConfig::new: this call overrides the config
+    // standard_env() derived from the environment, so passing the bare
+    // defaults here silently made CLJRS_GC_SOFT_LIMIT_MB /
+    // CLJRS_GC_HARD_LIMIT_MB dead for cljrsh (they worked for cljrs).
     let globals = cljrs_stdlib::standard_env_with_paths_and_config(
         extra_paths,
-        Arc::new(cljrs_gc::GcConfig::new()),
+        Arc::new(cljrs_gc::gc_config_from_env()),
     );
 
     // Async runtime hookups run inside the LocalSet (init spawns tasks).
