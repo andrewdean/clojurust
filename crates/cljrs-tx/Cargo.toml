@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-tx"
-version = "0.1.0"
+version = "0.2.24"
 edition = "2024"
 description = "GC-less isolated transaction-function runtime for clojurust"
 license.workspace = true
@@ -24,6 +24,6 @@ cljrs-gc = { workspace = true }
 cljrs-types = { workspace = true }
 cljrs-value = { workspace = true }
 cljrs-reader = { workspace = true }
-cljrs-env = { path = "../cljrs-env", version = "0.1.0", default-features = false }
-cljrs-interp = { path = "../cljrs-interp", version = "0.1.0", default-features = false }
+cljrs-env = { path = "../cljrs-env", version = "0.2.24", default-features = false }
+cljrs-interp = { path = "../cljrs-interp", version = "0.2.24", default-features = false }
 thiserror = { workspace = true }

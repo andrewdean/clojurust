@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-qt"
-version = "0.1.0"
+version = "0.2.24"
 edition = "2024"
 description = "cljrs embedded in a Qt/QML host — C ABI cdylib around an nREPL-centered interpreter thread"
 license.workspace = true
