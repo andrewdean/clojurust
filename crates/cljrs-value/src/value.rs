@@ -1333,6 +1333,9 @@ impl Value {
                 | Value::Queue(_)
                 | Value::LazySeq(_)
                 | Value::Cons(_)
+                // Records are IPersistentCollection on the JVM: (coll? rec)
+                // is true, and tree-seq/walk descend into them.
+                | Value::TypeInstance(_)
         )
     }
 }
