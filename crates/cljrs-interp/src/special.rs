@@ -1725,7 +1725,45 @@ fn eval_ns(args: &[Form], env: &mut Env) -> EvalResult {
                         load_ns(env.globals.clone(), &spec, &name)?;
                     }
                 }
-                // Other clauses (:refer-clojure, :use, :import) — skip for now.
+                Some(FormKind::Keyword(k)) if k == "import" => {
+                    // (:import [some.ns TypeA TypeB] ...) — the "package" is a
+                    // cljrsh namespace (defrecord/deftype home).  JVM classes
+                    // (java.util.UUID etc.) have no such namespace and are
+                    // skipped, falling back to the class-name self-eval.
+                    // Alias each type's ->Type / map->Type constructors and
+                    // its type symbol into the importing ns so `(Type. args)`
+                    // resolves cross-namespace, matching JVM import behavior.
+                    for spec_form in expand_reader_conds(&items[1..]) {
+                        let (src_ns, type_names): (String, Vec<String>) = match &spec_form.kind {
+                            FormKind::Vector(parts) | FormKind::List(parts) if parts.len() >= 2 => {
+                                let FormKind::Symbol(src) = &parts[0].kind else {
+                                    continue;
+                                };
+                                let types = parts[1..]
+                                    .iter()
+                                    .filter_map(|p| match &p.kind {
+                                        FormKind::Symbol(t) => Some(t.to_string()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                (src.to_string(), types)
+                            }
+                            FormKind::Symbol(full) => match full.rsplit_once('.') {
+                                Some((src, ty)) => (src.to_string(), vec![ty.to_string()]),
+                                None => continue,
+                            },
+                            _ => continue,
+                        };
+                        for ty in &type_names {
+                            for var in [format!("->{ty}"), format!("map->{ty}"), ty.clone()] {
+                                if let Some(val) = env.globals.lookup_in_ns(&src_ns, &var) {
+                                    env.globals.intern(&name, Arc::from(var.as_str()), val);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Other clauses (:refer-clojure, :use) — skip for now.
                 _ => {}
             }
         }

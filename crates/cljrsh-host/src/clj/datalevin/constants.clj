@@ -884,9 +884,10 @@ must be capable of saving before the planner expands their placement states."}
 (def ^{:dynamic true
        :doc     "Cost associated with hash join"}
   magic-cost-hash-join
-  ;; cljrsh: single-threaded runtime, so the parallelism barrier factor
-  ;; is the core count 1.
-  #?(:cljrsh 5.0
+  ;; The processor-count factor is part of the tuned cost model (hash join
+  ;; as a parallelism barrier); dropping it flips plan-choice heuristics
+  ;; the vendored optimizer tests encode, so mirror the JVM exactly.
+  #?(:cljrsh (* 5.0 (available-processors))
      :clj (* 5.0
              ;; for hash join is a barrier to parallelism
              (.availableProcessors (Runtime/getRuntime)))))

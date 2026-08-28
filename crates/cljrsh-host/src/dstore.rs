@@ -101,6 +101,12 @@ fn to_store_value(store: &Store, attr: Option<&str>, v: &Value) -> Result<StoreV
         Value::Keyword(k) => StoreValue::Keyword(k.get().full_name()),
         Value::Uuid(u) => StoreValue::Uuid(u.to_be_bytes()),
         Value::Instant(ms) => StoreValue::Instant(*ms),
+        // JVM byte arrays are signed; stored as raw bytes (datalevin's
+        // :db.type/bytes), mirroring from_store_value's Bytes arm.
+        Value::ByteArray(a) => {
+            let bytes: Vec<u8> = a.get().lock().unwrap().iter().map(|&b| b as u8).collect();
+            StoreValue::Bytes(bytes)
+        }
         seq @ (Value::Vector(_) | Value::List(_) | Value::Cons(_) | Value::LazySeq(_)) => {
             StoreValue::Vec(
                 cljrs_value::value::value_to_seq_vec(seq)

@@ -1336,6 +1336,11 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("close", Arity::Fixed(1), builtin_close),
         // Misc
         ("gensym", Arity::Variadic { min: 0 }, builtin_gensym),
+        (
+            "available-processors",
+            Arity::Fixed(0),
+            builtin_available_processors,
+        ),
         ("type", Arity::Fixed(1), builtin_type),
         ("hash", Arity::Fixed(1), builtin_hash),
         ("name", Arity::Fixed(1), builtin_name),
@@ -3518,17 +3523,20 @@ fn builtin_keyword_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(args[0], Value::Keyword(_))))
 }
 fn builtin_symbol_q(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Bool(matches!(args[0], Value::Symbol(_))))
+    Ok(Value::Bool(matches!(
+        args[0].unwrap_meta(),
+        Value::Symbol(_)
+    )))
 }
 fn builtin_fn_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
-        args[0],
+        args[0].unwrap_meta(),
         Value::Fn(_) | Value::BoundFn(_) | Value::NativeFunction(_)
     )))
 }
 fn builtin_ifn_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
-        args[0],
+        args[0].unwrap_meta(),
         Value::Fn(_)
             | Value::BoundFn(_)
             | Value::NativeFunction(_)
@@ -3546,7 +3554,7 @@ fn builtin_ifn_q(args: &[Value]) -> ValueResult<Value> {
 }
 fn builtin_seq_q(args: &[Value]) -> ValueResult<Value> {
     Ok(Value::Bool(matches!(
-        args[0],
+        args[0].unwrap_meta(),
         Value::List(_) | Value::Cons(_) | Value::LazySeq(_)
     )))
 }
@@ -7103,6 +7111,16 @@ fn builtin_make_lazy_seq_sentinel(_args: &[Value]) -> ValueResult<Value> {
 
 pub static GENSYM_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// `(available-processors)` — the host's available parallelism (>= 1).
+/// Mirrors the JVM's `Runtime.availableProcessors`; datalevin's cost model
+/// scales its hash-join constant by it.
+fn builtin_available_processors(_args: &[Value]) -> ValueResult<Value> {
+    let n = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    Ok(Value::Long(n as i64))
+}
+
 fn builtin_gensym(args: &[Value]) -> ValueResult<Value> {
     let prefix = match args.first() {
         Some(Value::Str(s)) => s.get().to_string(),
@@ -9202,7 +9220,12 @@ fn builtin_make_type_instance(args: &[Value]) -> ValueResult<Value> {
 
 /// `(record? x)` — true if x is a TypeInstance.
 fn builtin_record_q(args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Bool(matches!(args[0], Value::TypeInstance(_))))
+    // unwrap_meta: with-meta on a record stays a record (JVM semantics);
+    // the parser attaches source metadata to every datalevin record.
+    Ok(Value::Bool(matches!(
+        args[0].unwrap_meta(),
+        Value::TypeInstance(_)
+    )))
 }
 
 /// `(instance? TypeName x)` — true if x is a TypeInstance with the given type tag.

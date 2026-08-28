@@ -184,6 +184,16 @@
        (catch Exception _
          (cond
            (coll? a) (if (= a b) 0 (compare (hash a) (hash b)))
+           ;; byte arrays: unsigned lexicographic, mirroring the :clj arm's
+           ;; BitOps/compareBytes (LMDB key order)
+           (and (bytes? a) (bytes? b))
+           (let [la (alength a) lb (alength b) n (min la lb)]
+             (loop [i 0]
+               (if (< i n)
+                 (let [x (bit-and (long (aget a i)) 0xff)
+                       y (bit-and (long (aget b i)) 0xff)]
+                   (if (= x y) (recur (inc i)) (- x y)))
+                 (- la lb))))
            :else     (compare (str (type a)) (str (type b)))))))
    :clj
    (defn compare-with-type [a b]

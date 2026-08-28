@@ -33,17 +33,18 @@
    [datalevin.query-util :as qu]
    [datalevin.relation :as r]
    [datalevin.util :as u :refer [cond+ raise conjv concatv map+]])
-  #?(:cljrsh nil
-     :clj (:import
-           [java.util HashMap HashSet IdentityHashMap List]
-           [java.util.concurrent ConcurrentHashMap]
-           [datalevin.db DB]
-           [datalevin.storage Store]
-           [datalevin.utl DPKey LRUCache]
-           [datalevin.parser And BindColl BindIgnore BindScalar BindTuple
-            Constant DefaultSrc Function Or Variable Pattern Predicate Not
-            RuleExpr]
-           [org.eclipse.collections.impl.list.mutable FastList])))
+  ;; cljrsh processes :import for record namespaces (constructor aliasing);
+  ;; JVM-only entries resolve to nothing there and are skipped.
+  (:import
+   [java.util HashMap HashSet IdentityHashMap List]
+   [java.util.concurrent ConcurrentHashMap]
+   [datalevin.db DB]
+   [datalevin.storage Store]
+   [datalevin.utl DPKey LRUCache]
+   [datalevin.parser And BindColl BindIgnore BindScalar BindTuple
+    Constant DefaultSrc Function Or Variable Pattern Predicate Not
+    RuleExpr]
+   [org.eclipse.collections.impl.list.mutable FastList]))
 
 ;; cljrs port note: DPK replaces the DPKey Java class (record equality
 ;; matches its semantics: canonical keys by member bitset, ordered keys

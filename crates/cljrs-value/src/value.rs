@@ -442,6 +442,17 @@ impl PartialEq for Value {
         if let (Value::ObjectArray(a), Value::ObjectArray(b)) = (self, other) {
             return GcPtr::ptr_eq(a, b);
         }
+        match (self, other) {
+            (Value::BooleanArray(a), Value::BooleanArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::ByteArray(a), Value::ByteArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::ShortArray(a), Value::ShortArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::IntArray(a), Value::IntArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::LongArray(a), Value::LongArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::FloatArray(a), Value::FloatArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::DoubleArray(a), Value::DoubleArray(b)) => return GcPtr::ptr_eq(a, b),
+            (Value::CharArray(a), Value::CharArray(b)) => return GcPtr::ptr_eq(a, b),
+            _ => {}
+        }
         // Realize lazy sequences before comparing.
         // A lazy-seq that realizes to nil is an empty sequence, which is equal
         // to both nil and any empty sequential collection (matching Clojure).
