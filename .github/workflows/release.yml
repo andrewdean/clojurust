@@ -1,7 +1,10 @@
 name: Release
 
-# Builds cljrsh distribution binaries for a tag and attaches them to a
-# GitHub Release. Tags are pushed by the Publish workflow with the
+# Builds cljrsh and cljrs distribution binaries for a tag and attaches
+# them to a GitHub Release. Both ship in one tarball per platform so the
+# asset set stays one-per-target — mise's github: backend then selects
+# unambiguously and its exe option picks the binary out of the archive
+# (separate cljrs-*/cljrsh-* assets would be prefix-ambiguous there). Tags are pushed by the Publish workflow with the
 # workflow's own GITHUB_TOKEN, and such pushes never trigger other
 # workflows — so Publish *calls* this workflow after a successful
 # crates.io publish. workflow_dispatch covers manual runs and backfills;
@@ -78,20 +81,24 @@ jobs:
           key: dist-${{ matrix.target }}
 
       - name: Build (dist profile)
-        run: cargo build --profile dist -p cljrsh --target ${{ matrix.target }}
+        run: cargo build --profile dist -p cljrsh -p cljrs --target ${{ matrix.target }}
 
       - name: Smoke test
         run: |
-          BIN=target/${{ matrix.target }}/dist/cljrsh
-          "$BIN" --version
-          test "$("$BIN" -e '(+ 1 2)')" = "3"
+          DIST=target/${{ matrix.target }}/dist
+          "$DIST/cljrsh" --version
+          test "$("$DIST/cljrsh" -e '(+ 1 2)')" = "3"
+          "$DIST/cljrs" --version
+          test "$("$DIST/cljrs" eval '(+ 1 2)')" = "3"
 
       # Version-free asset names keep releases/latest/download/ URLs stable.
       - name: Package
         run: |
           STAGE=cljrsh-${{ matrix.target }}
           mkdir "$STAGE"
-          cp target/${{ matrix.target }}/dist/cljrsh crates/cljrsh/README.md "$STAGE"/
+          cp target/${{ matrix.target }}/dist/cljrsh \
+             target/${{ matrix.target }}/dist/cljrs \
+             crates/cljrsh/README.md "$STAGE"/
           tar czf "$STAGE.tar.gz" "$STAGE"
 
       - uses: actions/upload-artifact@v4
