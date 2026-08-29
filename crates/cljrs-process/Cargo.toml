@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-process"
-version = "0.1.0"
+version = "0.2.31"
 edition = "2024"
 description = "Subprocess support for clojurust scripting: blocking sh and spawned child-process handles (cljrs.process namespace)"
 license.workspace = true
