@@ -344,6 +344,29 @@ pub fn dispatch_method(method: &str, target: &Value, args: &[Value]) -> EvalResu
         Value::List(_) | Value::Cons(_) | Value::LazySeq(_) => {
             dispatch_seq_method(method, target, args)
         }
+        Value::TypeInstance(ti) => {
+            // `.-field` reads a deftype/defrecord field. There are no host
+            // methods to call on an interpreter instance, so a plain `.method`
+            // is unsupported (protocol methods are called as `(proto-fn inst)`).
+            if let Some(field) = method.strip_prefix('-') {
+                let key = Value::keyword(cljrs_value::Keyword::simple(field));
+                let inst = ti.get();
+                // A mutable field lives in the interior-mutable cell; an
+                // immutable one in the field map.
+                if let Some(atom) = &inst.mutable
+                    && let Value::Map(m) = atom.get().deref()
+                    && let Some(v) = m.get(&key)
+                {
+                    return Ok(v);
+                }
+                Ok(inst.fields.get(&key).unwrap_or(Value::Nil))
+            } else {
+                Err(EvalError::Runtime(format!(
+                    ".{method} not supported on {} (only .-field access is)",
+                    target.type_name()
+                )))
+            }
+        }
         _ => Err(EvalError::Runtime(format!(
             ".{method} not supported on type {}",
             target.type_name()

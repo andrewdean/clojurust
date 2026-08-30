@@ -503,18 +503,30 @@ pub struct CljxCons {
 `cljrs-value` stays free of evaluator dependencies while `LazySeq` can still
 call back through the trait object.
 
-### `TypeInstance` (Phase 6-ext — defrecord/reify)
+### `TypeInstance` (Phase 6-ext — defrecord/deftype/reify)
 
 ```rust
 pub struct TypeInstance {
-    pub type_tag: Arc<str>,  // record name (defrecord) or gensym (reify)
-    pub fields: MapValue,    // keyword → value
+    pub type_tag: Arc<str>,                        // type name, or a gensym for reify
+    pub fields: MapValue,                          // keyword → value (immutable fields)
+    pub mutable: Option<GcPtr<crate::types::Atom>>, // keyword → value, deftype only
 }
 ```
 
-Used by `defrecord` (named type_tag, generates `->Name`/`map->Name` constructors) and
-`reify` (gensym'd type_tag, no constructors).  Supports keyword field access `(:field rec)`,
-`get`, `assoc` (returns new TypeInstance), and `count`.
+Used by `defrecord` (named type_tag, generates `->Name`/`map->Name` constructors),
+`deftype` (named type_tag, `->Name` only), and `reify` (gensym'd type_tag, no
+constructors).  Supports keyword field access `(:field rec)`, `get`, `assoc`
+(returns new TypeInstance), and `count`.
+
+`mutable` holds a `deftype`'s `^:unsynchronized-mutable` / `^:volatile-mutable`
+fields in one interior-mutable cell — an `Atom` over a keyword→value map — so
+`set!` updates them in place and every clone of the instance sees the write.
+It is `None` for `defrecord`, `reify`, and an all-immutable `deftype`.
+Instances are `!Send`, so one shared cell needs no stronger volatility than an
+`Atom`, and the two mutability markers behave identically.  `assoc`/`assoc-in`
+and `with-meta` carry the cell through; `serialize` folds the slot *values*
+into the field map and `deserialize` restores `mutable: None`, since mutability
+itself is runtime state that does not cross a clone boundary.
 
 ### `Volatile` / `Delay` / `CljxPromise` / `CljxFuture` / `Agent` (Phase 7)
 

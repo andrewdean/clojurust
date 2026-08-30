@@ -159,6 +159,14 @@ form.  Interpreter-only special forms with no IR equivalent (`defprotocol`,
 them as generic calls would resolve their clojure.core stub vars, which
 return nil and silently corrupt the promoted function.
 
+`set!` lowers to `SetBang` only for a global var target.  A `deftype` mutable
+field write — `(set! (.-field inst) v)`, or the bare `(set! field v)` inside a
+method body, where the field is bound as a `let*` local — is likewise
+**rejected**, because the `LoadVar`/`SetBang` pair would target a global var
+of that name rather than the instance's interior-mutable cell: the write would
+be lost and a stray var defined.  The method tree-walks instead, where
+`eval_set_bang` updates the cell.
+
 `Const`, `LoadLocal`, `LoadGlobal`, `LoadVar`, `AllocVector`, `AllocMap`,
 `AllocSet`, `AllocList`, `AllocCons`, `AllocClosure`, `CallKnown`, `Call`,
 `CallDirect`, `Deref`, `DefVar`, `SetBang`, `Throw`, `Phi`, `Recur`,
