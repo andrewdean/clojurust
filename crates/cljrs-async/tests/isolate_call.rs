@@ -221,6 +221,36 @@ fn pfuture_rejects_non_call_and_unqualified_forms() {
     });
 }
 
+/// C2 + C4 together: a `shared-atom` holding a map crosses by Arc-clone,
+/// is written inside the isolate, and the write is observed by the caller —
+/// genuine cross-isolate coordination through the shared tier.
+#[test]
+fn shared_atom_map_coordinates_across_isolates() {
+    let _mutator = cljrs_gc::register_mutator();
+    let globals = async_env();
+    block_on_local(async move {
+        let mut env = user_env(globals);
+        eval_sync(
+            "(def sa (shared-atom {:done false}))
+             (def iso (isolate))",
+            &mut env,
+        );
+        let r = eval_await(
+            "(await (isolate-call iso 'clojure.core/reset! sa {:done true :n 42}))",
+            &mut env,
+        )
+        .await
+        .expect("cross-isolate reset! resolves");
+        let expected = eval_sync("{:done true :n 42}", &mut env);
+        assert_eq!(r, expected);
+        // The write happened in the worker's heap; the caller sees it through
+        // the shared cell, not through the reply copy.
+        assert_eq!(eval_sync("(:n @sa)", &mut env), Value::Long(42));
+        assert_eq!(eval_sync("(:done @sa)", &mut env), Value::Bool(true));
+        eval_sync("(isolate-close! iso)", &mut env);
+    });
+}
+
 /// A namespace on the caller's source paths is requirable inside the worker,
 /// and two isolates genuinely run on separate cores: two concurrent calls take
 /// roughly as long as one, not twice as long.

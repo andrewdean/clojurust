@@ -23,9 +23,15 @@
 //! - Strings (`Arc<str>`, immutable, refcounted)
 //! - Keywords / symbols (`StaticGcPtr<T>`, interned, program-lifetime)
 //! - Large byte buffers (`Arc<[u8]>`, the BEAM off-heap-binary trick)
+//! - Immutable collections of the above (`Arc<[SharedValue]>` slices,
+//!   Phase C4) — promoted bottom-up, so the result is an acyclic DAG and
+//!   plain `Arc` refcounting stays leak-free
 //!
 //! Closures, native resources, and isolate-bound GC objects are not
 //! promotable.  This restriction is enforced at publish time via `promote`.
+//! Reads (`deref`) demote back into GC-heap collections — O(n) for
+//! collections; the zero-copy read view is deferred alongside `shared-vec`
+//! (docs/isolate-boundary-plan.md).
 
 use std::sync::{Arc, Mutex};
 
@@ -55,8 +61,9 @@ impl std::fmt::Display for PromoteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "value of type '{}' cannot be promoted to a shared-atom: \
-             only scalars, strings, keywords, symbols, and byte-blobs are supported",
+            "value of type '{}' cannot be promoted to a shared-atom: only \
+             plain data — scalars, strings, keywords, symbols, byte-blobs, \
+             and vectors/lists/maps/sets thereof — is supported",
             self.type_name
         )
     }
@@ -73,8 +80,9 @@ impl std::error::Error for PromoteError {}
 /// keywords/symbols (program-lifetime `StaticGcPtr`).  Anything that holds
 /// isolate-local `GcPtr`s is excluded.
 ///
-/// Cycles are impossible — `SharedValue` contains no `SharedValue` references
-/// — so plain `Arc` refcounting is sufficient and cycle-free.
+/// Cycles are impossible — collections are promoted bottom-up from immutable
+/// values, so the graph is an acyclic DAG and plain `Arc` refcounting is
+/// sufficient and cycle-free.
 #[derive(Debug, Clone)]
 pub enum SharedValue {
     Nil,
@@ -93,6 +101,16 @@ pub enum SharedValue {
     /// Shared without copy across the isolate boundary; freed when the last
     /// reference is dropped.
     ByteBlob(Arc<[u8]>),
+    /// Immutable vector of shared values (Phase C4).
+    Vector(Arc<[SharedValue]>),
+    /// Immutable list of shared values, in order.
+    List(Arc<[SharedValue]>),
+    /// Immutable set of shared values. Membership semantics are restored on
+    /// demote; the slice just carries the elements.
+    Set(Arc<[SharedValue]>),
+    /// Immutable map as key-value pairs. Lookup semantics are restored on
+    /// demote; the slice just carries the entries.
+    Map(Arc<[(SharedValue, SharedValue)]>),
 }
 
 // SAFETY: all variants are either value types or `Arc`/`StaticGcPtr` wrappers
@@ -113,6 +131,10 @@ impl SharedValue {
             SharedValue::Keyword(_) => "keyword",
             SharedValue::Symbol(_) => "symbol",
             SharedValue::ByteBlob(_) => "byte-blob",
+            SharedValue::Vector(_) => "vector",
+            SharedValue::List(_) => "list",
+            SharedValue::Set(_) => "set",
+            SharedValue::Map(_) => "map",
         }
     }
 }
@@ -150,6 +172,25 @@ pub fn promote(value: &Value) -> Result<SharedValue, PromoteError> {
             Ok(SharedValue::ByteBlob(blob))
         }
         Value::ByteBlob(blob) => Ok(SharedValue::ByteBlob(blob.clone())),
+        Value::Vector(v) => {
+            let items: Result<Vec<_>, _> = v.get().iter().map(promote).collect();
+            Ok(SharedValue::Vector(items?.into()))
+        }
+        Value::List(l) => {
+            let items: Result<Vec<_>, _> = l.get().iter().map(promote).collect();
+            Ok(SharedValue::List(items?.into()))
+        }
+        Value::Set(s) => {
+            let items: Result<Vec<_>, _> = s.iter().map(promote).collect();
+            Ok(SharedValue::Set(items?.into()))
+        }
+        Value::Map(m) => {
+            let pairs: Result<Vec<_>, _> = m
+                .iter()
+                .map(|(k, v)| Ok((promote(k)?, promote(v)?)))
+                .collect();
+            Ok(SharedValue::Map(pairs?.into()))
+        }
         other => Err(PromoteError::not_promotable(other.type_name())),
     }
 }
@@ -172,6 +213,22 @@ pub fn demote(sv: &SharedValue) -> Value {
         SharedValue::Keyword(kw) => Value::Keyword(GcPtr::new(kw.get().clone())),
         SharedValue::Symbol(sym) => Value::Symbol(GcPtr::new(sym.get().clone())),
         SharedValue::ByteBlob(blob) => Value::ByteBlob(blob.clone()),
+        SharedValue::Vector(items) => Value::Vector(GcPtr::new(
+            crate::collections::PersistentVector::from_iter(items.iter().map(demote)),
+        )),
+        SharedValue::List(items) => Value::List(GcPtr::new(
+            crate::collections::PersistentList::from_iter(items.iter().map(demote)),
+        )),
+        SharedValue::Set(items) => {
+            let mut hs = crate::collections::PersistentHashSet::empty();
+            for item in items.iter().map(demote) {
+                hs = hs.conj(item);
+            }
+            Value::Set(crate::value::SetValue::Hash(GcPtr::new(hs)))
+        }
+        SharedValue::Map(pairs) => Value::Map(crate::value::MapValue::from_pairs(
+            pairs.iter().map(|(k, v)| (demote(k), demote(v))).collect(),
+        )),
     }
 }
 
@@ -351,6 +408,49 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SharedAtom>();
         assert_send_sync::<Arc<SharedAtom>>();
+    }
+
+    #[test]
+    fn promote_demote_roundtrips_nested_collections() {
+        use crate::collections::PersistentVector;
+        use crate::value::MapValue;
+        let inner = Value::Map(MapValue::from_pairs(vec![
+            (kw("a"), Value::Long(1)),
+            (kw("b"), Value::string("two")),
+        ]));
+        let original = Value::Vector(GcPtr::new(PersistentVector::from_iter([
+            Value::Long(7),
+            inner.clone(),
+            Value::Nil,
+        ])));
+        let sv = promote(&original).expect("nested plain data promotes");
+        assert!(matches!(sv, SharedValue::Vector(_)));
+        assert_eq!(demote(&sv), original);
+    }
+
+    #[test]
+    fn promote_set_roundtrips_membership() {
+        use crate::collections::PersistentHashSet;
+        use crate::value::SetValue;
+        let mut hs = PersistentHashSet::empty();
+        for v in [Value::Long(1), kw("x"), Value::string("s")] {
+            hs = hs.conj(v);
+        }
+        let original = Value::Set(SetValue::Hash(GcPtr::new(hs)));
+        let sv = promote(&original).expect("set of plain data promotes");
+        assert_eq!(demote(&sv), original);
+    }
+
+    #[test]
+    fn promote_collection_holding_atom_is_rejected() {
+        use crate::collections::PersistentVector;
+        let poison = Value::Atom(GcPtr::new(crate::types::Atom::new(Value::Nil)));
+        let v = Value::Vector(GcPtr::new(PersistentVector::from_iter([
+            Value::Long(1),
+            poison,
+        ])));
+        let err = promote(&v).expect_err("atom inside a vector must reject");
+        assert_eq!(err.type_name, "atom");
     }
 
     #[test]

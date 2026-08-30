@@ -115,6 +115,39 @@ fn shared_atom_rejects_non_promotable() {
 }
 
 #[test]
+fn shared_atom_holds_collections() {
+    // Phase C4: vectors/lists/maps/sets of plain data are promotable.
+    let mut env = make_env().1;
+    eval_src("(def a (shared-atom {:hits 0 :tags [:a :b]}))", &mut env);
+    let expected = eval_src("{:hits 0 :tags [:a :b]}", &mut env);
+    assert_eq!(eval_src("@a", &mut env), expected);
+    eval_src("(swap! a update :hits inc)", &mut env);
+    assert_eq!(eval_src("(:hits @a)", &mut env), Value::Long(1));
+    assert_eq!(
+        eval_src("(= (:tags @a) [:a :b])", &mut env),
+        Value::Bool(true)
+    );
+
+    eval_src("(def s (shared-atom #{1 2 3}))", &mut env);
+    assert_eq!(eval_src("(contains? @s 2)", &mut env), Value::Bool(true));
+    eval_src("(swap! s conj 4)", &mut env);
+    assert_eq!(eval_src("(count @s)", &mut env), Value::Long(4));
+
+    eval_src("(def l (shared-atom '(1 2 3)))", &mut env);
+    assert_eq!(eval_src("(first @l)", &mut env), Value::Long(1));
+}
+
+#[test]
+fn shared_atom_rejects_collection_holding_local_state() {
+    // A vector is promotable only if everything inside it is.
+    let (_, mut env) = make_env();
+    let mut parser = Parser::new("(shared-atom [1 (atom 2)])".to_string(), "<test>".to_string());
+    let forms = parser.parse_all().expect("parse error");
+    let res = cljrs_interp::eval::eval(&forms[0], &mut env);
+    assert!(res.is_err(), "an atom inside a vector should fail to publish");
+}
+
+#[test]
 fn shared_atom_swap_rejects_non_promotable_result() {
     let mut env = make_env().1;
     eval_src("(def a (shared-atom 0))", &mut env);
