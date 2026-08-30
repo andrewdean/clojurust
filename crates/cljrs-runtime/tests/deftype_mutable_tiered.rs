@@ -40,7 +40,11 @@ fn eval_pr(src: &str) -> String {
     }
     match result {
         Value::Str(s) => s.get().as_str().to_string(),
-        other => panic!("expected a string from pr-str, got {:?}", other),
+        // The type name, not `{:?}`: a `Value` may be a `Uuid`, and CodeQL
+        // reads Debug-formatting one into a panic as logging it in cleartext.
+        // Which type came back instead of a string is what this assertion is
+        // actually about.
+        other => panic!("expected a string from pr-str, got a {}", other.type_name()),
     }
 }
 
