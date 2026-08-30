@@ -25,10 +25,11 @@
 //! - `(isolate-take! rx)` → a `Future` resolving to the next value, or `nil`
 //!   once the channel is closed and drained. Use with `await` in an async body.
 //!
-//! Until a Clojure-level isolate-spawn primitive exists (deferred with the
-//! `pfuture`/`spawn` parallel primitive), both ends typically live on the same
-//! isolate, so the channel behaves as an unbounded queue that still pays — and
-//! meters — the deep copy. That makes the boundary observable from Clojure today.
+//! With the Phase C2 isolate surface (`isolate`, `isolate-call`, `pfuture` —
+//! see `isolate_call.rs`), both ends of an isolate channel can genuinely live
+//! on different isolates. Used same-isolate, the channel behaves as an
+//! unbounded queue that still pays — and meters — the deep copy, keeping the
+//! boundary observable either way.
 
 use std::any::Any;
 use std::sync::{Arc, Mutex};

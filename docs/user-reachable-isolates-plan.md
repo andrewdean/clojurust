@@ -120,7 +120,7 @@ workload exists to signal — it is sequenced after D2, not before.
 | Phase | Deliverable | Crates |
 |---|---|---|
 | C1 | Waker-complete channels: the four residual spin loops, regression-tested — **done 2026-08-30** | `cljrs-async` |
-| C2 | Isolate handles, `isolate-call`, reply futures, `pfuture` + default pool (D1, D2) | `cljrs-async`, `cljrs-builtins` |
+| C2 | Isolate handles, `isolate-call`, reply futures, `pfuture` + default pool (D1, D2) — **done 2026-08-30** (`isolate_call.rs`; two concurrent calls verified ≈1× wall-clock of one) | `cljrs-async` |
 | C3 | Agents as loop-async mailboxes; docs truth pass rides along (D3, D6) | `cljrs-async`, `cljrs-value`, docs |
 | C4 | Arc-backed `SharedValue` collections; `shared-atom` holds maps (D4) | `cljrs-value` |
 | C5 | Pressure coordinator (`watch<PressureLevel>` per the existing design), boundary-telemetry review, `shared-vec` go/no-go | `cljrs-gc`, `cljrs-async` |

@@ -135,3 +135,22 @@
                             (list 'await (list 'clojure.core.async/put! c r)))
                       (list 'clojure.core.async/close! c)))
           c)))
+
+;; (pfuture (fully.qualified/sym args...))
+;;
+;; Run a call form on a default-pool isolate — a separate OS thread with its
+;; own heap — returning a Future for the result. The distinct parallel
+;; primitive (docs/isolate-boundary-plan.md): `future` stays loop-async on
+;; this isolate; `pfuture` crosses the copy boundary. The macro requires a
+;; (qualified-symbol args...) call form so the no-closure rule (D1) fails at
+;; expansion, not at runtime mid-scheduling: arguments are evaluated here and
+;; deep-copied across; the symbol is resolved inside the target isolate.
+(defmacro pfuture [call]
+  (if (and (seq? call) (symbol? (first call)) (namespace (first call)))
+    (apply list
+           (concat (list 'clojure.core.async/isolate-call
+                         (list 'clojure.core.async/default-isolate)
+                         (list 'quote (first call)))
+                   (rest call)))
+    (throw (ex-info "pfuture requires a (fully.qualified/symbol args...) call form — closures cannot cross an isolate boundary"
+                    {:form call}))))
