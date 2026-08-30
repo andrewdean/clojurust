@@ -103,6 +103,14 @@ impl IsolateReceiver {
         self.rx.try_recv().ok().map(deserialize)
     }
 
+    /// Poll for the next value, registering `cx`'s waker with the underlying
+    /// channel when empty — so a caller that must lock a shared receiver can
+    /// acquire the lock per poll instead of holding it across a suspension.
+    /// `Poll::Ready(None)` means all senders are dropped and the queue drained.
+    pub fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Value>> {
+        self.rx.poll_recv(cx).map(|opt| opt.map(deserialize))
+    }
+
     /// Non-blocking receive that distinguishes "empty" from "disconnected" —
     /// the Clojure-level `isolate-take!`/`isolate-poll!` builtins need to tell a
     /// transient empty queue (keep waiting) from a closed channel (yield `nil`).

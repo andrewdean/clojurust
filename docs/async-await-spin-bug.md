@@ -172,19 +172,24 @@ processes started before the build keep executing the old image until
 restarted. If a cljrs daemon is pinning a core, check its start time
 against the binary's mtime before assuming a new bug.
 
-## Residual spin loops (known, not yet converted)
+## Residual spin loops (converted 2026-08-30)
 
-These `yield_now` loops remain in cljrs-async and spin only while
-their specific operation is outstanding — none is in the steady state
-of an idle daemon, which is why they didn't gate this fix. They are
-the natural next conversions, and `CljChannel`'s existing
-`async_not_empty`/`async_not_full` notifies (or the new waker lists)
-cover all of them:
+The `yield_now` loops that survived the original fix spun only while
+their specific operation was outstanding — never in the steady state
+of an idle daemon, which is why they didn't gate it. All are now
+converted onto the existing waker paths (Phase C1 of
+`docs/user-reachable-isolates-plan.md`):
 
-- `builtins.rs`: `mult`'s forwarding task (source take + per-tap put
-  loops), `onto-chan!`'s rendezvous offer/status and buffered put
-  loops, `thread-call`'s result put loop
-- `isolate_builtins.rs`: `isolate-take!` polling `IsolateRecv::Empty`
+- `builtins.rs`: `mult`'s forwarding task, `onto-chan!`/`to-chan!`'s
+  put loops, and `thread-call`'s result put now use `CljChannel`'s
+  async `take`/`put` (which park on `async_not_empty`/
+  `async_not_full`).
+- `isolate_builtins.rs`: `isolate-take!` parks on the underlying mpsc
+  waker via `IsolateReceiver::poll_recv`, locking the shared receiver
+  only inside each poll so a concurrent `isolate-poll!` can never
+  block the LocalSet thread against a parked taker.
 
-A `mult` with a slow tap, or `onto-chan!` onto a full channel, still
-burns CPU for the duration of the stall.
+Guarded by `tests/channel_parks.rs`, which stalls each path for
+~300 ms and requires the executor thread to sleep through the stall
+(the spin implementations burn the whole interval and fail the
+CPU-tick assertion).

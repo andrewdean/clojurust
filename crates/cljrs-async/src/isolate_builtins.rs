@@ -179,23 +179,20 @@ fn builtin_isolate_poll(args: &[Value]) -> ValueResult<Value> {
 }
 
 /// `(isolate-take! rx)` — a `Future` resolving to the next value, or `nil` once
-/// the channel is closed and drained. Parks (yields) while the channel is empty.
+/// the channel is closed and drained. Parks while the channel is empty.
 fn builtin_isolate_take(args: &[Value]) -> ValueResult<Value> {
     let rx = rx_arg(args)?;
     Ok(spawn_future(async move {
-        loop {
-            let status = {
-                let mut guard = rx_ref(rx.get())
-                    .rx
-                    .lock()
-                    .expect("isolate-receiver mutex poisoned");
-                guard.try_recv_status()
-            };
-            match status {
-                IsolateRecv::Value(v) => return Ok(v),
-                IsolateRecv::Disconnected => return Ok(Value::Nil),
-                IsolateRecv::Empty => tokio::task::yield_now().await,
-            }
-        }
+        // Lock only inside each poll: parking with the mutex held would let a
+        // concurrent `isolate-poll!` block the whole LocalSet thread.
+        let v = std::future::poll_fn(|cx| {
+            rx_ref(rx.get())
+                .rx
+                .lock()
+                .expect("isolate-receiver mutex poisoned")
+                .poll_recv(cx)
+        })
+        .await;
+        Ok(v.unwrap_or(Value::Nil))
     }))
 }
