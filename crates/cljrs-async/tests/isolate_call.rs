@@ -279,9 +279,12 @@ fn isolates_require_user_namespaces_and_run_in_parallel() {
 
         // Warm both workers (env build + require) before timing anything.
         for iso in ["iso-a", "iso-b"] {
-            let r = eval_await(&format!("(await (isolate-call {iso} 'crunch/burn 10))"), &mut env)
-                .await
-                .expect("warm-up call resolves");
+            let r = eval_await(
+                &format!("(await (isolate-call {iso} 'crunch/burn 10))"),
+                &mut env,
+            )
+            .await
+            .expect("warm-up call resolves");
             assert_eq!(r, Value::Long(45));
         }
 
@@ -289,9 +292,12 @@ fn isolates_require_user_namespaces_and_run_in_parallel() {
         let expected = Value::Long((N as i64 - 1) * N as i64 / 2);
 
         let t = Instant::now();
-        let r = eval_await(&format!("(await (isolate-call iso-a 'crunch/burn {N}))"), &mut env)
-            .await
-            .expect("baseline call resolves");
+        let r = eval_await(
+            &format!("(await (isolate-call iso-a 'crunch/burn {N}))"),
+            &mut env,
+        )
+        .await
+        .expect("baseline call resolves");
         let baseline = t.elapsed();
         assert_eq!(r, expected);
 
@@ -306,7 +312,10 @@ fn isolates_require_user_namespaces_and_run_in_parallel() {
         .await
         .expect("parallel calls resolve");
         let parallel = t.elapsed();
-        let expected_pair = eval_sync(&format!("[{0} {0}]", (N as i64 - 1) * N as i64 / 2), &mut env);
+        let expected_pair = eval_sync(
+            &format!("[{0} {0}]", (N as i64 - 1) * N as i64 / 2),
+            &mut env,
+        );
         assert_eq!(r, expected_pair);
 
         // Two concurrent runs on two isolates ≈ one run, not two. The 1.6×

@@ -23,10 +23,9 @@ use cljrs_gc::GcPtr;
 use cljrs_value::value::{PrintValue, SetValue};
 use cljrs_value::{
     Agent, Arity, Atom, CljxCons, CljxPromise, ExceptionInfo, FutureState, Keyword, LazySeq,
-    MapValue,
-    Namespace, NativeFn, ObjectArray, PersistentHashMap, PersistentHashSet, PersistentList,
-    PersistentQueue, PersistentVector, SharedAtom, SortedSet, Symbol, Thunk, TypeInstance, Value,
-    ValueError, ValueResult, Volatile, demote, promote,
+    MapValue, Namespace, NativeFn, ObjectArray, PersistentHashMap, PersistentHashSet,
+    PersistentList, PersistentQueue, PersistentVector, SharedAtom, SortedSet, Symbol, Thunk,
+    TypeInstance, Value, ValueError, ValueResult, Volatile, demote, promote,
 };
 use num_bigint::{BigInt, Sign, ToBigInt};
 use num_rational::Ratio;
@@ -9213,7 +9212,10 @@ fn builtin_restart_agent(args: &[Value]) -> ValueResult<Value> {
             }
             let clear_actions = args[2..].chunks(2).any(|pair| {
                 matches!(&pair[0], Value::Keyword(k) if k.get().name.as_ref() == "clear-actions")
-                    && !matches!(pair.get(1), None | Some(Value::Nil) | Some(Value::Bool(false)))
+                    && !matches!(
+                        pair.get(1),
+                        None | Some(Value::Nil) | Some(Value::Bool(false))
+                    )
             });
             if clear_actions {
                 a.get().queue.lock().unwrap().clear();

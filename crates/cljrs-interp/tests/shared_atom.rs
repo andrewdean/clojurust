@@ -141,10 +141,16 @@ fn shared_atom_holds_collections() {
 fn shared_atom_rejects_collection_holding_local_state() {
     // A vector is promotable only if everything inside it is.
     let (_, mut env) = make_env();
-    let mut parser = Parser::new("(shared-atom [1 (atom 2)])".to_string(), "<test>".to_string());
+    let mut parser = Parser::new(
+        "(shared-atom [1 (atom 2)])".to_string(),
+        "<test>".to_string(),
+    );
     let forms = parser.parse_all().expect("parse error");
     let res = cljrs_interp::eval::eval(&forms[0], &mut env);
-    assert!(res.is_err(), "an atom inside a vector should fail to publish");
+    assert!(
+        res.is_err(),
+        "an atom inside a vector should fail to publish"
+    );
 }
 
 #[test]

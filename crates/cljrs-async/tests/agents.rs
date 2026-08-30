@@ -88,7 +88,9 @@ fn failed_agent_reports_error_rejects_sends_and_restarts() {
             "(do (send a (fn [s] (throw (ex-info \"boom\" {:s s})))) (send a + 5))",
             &mut env,
         );
-        eval_await("(await a)", &mut env).await.expect("await on failing agent");
+        eval_await("(await a)", &mut env)
+            .await
+            .expect("await on failing agent");
 
         // Failed: error observable, state unchanged, new sends rejected.
         assert_ne!(eval_sync("(agent-error a)", &mut env), Value::Nil);
@@ -98,7 +100,9 @@ fn failed_agent_reports_error_rejects_sends_and_restarts() {
 
         // Restart resumes the still-queued (+ 5) action on the new state.
         eval_sync("(restart-agent a 10)", &mut env);
-        eval_await("(await a)", &mut env).await.expect("await after restart");
+        eval_await("(await a)", &mut env)
+            .await
+            .expect("await after restart");
         assert_eq!(eval_sync("@a", &mut env), Value::Long(15));
         assert_eq!(eval_sync("(agent-error a)", &mut env), Value::Nil);
     });
@@ -118,7 +122,9 @@ fn restart_agent_clear_actions_drops_the_queue() {
         );
         eval_await("(await a)", &mut env).await.expect("await");
         eval_sync("(restart-agent a 10 :clear-actions true)", &mut env);
-        eval_await("(await a)", &mut env).await.expect("await after restart");
+        eval_await("(await a)", &mut env)
+            .await
+            .expect("await after restart");
         assert_eq!(eval_sync("@a", &mut env), Value::Long(10));
     });
 }

@@ -192,9 +192,13 @@ fn builtin_isolate_p(args: &[Value]) -> ValueResult<Value> {
 
 fn handle_arg<'a>(args: &'a [Value], who: &str) -> ValueResult<&'a IsolateHandle> {
     match args.first() {
-        Some(Value::Resource(rh)) => rh.0.as_any().downcast_ref::<IsolateHandle>().ok_or_else(|| {
-            ValueError::Other(format!("{who}: expected an isolate handle resource"))
-        }),
+        Some(Value::Resource(rh)) => {
+            rh.0.as_any()
+                .downcast_ref::<IsolateHandle>()
+                .ok_or_else(|| {
+                    ValueError::Other(format!("{who}: expected an isolate handle resource"))
+                })
+        }
         other => Err(ValueError::WrongType {
             expected: "isolate handle",
             got: other.map(|v| v.type_name().to_string()).unwrap_or_default(),
@@ -323,7 +327,11 @@ pub(crate) fn register(globals: &Arc<GlobalEnv>, ns: &str) {
     let fns: Vec<(&str, Arity, fn(&[Value]) -> ValueResult<Value>)> = vec![
         ("isolate", Arity::Fixed(0), builtin_isolate),
         ("isolate?", Arity::Fixed(1), builtin_isolate_p),
-        ("isolate-call", Arity::Variadic { min: 2 }, builtin_isolate_call),
+        (
+            "isolate-call",
+            Arity::Variadic { min: 2 },
+            builtin_isolate_call,
+        ),
         ("isolate-close!", Arity::Fixed(1), builtin_isolate_close),
         ("default-isolate", Arity::Fixed(0), builtin_default_isolate),
     ];

@@ -110,7 +110,10 @@ fn onto_chan_parks_while_destination_full() {
 
         // Draining lets the parked task finish; values arrive in order.
         for expected in 1..=3 {
-            assert_eq!(drain_one("(poll! ch)", &mut env).await, Value::Long(expected));
+            assert_eq!(
+                drain_one("(poll! ch)", &mut env).await,
+                Value::Long(expected)
+            );
         }
         assert!(
             stall_ticks < MAX_STALL_TICKS,
