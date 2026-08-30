@@ -1336,16 +1336,40 @@ impl cljrs_gc::Trace for CljxFuture {
 
 // ── Agent ─────────────────────────────────────────────────────────────────────
 
-/// A Clojure agent — asynchronous state update queue (stub: not yet implemented).
+/// A Clojure agent — a serial asynchronous state-update mailbox.
+///
+/// Actions queue via `send`/`send-off` and are applied one at a time by a
+/// drainer task on this isolate's `LocalSet` (scheduled through
+/// `AsyncRuntime::schedule_agent_drain`). Cooperative like `future`: no OS
+/// threads. An action error puts the agent in a failed state; pending actions
+/// stay queued until `restart-agent`.
 pub struct Agent {
     /// Current state.
     pub state: Arc<Mutex<Value>>,
     /// Last error.
     pub error: Arc<Mutex<Option<Value>>>,
     pub watches: Mutex<Vec<(Value, Value)>>,
+    /// Pending actions: `(action-fn, extra-args)`, drained FIFO.
+    pub queue: Mutex<std::collections::VecDeque<(Value, Vec<Value>)>>,
+    /// True while a drainer task is scheduled or running. `Cell` suffices:
+    /// agents are `!Send` like every GC value, so all access is one thread.
+    pub draining: std::cell::Cell<bool>,
+    /// Tasks parked in `(await agent)`, woken when the mailbox goes idle.
+    pub wakers: Mutex<Vec<std::task::Waker>>,
 }
 
 impl Agent {
+    pub fn new(state: Value) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            error: Arc::new(Mutex::new(None)),
+            watches: Mutex::new(Vec::new()),
+            queue: Mutex::new(std::collections::VecDeque::new()),
+            draining: std::cell::Cell::new(false),
+            wakers: Mutex::new(Vec::new()),
+        }
+    }
+
     pub fn get_state(&self) -> Value {
         self.state.lock().unwrap().clone()
     }
@@ -1356,6 +1380,18 @@ impl Agent {
 
     pub fn clear_error(&self) {
         *self.error.lock().unwrap() = None;
+    }
+
+    /// No queued actions and no drainer running (also true while failed).
+    pub fn is_idle(&self) -> bool {
+        !self.draining.get() && self.queue.lock().unwrap().is_empty()
+    }
+
+    /// Wake every task parked in `(await agent)`.
+    pub fn notify_idle(&self) {
+        for w in self.wakers.lock().unwrap().drain(..) {
+            w.wake();
+        }
     }
 }
 
@@ -1382,6 +1418,15 @@ impl cljrs_gc::Trace for Agent {
             for (key, f) in watches.iter() {
                 key.trace(visitor);
                 f.trace(visitor);
+            }
+        }
+        {
+            let queue = self.queue.lock().unwrap();
+            for (f, args) in queue.iter() {
+                f.trace(visitor);
+                for a in args {
+                    a.trace(visitor);
+                }
             }
         }
     }

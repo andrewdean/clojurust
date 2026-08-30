@@ -119,9 +119,9 @@ Implementation roadmap for a Rust-hosted Clojure dialect. Native file extension 
 ## Phase 7 — Concurrency Primitives ✓
 
 - [x] `atom` — compare-and-swap with `swap!`, `reset!`, `compare-and-set!`
-- [ ] `ref` + software transactional memory (`dosync`, `alter`, `ref-set`, `commute`, `ensure`) — **deferred**
-- [x] `agent` — async update queue (`send`, `send-off`, `await`, `agent-error`, `restart-agent`)
-- [x] `future` — thread-pool backed async computation (`future-done?`, `future-cancelled?`, `future-cancel`)
+- [ ] `ref` + software transactional memory — **non-goal**: isolates + `shared-atom` are the model's answer to cross-thread coordination (docs/user-reachable-isolates-plan.md, D6)
+- [x] `agent` — serial async mailbox on the isolate's executor (`send`, `send-off`, `(await agent)`, `agent-error`, `restart-agent`)
+- [x] `future` — cooperative LocalSet task with work-stealing deref (`future-done?`, `future-cancelled?`, `future-cancel`); `pfuture` for isolate-parallel calls
 - [x] `promise` — `deliver` / `deref` with blocking and timeout
 - [x] `delay` — lazy one-time computation (`force`, `realized?`)
 - [x] `volatile!` — non-atomic mutable cell (`vreset!`, `vswap!`, `volatile?`)

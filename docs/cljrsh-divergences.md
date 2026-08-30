@@ -8,12 +8,32 @@ exit codes through `try/finally`) are not listed.
 
 ## Runtime model
 
-- **Single-threaded.** One interpreter thread with a current-thread
-  Tokio runtime. `future`, `pmap`, and `promise` exist and are
-  API-compatible, but execute cooperatively on that thread — `pmap` is
-  `map` with a different cost model, and `with-redefs`' "visible in all
-  threads" is trivially true. Use OS processes (`cljrsh.process`) for
-  real parallelism.
+- **Single-threaded per isolate; parallelism is explicit.** One
+  interpreter thread with a current-thread Tokio runtime. `future`,
+  `pmap`, and `promise` exist and are API-compatible, but execute
+  cooperatively on that thread — `pmap` is `map` with a different cost
+  model, and `with-redefs`' "visible in all threads" is true per
+  isolate. Real parallelism is opt-in and visibly so: `(isolate)` /
+  `(isolate-call iso 'ns/fn args…)` / `(pfuture (ns/fn args…))` run on
+  separate OS threads with share-nothing heaps; work ships as a fully
+  qualified symbol plus deep-copied arguments — never a closure — and
+  results cross the same metered copy boundary as `isolate-chan`
+  (docs/user-reachable-isolates-plan.md). OS processes
+  (`cljrsh.process`) remain an option for process-level isolation.
+- **Agents are serial async mailboxes, not thread-pool actors.**
+  `send` and `send-off` are the same operation (no pools to choose
+  between); actions run cooperatively, in order, on the owning
+  isolate's executor. `(await agent)` is the async special form —
+  it parks until the mailbox drains (or the agent fails) and returns
+  nil; there is no blocking await. Constructor options (`:meta`,
+  `:validator`, `:error-handler`, `:error-mode`) are accepted and
+  ignored; a failed agent keeps its queue for `restart-agent`, and a
+  watch error fails the agent like an action error.
+- **`locking` is a no-op — by argument, not omission.** Share-nothing
+  isolates mean no two threads can ever reference the same GC object;
+  the only cross-isolate mutables are `shared-atom` (lock-free CAS)
+  and channels (already synchronized). There is nothing a monitor
+  could guard, so the body just runs.
 - **`System/exit` is an uncatchable control signal** — `catch` never
   sees it — but **`finally` blocks still run** on the way out. JVM
   `System.exit` skips `finally` (the process dies inside the call);

@@ -73,7 +73,7 @@ The project is a library crate (`src/lib.rs`) with a binary entry point (`src/ma
 | `gc` | Tracing garbage collector; safepoints; write barriers; weak refs |
 | `eval` | Tree-walking interpreter; special forms; macro expansion; namespace/environment |
 | `compiler` | IR lowering; AOT code-gen; inline caches |
-| `runtime` | Core standard library (`clojure.core` equivalent); concurrency primitives (atom, ref/STM, agent, future) |
+| `runtime` | Core standard library (`clojure.core` equivalent); concurrency primitives (atom, agent, future, isolates; STM is a declared non-goal) |
 | `interop` | Rust↔Clojure FFI; `#[cljx::export]` proc-macro; type marshalling; `NativeObject` |
 | `cli` | `cljx` command entry point; REPL; file runner; project tooling |
 | `lsp` | Language Server Protocol server (`cljrs-lsp` crate, `cljrs lsp` subcommand); parse diagnostics + document symbols |

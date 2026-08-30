@@ -33,6 +33,13 @@ pub trait AsyncRuntime: Send + Sync {
     ///
     /// Used by the IR interpreter's sync-context fallback for `ChanPut`.
     fn chan_put_blocking(&self, chan: Value, val: Value) -> EvalResult<()>;
+
+    /// Ensure a drainer task is running for `agent`'s action mailbox.
+    ///
+    /// Called by `send`/`send-off` after enqueueing an action and by
+    /// `restart-agent`. Idempotent while a drainer is already scheduled.
+    /// `env` supplies the evaluation context the drained actions run in.
+    fn schedule_agent_drain(&self, agent: Value, env: Env);
 }
 
 // ── Async JIT compile hook ──────────────────────────────────────────────────

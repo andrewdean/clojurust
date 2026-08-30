@@ -22,7 +22,8 @@ use cljrs_env::env::GlobalEnv;
 use cljrs_gc::GcPtr;
 use cljrs_value::value::{PrintValue, SetValue};
 use cljrs_value::{
-    Arity, Atom, CljxCons, CljxPromise, ExceptionInfo, FutureState, Keyword, LazySeq, MapValue,
+    Agent, Arity, Atom, CljxCons, CljxPromise, ExceptionInfo, FutureState, Keyword, LazySeq,
+    MapValue,
     Namespace, NativeFn, ObjectArray, PersistentHashMap, PersistentHashSet, PersistentList,
     PersistentQueue, PersistentVector, SharedAtom, SortedSet, Symbol, Thunk, TypeInstance, Value,
     ValueError, ValueResult, Volatile, demote, promote,
@@ -936,7 +937,8 @@ const BUILTIN_DOCS: &[(&str, &str)] = &[
     ),
     (
         "send",
-        "Dispatches an action to an agent, running f on the agent's state in a background thread.",
+        "Dispatches an action to an agent: f is applied to the agent's state \
+         serially by an async mailbox task on this isolate's executor.",
     ),
     (
         "force",
@@ -1301,15 +1303,17 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ("ensure-reduced", Arity::Fixed(1), builtin_ensure_reduced),
         ("promise", Arity::Fixed(0), builtin_promise),
         ("deliver", Arity::Fixed(2), builtin_deliver),
-        // future/agent: not yet implemented — omitted from namespace
         // future-done?, future-cancelled?, future-cancel, future-call* are stubs
-        // agent, await-agent, agent-error, restart-agent are stubs
-        ("send", Arity::Variadic { min: 2 }, builtin_send_sentinel),
+        // (future/pmap themselves are interned by cljrs-async's init)
+        ("agent", Arity::Variadic { min: 1 }, builtin_agent),
+        ("agent-error", Arity::Fixed(1), builtin_agent_error),
         (
-            "send-off",
+            "restart-agent",
             Arity::Variadic { min: 2 },
-            builtin_send_sentinel,
+            builtin_restart_agent,
         ),
+        ("send", Arity::Variadic { min: 2 }, builtin_send),
+        ("send-off", Arity::Variadic { min: 2 }, builtin_send),
         ("make-delay", Arity::Fixed(1), builtin_make_delay_sentinel),
         // I/O
         ("print", Arity::Variadic { min: 0 }, builtin_print),
@@ -9136,17 +9140,53 @@ fn builtin_future_call_star(_args: &[Value]) -> ValueResult<Value> {
     Err(ValueError::Other("future is not yet implemented".into()))
 }
 
-#[allow(dead_code)]
-fn builtin_agent(_args: &[Value]) -> ValueResult<Value> {
-    Err(ValueError::Other("agent is not yet implemented".into()))
+/// `(agent init & options)` — a serial async state-update mailbox (see the
+/// `Agent` type). Options (:meta, :validator, :error-handler, :error-mode)
+/// are accepted and ignored — documented in docs/cljrsh-divergences.md.
+fn builtin_agent(args: &[Value]) -> ValueResult<Value> {
+    let init = args.first().cloned().unwrap_or(Value::Nil);
+    Ok(Value::Agent(GcPtr::new(Agent::new(init))))
 }
 
-#[allow(dead_code)]
-fn builtin_await_agent(_args: &[Value]) -> ValueResult<Value> {
-    Ok(Value::Nil)
+/// Schedule the agent's mailbox drainer via the installed async runtime.
+fn agent_schedule_drain(agent: &Value, who: &str) -> ValueResult<()> {
+    let (globals, ns) = cljrs_env::callback::capture_eval_context()
+        .ok_or_else(|| ValueError::Other(format!("{who} called outside an eval context")))?;
+    let rt = globals.async_runtime().ok_or_else(|| {
+        ValueError::Other(format!(
+            "{who} requires the async runtime (cljrs-async init)"
+        ))
+    })?;
+    let env = cljrs_env::env::Env::new(globals.clone(), ns.as_ref());
+    rt.schedule_agent_drain(agent.clone(), env);
+    Ok(())
 }
 
-#[allow(dead_code)]
+/// `(send agent f & args)` / `(send-off agent f & args)` — enqueue an action.
+/// Both are the same operation here: actions run cooperatively on this
+/// isolate's executor, never on a thread pool.
+fn builtin_send(args: &[Value]) -> ValueResult<Value> {
+    let Some(agent_val @ Value::Agent(a)) = args.first() else {
+        return Err(ValueError::WrongType {
+            expected: "agent",
+            got: args
+                .first()
+                .map(|v| v.type_name().to_string())
+                .unwrap_or_default(),
+        });
+    };
+    if a.get().get_error().is_some() {
+        return Err(ValueError::Other(
+            "send: agent is failed; check agent-error and use restart-agent".into(),
+        ));
+    }
+    let f = args[1].clone();
+    let extra = args[2..].to_vec();
+    a.get().queue.lock().unwrap().push_back((f, extra));
+    agent_schedule_drain(agent_val, "send")?;
+    Ok(agent_val.clone())
+}
+
 fn builtin_agent_error(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
         Value::Agent(a) => match a.get().get_error() {
@@ -9160,12 +9200,29 @@ fn builtin_agent_error(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-#[allow(dead_code)]
+/// `(restart-agent agent new-state & options)` — clear a failed agent and
+/// resume draining its queued actions. `:clear-actions true` drops the queue
+/// instead.
 fn builtin_restart_agent(args: &[Value]) -> ValueResult<Value> {
     match &args[0] {
-        Value::Agent(a) => {
+        agent_val @ Value::Agent(a) => {
+            if a.get().get_error().is_none() {
+                return Err(ValueError::Other(
+                    "restart-agent: agent does not need a restart".into(),
+                ));
+            }
+            let clear_actions = args[2..].chunks(2).any(|pair| {
+                matches!(&pair[0], Value::Keyword(k) if k.get().name.as_ref() == "clear-actions")
+                    && !matches!(pair.get(1), None | Some(Value::Nil) | Some(Value::Bool(false)))
+            });
+            if clear_actions {
+                a.get().queue.lock().unwrap().clear();
+            }
             a.get().clear_error();
             *a.get().state.lock().unwrap() = args[1].clone();
+            if !a.get().queue.lock().unwrap().is_empty() {
+                agent_schedule_drain(agent_val, "restart-agent")?;
+            }
             Ok(args[0].clone())
         }
         v => Err(ValueError::WrongType {
@@ -9173,12 +9230,6 @@ fn builtin_restart_agent(args: &[Value]) -> ValueResult<Value> {
             got: v.type_name().to_string(),
         }),
     }
-}
-
-fn builtin_send_sentinel(_args: &[Value]) -> ValueResult<Value> {
-    Err(ValueError::Other(
-        "send/send-off must be invoked through the evaluator".into(),
-    ))
 }
 
 fn builtin_make_delay_sentinel(_args: &[Value]) -> ValueResult<Value> {

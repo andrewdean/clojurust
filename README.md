@@ -40,7 +40,7 @@ Current capabilities:
 - **Clojure-compatible hashing** — Murmur3-based hashing matching Clojure/JVM semantics
 - **Lazy sequences** — lazy-seq, cons cells, and full lazy evaluation
 - **Protocols & multimethods** — defprotocol, extend-type, defmulti, defmethod, defrecord, reify
-- **Concurrency** — atom, volatile, delay, promise, future, agent (with send/await)
+- **Concurrency** — atom, volatile, delay, promise, future, agent (with send/await) — all cooperative on one executor; **isolates** (`isolate`, `isolate-call`, `pfuture`) run Clojure on multiple cores with share-nothing heaps and a copy boundary
 - **core.async** — `go`/`chan`/`<!`/`>!`/`alts!`/`timeout` via a Tokio executor (`cljrs-async`)
 - **Dynamic variables** — binding, thread-local bindings, future conveyance
 - **Namespaces** — require with :as/:refer, load-file, alias resolution

@@ -232,11 +232,9 @@ fn eval_call_inner(func_form: &Form, arg_forms: &[Form], env: &mut Env) -> EvalR
             "swap!" => return handle_swap_call(arg_forms, env),
             "volatile!" => return handle_volatile(arg_forms, env),
             "vreset!" => return handle_vreset(arg_forms, env),
-            "agent" => return handle_agent_call(arg_forms, env),
             "make-lazy-seq" => return handle_make_lazy_seq(arg_forms, env),
             "make-delay" => return handle_make_delay(arg_forms, env),
             "vswap!" => return handle_vswap(arg_forms, env),
-            "send" | "send-off" => return handle_send(arg_forms, env),
             "with-bindings*" => return handle_with_bindings(arg_forms, env),
             "alter-var-root" => return handle_alter_var_root(arg_forms, env),
             "vary-meta" => return handle_vary_meta(arg_forms, env),
@@ -1044,20 +1042,6 @@ fn handle_vreset(arg_forms: &[Form], env: &mut Env) -> EvalResult {
             other.type_name()
         ))),
     }
-}
-
-// ── agent ────────────────────────────────────────────────────────────────────
-
-/// Handle `(agent init-val & opts)`.
-fn handle_agent_call(_arg_forms: &[Form], _env: &mut Env) -> EvalResult {
-    Err(EvalError::Runtime("agent is not yet implemented".into()))
-}
-
-/// Handle `(send agent f & extra)` / `(send-off agent f & extra)`.
-fn handle_send(_arg_forms: &[Form], _env: &mut Env) -> EvalResult {
-    Err(EvalError::Runtime(
-        "send/send-off: agents are not yet implemented".into(),
-    ))
 }
 
 // ── atom ──────────────────────────────────────────────────────────────────────

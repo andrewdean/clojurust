@@ -334,6 +334,27 @@ pub async fn await_value(val: Value) -> EvalResult {
                 .await;
             }
         }
+        Value::Agent(a) => {
+            // `(await agent)`: park until the mailbox drains (or the agent
+            // fails), then return nil — Clojure's await contract. The drainer
+            // runs on this same LocalSet, so a registration cannot miss the
+            // idle wake: nothing else runs between the check and the push.
+            let anchor = Value::Agent(a.clone());
+            let _root = cljrs_env::gc_roots::root_value(&anchor);
+            cljrs_env::gc_roots::async_gc_collect();
+            std::future::poll_fn(|cx| {
+                // A failed agent keeps its pending queue for restart-agent,
+                // so it never looks idle — its error also releases awaiters.
+                if a.get().is_idle() || a.get().get_error().is_some() {
+                    std::task::Poll::Ready(())
+                } else {
+                    a.get().wakers.lock().unwrap().push(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            Ok(Value::Nil)
+        }
         other => Ok(other),
     }
 }

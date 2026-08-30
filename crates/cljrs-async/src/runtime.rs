@@ -97,6 +97,71 @@ impl AsyncRuntime for AsyncRuntimeImpl {
             Err(EvalError::Runtime("chan-put: channel is closed".into()))
         }
     }
+
+    fn schedule_agent_drain(&self, agent: Value, env: Env) {
+        let Value::Agent(a) = &agent else { return };
+        // Single-threaded LocalSet: replace() cannot race, it just makes the
+        // second `send` before the drainer finishes a no-op.
+        if a.get().draining.replace(true) {
+            return;
+        }
+        let mut env = env;
+        spawn_future(async move {
+            let Value::Agent(a) = &agent else {
+                return Ok(Value::Nil);
+            };
+            loop {
+                let next = a.get().queue.lock().unwrap().pop_front();
+                let Some((f, extra)) = next else {
+                    a.get().draining.set(false);
+                    a.get().notify_idle();
+                    return Ok(Value::Nil);
+                };
+                let old = a.get().get_state();
+                let mut args = vec![old.clone()];
+                args.extend(extra);
+                let applied = match cljrs_env::apply::apply_value(&f, args, &mut env) {
+                    // An ^:async action hands back a future; its settled
+                    // value is the new state.
+                    Ok(v @ (Value::Future(_) | Value::Promise(_))) => {
+                        crate::eval_async::await_value(v).await
+                    }
+                    other => other,
+                };
+                let failure = match applied {
+                    Ok(new) => {
+                        *a.get().state.lock().unwrap() = new.clone();
+                        // Watches run on the drainer like actions do; a watch
+                        // error fails the agent (its error is observable via
+                        // agent-error, matching action-error handling).
+                        let ws: Vec<(Value, Value)> = a.get().watches.lock().unwrap().clone();
+                        let mut err = None;
+                        for (k, wf) in ws {
+                            let wargs = vec![k, agent.clone(), old.clone(), new.clone()];
+                            if let Err(e) = cljrs_env::apply::apply_value(&wf, wargs, &mut env) {
+                                err = Some(e);
+                                break;
+                            }
+                        }
+                        err
+                    }
+                    Err(e) => Some(e),
+                };
+                if let Some(e) = failure {
+                    // Fail the agent: record the error, stop draining, keep
+                    // the remaining queue for restart-agent to resume.
+                    let err_val = match e {
+                        EvalError::Thrown(v) => v,
+                        other => Value::string(format!("{other}")),
+                    };
+                    *a.get().error.lock().unwrap() = Some(err_val);
+                    a.get().draining.set(false);
+                    a.get().notify_idle();
+                    return Ok(Value::Nil);
+                }
+            }
+        });
+    }
 }
 
 /// Pack args for a compiled (native) async state machine.
