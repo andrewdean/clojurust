@@ -116,6 +116,11 @@ tests/
   declare_macro.rs, doc.rs, gas_meter.rs, into_seq_target.rs, map_entry.rs,
   defrecord_method_fields.rs       — defrecord fields in scope in an inline
                                      protocol method body; params shadow them
+  deftype_types.rs                 — deftype: positional ctor, `.-field`, protocol
+                                     impls, and mutable fields written with `set!`
+  qualified_protocol_impl.rs       — a qualified protocol name in an impl position
+                                     (defrecord/deftype/reify/extend-*) resolves
+                                     through its own namespace
   named_fn_identity.rs, ns_metadata.rs, partition_arities.rs, shared_atom.rs,
   symbolic_nan.rs, threading_macros.rs, auto_gensym.rs, auto_keyword_macro.rs,
   assoc_in_metadata.rs, empty_metadata.rs, into_metadata.rs, vec_metadata.rs,
@@ -123,6 +128,10 @@ tests/
   auto_resolution_properties.rs   — tree-walker behavior
   gas_meter_ir.rs, versioned_ir.rs, partition_ir.rs, destructure_lowering.rs,
   osr_transfer.rs, region_phi_uaf.rs — tiered behavior
+  deftype_mutable_tiered.rs        — deftype mutable-field writes under forced
+                                     eager IR lowering: the lowerer must decline
+                                     a `set!` on a local (own binary — it flips
+                                     the process-wide eager-lowering switch)
 ```
 
 ---
@@ -964,7 +973,7 @@ implement sentinel operations without hitting the stub errors registered in
 | `eval_eval(args, env)` | `eval` — convert a form value back to a `Form` and evaluate it at top level of the current namespace (vars visible, caller's locals not) |
 | `eval_with_bindings_star(args, env)` | `with-bindings*` — push binding frame, call f |
 | `eval_send_to_agent(args, env)` | `send` / `send-off` — dispatch action to agent |
-| `dispatch_method(method, target, args)` | `(.method target args…)` — interop method dispatch on an evaluated target (strings, vectors, seqs) |
+| `dispatch_method(method, target, args)` | `(.method target args…)` — interop method dispatch on an evaluated target (strings, vectors, seqs); on a `TypeInstance` only `.-field` reads are supported (mutable cell first, then the field map) |
 
 `make_lazy_seq_from_fn(f, globals, ns)` (already public) creates a `LazySeq`
 from a zero-arg callable; the above `make_delay_from_fn` is the analogous
@@ -980,6 +989,20 @@ the return value in `:post` conditions); `spec_element` resolves a reader
 conditional in ANY slot of an `ns` require spec, namespace included, so
 `[#?(:clj clojure.core :cljs cljs.core) :as core]` reads — an option selecting
 no branch is dropped, a namespace selecting none is an error.
+
+`deftype` and `defrecord` share `parse_field_specs` (field name + mutability,
+metadata-transparent), `build_positional_ctor` (`->Name`, routed to the
+`make-type-instance-mut` builtin when the type declares mutable fields) and
+`intern_type_symbol` (so `(instance? Name x)` resolves); only `defrecord` also
+gets `build_map_ctor`. `synth_field_scope` wraps a method body in a `let*`
+binding each field a param does not shadow — a mutable field through
+`(.-field this)` (the live cell) and an immutable one through `(:field this)` —
+plus a hidden `__deftype_self__` handle when any field is mutable, which is how
+`eval_set_bang` finds the instance whose cell a bare `(set! field v)` updates.
+`resolve_protocol_sym` resolves a protocol named in an impl position
+(`extend-type`, `extend-protocol`, `reify`/`defrecord`/`deftype`) through the
+current ns's `:require :as` aliases and through its own namespace when
+qualified — not as a literal intern of the current ns.
 
 ---
 

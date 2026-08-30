@@ -2022,19 +2022,13 @@ fn eval_extend_type(args: &[Form], env: &mut Env) -> EvalResult {
 
     for form in &args[1..] {
         match &form.unmeta().kind {
-            FormKind::Symbol(s) => {
-                // Look up protocol in env.
-                let val = env.globals.lookup_in_ns(&env.current_ns, s);
-                match val {
-                    Some(Value::Protocol(p)) => {
-                        current_proto = Some(p);
-                    }
-                    _ => {
-                        return Err(EvalError::Runtime(format!(
-                            "extend-type: {} is not a protocol",
-                            s
-                        )));
-                    }
+            FormKind::Symbol(s) => match resolve_protocol_sym(env, s) {
+                Some(p) => current_proto = Some(p),
+                None => {
+                    return Err(EvalError::Runtime(format!(
+                        "extend-type: {} is not a protocol",
+                        s
+                    )));
                 }
             },
             FormKind::List(parts) => {
@@ -2079,10 +2073,9 @@ fn eval_extend_protocol(args: &[Form], env: &mut Env) -> EvalResult {
             "extend-protocol: first arg must be a protocol symbol".into(),
         ));
     };
-    let proto_val = env.globals.lookup_in_ns(&env.current_ns, proto_sym);
-    let proto_ptr = match proto_val {
-        Some(Value::Protocol(p)) => p,
-        _ => {
+    let proto_ptr = match resolve_protocol_sym(env, proto_sym) {
+        Some(p) => p,
+        None => {
             return Err(EvalError::Runtime(format!(
                 "extend-protocol: {} is not a protocol",
                 proto_sym
@@ -2430,13 +2423,12 @@ fn field_spec_of(form: &Form) -> Option<(Arc<str>, bool)> {
 
 /// Parse a `deftype` `[field ...]` vector into `(name, mutable?)` specs.
 fn parse_field_specs(form: &Form, ctx: &str) -> EvalResult<Vec<(Arc<str>, bool)>> {
-    let fields = match &form.kind {
-        FormKind::Vector(v) => v,
-        _ => {
-            return Err(EvalError::Runtime(format!(
-                "{ctx} requires a field vector as second arg"
-            )));
-        }
+    // `as_vector` reports the shape under any `^meta`, so a marker on the
+    // vector itself — `(defrecord R ^:marker [x])` — stays transparent.
+    let Some(fields) = form.as_vector() else {
+        return Err(EvalError::Runtime(format!(
+            "{ctx} requires a field vector as second arg"
+        )));
     };
     fields
         .iter()
@@ -2560,7 +2552,11 @@ fn intern_type_symbol(type_name: &str, env: &mut Env) {
     let ns = env.current_ns.clone();
     let globals = env.globals.clone();
     let type_sym = cljrs_value::Symbol::simple(type_name.to_string());
-    globals.intern(&ns, Arc::from(type_name), Value::Symbol(GcPtr::new(type_sym)));
+    globals.intern(
+        &ns,
+        Arc::from(type_name),
+        Value::Symbol(GcPtr::new(type_sym)),
+    );
 }
 
 // ── defrecord ─────────────────────────────────────────────────────────────────
@@ -2578,20 +2574,12 @@ fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
     let (type_name, _) = require_sym_meta(args, 0, "defrecord", env)?;
     let type_tag: Arc<str> = Arc::from(type_name.as_str());
 
-    // Parse field names from the vector.
-    let Some(fields) = args[1].as_vector() else {
-        return Err(EvalError::Runtime(
-            "defrecord requires a field vector as second arg".into(),
-        ));
-    };
-    let field_names: Vec<Arc<str>> = fields
-        .iter()
-        .map(|f| {
-            f.as_symbol()
-                .map(Arc::from)
-                .ok_or_else(|| EvalError::Runtime("defrecord field names must be symbols".into()))
-        })
-        .collect::<EvalResult<_>>()?;
+    // Parse field names from the vector, peeling any per-field metadata.
+    // (A defrecord field is always immutable, so the mutability flag is dropped.)
+    let field_names: Vec<Arc<str>> = parse_field_specs(&args[1], "defrecord")?
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
 
     // Register protocol implementations (same as extend-type inner logic).
     // The field names go with them: a defrecord method body may name its fields
@@ -2606,7 +2594,7 @@ fn eval_defrecord(args: &[Form], env: &mut Env) -> EvalResult {
     Ok(Value::Nil)
 }
 
-// ── reify ─────────────────────────────────────────────────────────────────────
+// ── deftype ──────────────────────────────────────────────────────────────────
 
 fn eval_deftype(args: &[Form], env: &mut Env) -> EvalResult {
     // (deftype TypeName [field ...] Proto (method [this] body) ...)
@@ -2628,33 +2616,19 @@ fn eval_deftype(args: &[Form], env: &mut Env) -> EvalResult {
         .map(|(n, _)| n.clone())
         .collect();
 
-    // Intern the type name as a Symbol value so `(instance? TypeName x)` works.
-    let type_sym = cljrs_value::Symbol::simple(type_name.clone());
-    globals.intern(
-        &ns,
-        Arc::from(type_name),
-        Value::Symbol(GcPtr::new(type_sym)),
-    );
+    // Register protocol/interface method impls, with the fields in scope in
+    // each body — same machinery as defrecord/reify. Mutable fields read
+    // through the live cell and are writable with `set!`.
+    register_impls_for_tag(&type_tag, &args[2..], &field_names, &mutable_names, env)?;
+
+    // deftype gets a positional `->T` constructor and its type symbol, but no
+    // `map->T` (Clojure reserves that for defrecord).
+    build_positional_ctor(&type_name, &type_tag, &field_names, &mutable_names, env);
+    intern_type_symbol(&type_name, env);
     Ok(Value::Nil)
 }
 
 // ── reify ─────────────────────────────────────────────────────────────────────
-
-fn eval_deftype(args: &[Form], _env: &mut Env) -> EvalResult {
-    // deftype is not implemented. It is a SPECIAL FORM (not a builtin) purely so
-    // this error fires at the deftype form itself, unevaluated, rather than the
-    // builtin path evaluating `(deftype T [x y])`'s args and reporting the far
-    // more confusing "Unable to resolve symbol: T". A real implementation needs
-    // mutable/volatile fields, set! over them, and array interop — see the
-    // hive kanban [CLJRS-DEFTYPE].
-    let name = match args.first().map(|f| &f.kind) {
-        Some(FormKind::Symbol(s)) => s.as_str(),
-        _ => "<name>",
-    };
-    Err(EvalError::Runtime(format!(
-        "deftype is not implemented (defining {name}); use defrecord where a map-backed type suffices"
-    )))
-}
 
 fn eval_reify(args: &[Form], env: &mut Env) -> EvalResult {
     // (reify Proto1 (method [this] body) ...)
@@ -2717,18 +2691,13 @@ fn register_impls_for_tag(
 
     for form in forms {
         match &form.unmeta().kind {
-            FormKind::Symbol(s) => {
-                let val = env.globals.lookup_in_ns(&env.current_ns, s);
-                match val {
-                    Some(Value::Protocol(p)) => {
-                        current_proto = Some(p);
-                    }
-                    _ => {
-                        return Err(EvalError::Runtime(format!(
-                            "reify/defrecord: {} is not a protocol",
-                            s
-                        )));
-                    }
+            FormKind::Symbol(s) => match resolve_protocol_sym(env, s) {
+                Some(p) => current_proto = Some(p),
+                None => {
+                    return Err(EvalError::Runtime(format!(
+                        "reify/defrecord: {} is not a protocol",
+                        s
+                    )));
                 }
             },
             FormKind::List(parts) => {
