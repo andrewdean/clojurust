@@ -1037,9 +1037,22 @@ fn apply_default_if_nil(
 }
 
 fn lower_with_default(ctx: &mut LowerCtx, got: VarId, default_form: &Form) -> R {
+    // `destructure` expands an `:or` entry to `(get m :k default)`, and `get`
+    // is an ordinary function: its third argument is evaluated whether or not
+    // the key is present.  So the default is lowered into the *current* block —
+    // straight-line, unconditional — and the nil check only selects between the
+    // two already-computed values.  Lowering it into the `then` block instead
+    // would make a side-effecting or throwing default fire only on a miss,
+    // which is what the tree-walker does not do (see
+    // `cljrs-runtime/src/interp/destructure.rs`); with tier-up mid-program that
+    // divergence is observable as a behaviour change partway through a run.
+    let default_var = lower_form(ctx, default_form)?;
+
     let nil_check = ctx.fresh_var();
     ctx.emit(Inst::CallKnown(nil_check, KnownFn::IsNil, vec![got]));
 
+    // The select: both arms are empty, so no evaluation is conditional.  The
+    // phi picks `default_var` when the looked-up value was nil, `got` otherwise.
     let then_block = ctx.fresh_block();
     let else_block = ctx.fresh_block();
     let merge_block = ctx.fresh_block();
@@ -1051,7 +1064,6 @@ fn lower_with_default(ctx: &mut LowerCtx, got: VarId, default_form: &Form) -> R 
     });
 
     ctx.start_block(then_block);
-    let default_var = lower_form(ctx, default_form)?;
     let then_exit = ctx.current_block_id();
     ctx.finish_block(Terminator::Jump(merge_block));
 

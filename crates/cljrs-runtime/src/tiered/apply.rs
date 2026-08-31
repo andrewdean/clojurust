@@ -273,8 +273,12 @@ fn execute_ir(
         env.bind(name.clone(), self_val);
     }
 
-    // Bind params (including destructuring) into the env so LoadLocal can find them.
-    crate::interp::apply::bind_fn_params(arity, args, &mut env)?;
+    // Bind the named params into the env so LoadLocal can find them.  The
+    // destructuring patterns are deliberately *not* expanded here: the lowered
+    // prologue binds those names as IR registers, and re-binding them in the
+    // env would evaluate every `:or` default a second time (destructuring
+    // defaults are eager, so a side-effecting one would fire twice per call).
+    crate::interp::apply::bind_fn_params_positional(arity, args, &mut env)?;
 
     // Push eval context so IR closures (which use with_eval_context) can
     // call back into the interpreter.

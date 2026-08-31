@@ -652,8 +652,36 @@ pub fn call_cljrs_fn(f: &CljxFn, args: &[Value], caller_env: &mut Env) -> EvalRe
     }
 }
 
-/// Bind function parameters in the current (top) frame.
+/// Bind function parameters in the current (top) frame, expanding any
+/// destructuring patterns the arity carries.
 pub fn bind_fn_params(arity: &CljxFnArity, args: &[Value], env: &mut Env) -> EvalResult<()> {
+    bind_fn_params_impl(arity, args, env, true)
+}
+
+/// Bind only the *named* parameters — the positional slots and the rest list —
+/// leaving the arity's destructuring patterns unexpanded.
+///
+/// For the IR tier: the lowered prologue expands those same patterns into
+/// explicit IR bindings (`lower_fn_body_destructured`), and the ANF lowerer
+/// never emits `LoadLocal`, so a destructured name is only ever read as an IR
+/// register — the env copy is unobservable.  Producing it anyway would not be
+/// free, though: an `:or` default is evaluated eagerly, exactly as
+/// `(get m :k default)` evaluates its third argument, so a side-effecting
+/// default would fire once here and once in the prologue — twice per call.
+pub fn bind_fn_params_positional(
+    arity: &CljxFnArity,
+    args: &[Value],
+    env: &mut Env,
+) -> EvalResult<()> {
+    bind_fn_params_impl(arity, args, env, false)
+}
+
+fn bind_fn_params_impl(
+    arity: &CljxFnArity,
+    args: &[Value],
+    env: &mut Env,
+    destructure: bool,
+) -> EvalResult<()> {
     let n = arity.params.len();
     // Bind positional params.
     for (i, name) in arity.params.iter().enumerate() {
@@ -670,7 +698,7 @@ pub fn bind_fn_params(arity: &CljxFnArity, args: &[Value], env: &mut Env) -> Eva
         };
         env.bind(rest.clone(), rest_val.clone());
         // Apply rest destructuring if present.
-        if let Some(ref pattern) = arity.destructure_rest {
+        if destructure && let Some(ref pattern) = arity.destructure_rest {
             // When the rest pattern is a map destructure (e.g. `& {:keys [bar]}`),
             // convert the rest args list into a map of alternating key-value pairs,
             // matching Clojure's keyword-arguments convention.
@@ -684,9 +712,11 @@ pub fn bind_fn_params(arity: &CljxFnArity, args: &[Value], env: &mut Env) -> Eva
         }
     }
     // Apply positional destructuring patterns.
-    for (idx, pattern) in &arity.destructure_params {
-        let val = args.get(*idx).cloned().unwrap_or(Value::Nil);
-        crate::interp::destructure::bind_pattern(pattern, val, env)?;
+    if destructure {
+        for (idx, pattern) in &arity.destructure_params {
+            let val = args.get(*idx).cloned().unwrap_or(Value::Nil);
+            crate::interp::destructure::bind_pattern(pattern, val, env)?;
+        }
     }
     Ok(())
 }
