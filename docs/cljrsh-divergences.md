@@ -25,7 +25,11 @@ exit codes through `try/finally`) are not listed.
   between); actions run cooperatively, in order, on the owning
   isolate's executor. `(await agent)` is the async special form —
   it parks until the mailbox drains (or the agent fails) and returns
-  nil; there is no blocking await. Constructor options (`:meta`,
+  nil. In runtimes without an executor (AOT binaries, embedders that
+  never init cljrs-async) `send` drains the mailbox synchronously at
+  the send site, and `await-agent` is the sync no-op/drain counterpart
+  — so agents work everywhere, eagerly where there is no scheduler to
+  defer to. Constructor options (`:meta`,
   `:validator`, `:error-handler`, `:error-mode`) are accepted and
   ignored; a failed agent keeps its queue for `restart-agent`, and a
   watch error fails the agent like an action error.

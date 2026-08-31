@@ -1305,6 +1305,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         // future-done?, future-cancelled?, future-cancel, future-call* are stubs
         // (future/pmap themselves are interned by cljrs-async's init)
         ("agent", Arity::Variadic { min: 1 }, builtin_agent),
+        ("await-agent", Arity::Fixed(1), builtin_await_agent),
         ("agent-error", Arity::Fixed(1), builtin_agent_error),
         (
             "restart-agent",
@@ -9151,14 +9152,68 @@ fn builtin_agent(args: &[Value]) -> ValueResult<Value> {
 fn agent_schedule_drain(agent: &Value, who: &str) -> ValueResult<()> {
     let (globals, ns) = cljrs_env::callback::capture_eval_context()
         .ok_or_else(|| ValueError::Other(format!("{who} called outside an eval context")))?;
-    let rt = globals.async_runtime().ok_or_else(|| {
-        ValueError::Other(format!(
-            "{who} requires the async runtime (cljrs-async init)"
-        ))
-    })?;
-    let env = cljrs_env::env::Env::new(globals.clone(), ns.as_ref());
-    rt.schedule_agent_drain(agent.clone(), env);
-    Ok(())
+    let mut env = cljrs_env::env::Env::new(globals.clone(), ns.as_ref());
+    match globals.async_runtime() {
+        Some(rt) => {
+            rt.schedule_agent_drain(agent.clone(), env);
+            Ok(())
+        }
+        // No executor (AOT binaries, embedders without cljrs-async): drain
+        // the mailbox synchronously at the send site. Still serial and FIFO;
+        // the state is settled by the time `send` returns.
+        None => agent_drain_sync(agent, &mut env),
+    }
+}
+
+/// Synchronous mailbox drain for runtimes without an async executor. Mirrors
+/// the async drainer in cljrs-async: an action or watch error fails the
+/// agent and preserves the remaining queue for `restart-agent`.
+fn agent_drain_sync(agent_val: &Value, env: &mut cljrs_env::env::Env) -> ValueResult<()> {
+    let Value::Agent(a) = agent_val else {
+        return Ok(());
+    };
+    // A send issued from inside a running action re-enters here; the already
+    // active drain loop picks the new action up.
+    if a.get().draining.replace(true) {
+        return Ok(());
+    }
+    loop {
+        let next = a.get().queue.lock().unwrap().pop_front();
+        let Some((f, extra)) = next else {
+            a.get().draining.set(false);
+            a.get().notify_idle();
+            return Ok(());
+        };
+        let old = a.get().get_state();
+        let mut call_args = vec![old.clone()];
+        call_args.extend(extra);
+        let failure = match cljrs_env::apply::apply_value(&f, call_args, env) {
+            Ok(new) => {
+                *a.get().state.lock().unwrap() = new.clone();
+                let ws: Vec<(Value, Value)> = a.get().watches.lock().unwrap().clone();
+                let mut err = None;
+                for (k, wf) in ws {
+                    let wargs = vec![k, agent_val.clone(), old.clone(), new.clone()];
+                    if let Err(e) = cljrs_env::apply::apply_value(&wf, wargs, env) {
+                        err = Some(e);
+                        break;
+                    }
+                }
+                err
+            }
+            Err(e) => Some(e),
+        };
+        if let Some(e) = failure {
+            let err_val = match e {
+                cljrs_env::error::EvalError::Thrown(v) => v,
+                other => Value::string(format!("{other}")),
+            };
+            *a.get().error.lock().unwrap() = Some(err_val);
+            a.get().draining.set(false);
+            a.get().notify_idle();
+            return Ok(());
+        }
+    }
 }
 
 /// `(send agent f & args)` / `(send-off agent f & args)` — enqueue an action.
@@ -9184,6 +9239,31 @@ fn builtin_send(args: &[Value]) -> ValueResult<Value> {
     a.get().queue.lock().unwrap().push_back((f, extra));
     agent_schedule_drain(agent_val, "send")?;
     Ok(agent_val.clone())
+}
+
+/// `(await-agent a)` — synchronous counterpart of the async `(await agent)`.
+/// Without an executor, sends drain inline so this is a no-op returning nil;
+/// if actions are somehow still pending and no drainer is active, it drains
+/// them here. It cannot block a LocalSet thread against an active async
+/// drainer — async code should use `(await agent)`.
+fn builtin_await_agent(args: &[Value]) -> ValueResult<Value> {
+    let Some(agent_val @ Value::Agent(a)) = args.first() else {
+        return Err(ValueError::WrongType {
+            expected: "agent",
+            got: args
+                .first()
+                .map(|v| v.type_name().to_string())
+                .unwrap_or_default(),
+        });
+    };
+    if !a.get().draining.get() && !a.get().queue.lock().unwrap().is_empty() {
+        let (globals, ns) = cljrs_env::callback::capture_eval_context().ok_or_else(|| {
+            ValueError::Other("await-agent called outside an eval context".into())
+        })?;
+        let mut env = cljrs_env::env::Env::new(globals.clone(), ns.as_ref());
+        agent_drain_sync(agent_val, &mut env)?;
+    }
+    Ok(Value::Nil)
 }
 
 fn builtin_agent_error(args: &[Value]) -> ValueResult<Value> {
