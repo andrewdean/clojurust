@@ -1,0 +1,4 @@
+{:task/id "b", :task/title "B"}
+{:task/id "a", :task/state "open"}
+{:task/blocked-by [{:task/id "a"}], :task/id "b"}
+{:task/priority 0, :task/id "a"}

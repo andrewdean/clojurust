@@ -171,8 +171,15 @@
                           attrs)
             attrs       (list* (sort-by key-fn attrs))
             datom-attrs (remove db-id? attrs)
-            first-attr  (first datom-attrs)
-            last-attr   (last datom-attrs)]
+            ;; cljrsh diff: an attribute the store has never seen has no
+            ;; aid, so it cannot anchor the eav range scan — anchoring on
+            ;; it silently empties the range and nils the whole pull.
+            ;; Anchor on known attrs only; unknown ones stay in `attrs`
+            ;; for their :default/:xform semantics (the merge join skips
+            ;; them as datom-ahead).
+            anchor-attrs (filter key-fn datom-attrs)
+            first-attr  (first anchor-attrs)
+            last-attr   (last anchor-attrs)]
         (map->PullPattern
           {:attrs         attrs
            :first-attr    first-attr
