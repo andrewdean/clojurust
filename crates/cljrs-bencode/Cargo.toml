@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-bencode"
-version = "0.1.0"
+version = "0.2.34"
 edition = "2024"
 description = "Minimal incremental bencode codec shared by the nREPL server and the babashka pod protocol client"
 license.workspace = true

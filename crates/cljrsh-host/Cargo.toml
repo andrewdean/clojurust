@@ -1,6 +1,6 @@
 [package]
 name = "cljrsh-host"
-version = "0.1.0"
+version = "0.2.34"
 edition = "2024"
 description = "cljrsh host library surface: native cljrsh.* namespaces (fs, json, ...) plus the embedded babashka.* compatibility layer"
 license.workspace = true
@@ -14,7 +14,7 @@ cljrs-value   = { workspace = true }
 cljrs-process = { workspace = true }
 cljrs-builtins = { workspace = true }
 cljrs-reader  = { workspace = true }
-cljrs-datalog-store = { path = "../cljrs-datalog-store", version = "0.1.0" }
+cljrs-datalog-store = { path = "../cljrs-datalog-store", version = "0.2.34" }
 serde_json = "1"
 walkdir    = "2"
 globset    = "0.4"
