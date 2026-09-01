@@ -215,6 +215,20 @@ for `[a b c]` patterns — a short collection binds the missing positions to
 `nil` rather than throwing.  Both compile to the `rt_nth` bridge (already
 nil-on-OOB); the IR interpreter appends the nil default for `NthLenient`.
 
+### `:or` destructuring defaults are eager
+
+`destructure` expands a symbol carrying an `:or` entry to `(get m :k default)`,
+and `get` is an ordinary function: its third argument is evaluated whether or
+not the key is present.  `lower_with_default` therefore lowers the default into
+the *current* block — straight-line and unconditional — and uses the `IsNil`
+check only to select between the default and the looked-up value (an `IsNil`
+branch over two empty arms, joined by a `Phi`).  Lowering the default into the
+branch's `then` arm instead would fire a side-effecting or throwing default only
+on a miss, diverging from the tree-walker (`cljrs-runtime`'s
+`interp/destructure.rs`) — and, because a function tiers up partway through a
+run, changing a program's behaviour mid-execution.  See issue #363; both tiers
+are pinned by `cljrs-runtime/tests/destructure_or_default_eager.rs`.
+
 Some `KnownFn` variants exist purely for analysis precision — the
 codegen and IR interpreter dispatch them through the dynamic builtin
 lookup like a regular `Call`, but the analyzer can use them to tighten

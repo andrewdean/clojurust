@@ -25,6 +25,13 @@ const PROGRAM: &str = r#"
 (defn parity-add [a b] (+ a b))
 (defn parity-sub [a b] (- a b))
 (defn parity-mul [a b] (* a b))
+(def parity-or-default-count (atom 0))
+(defn parity-or-default
+  ;; An `:or` default is an ordinary argument of `(get m :k default)`, so it is
+  ;; evaluated on every call — including calls that supply the key.  The atom
+  ;; counts how many times it actually ran (issue #363).
+  [{:keys [x] :or {x (do (swap! parity-or-default-count inc) 1)}}]
+  x)
 (def parity-input [1 2 3 4])
 (def parity-literal-sink nil)
 (def parity-seq-sink nil)
@@ -37,6 +44,8 @@ const PROGRAM: &str = r#"
   (parity-add 1 2)
   (parity-sub 2 1)
   (parity-mul 2 3)
+  ;; 50 calls that all supply `:x`; each still evaluates the default.
+  (parity-or-default {:x 7})
   ;; Keeping allocation-heavy results reachable also prevents AOT's region
   ;; optimizer from turning the JIT warm-up into an allocation stress test.
   (def parity-literal-sink (parity-literals))
@@ -57,6 +66,10 @@ const PROGRAM: &str = r#"
               (pr-str (parity-sub 9223372036854775807 -1))))
 (println (str "overflow-mul|value|"
               (pr-str (parity-mul 9223372036854775807 2))))
+;; Hit and miss, in that order, so the effect count below is 50 + 2 either way.
+(println (str "or-default-hit|value|" (pr-str (parity-or-default {:x 7}))))
+(println (str "or-default-miss|value|" (pr-str (parity-or-default {}))))
+(println (str "or-default-effects|value|" (pr-str @parity-or-default-count)))
 (println
   (str "arithmetic-error|"
        (try
@@ -228,7 +241,7 @@ fn parse_records(tier: Tier, output: &Output) -> BTreeMap<String, Outcome> {
             tier.name()
         );
     }
-    assert_eq!(records.len(), 10, "{} stdout:\n{stdout}", tier.name());
+    assert_eq!(records.len(), 13, "{} stdout:\n{stdout}", tier.name());
     records
 }
 
@@ -255,6 +268,11 @@ fn values_and_errors_match_across_all_execution_tiers() {
         Outcome::Value("[#\"[a-z]+\" 1/3 1.25M]".to_string())
     );
     assert_eq!(tree["recursive-aot"], Outcome::Value("55".to_string()));
+    // The key is present, so the default loses — but it still ran, once per
+    // call: 50 warm-up calls plus the hit and the miss below.
+    assert_eq!(tree["or-default-hit"], Outcome::Value("7".to_string()));
+    assert_eq!(tree["or-default-miss"], Outcome::Value("1".to_string()));
+    assert_eq!(tree["or-default-effects"], Outcome::Value("52".to_string()));
     assert_eq!(tree["seq-loop"], Outcome::Value("[1 2 3 4]".to_string()));
     assert_eq!(
         tree["overflow-add"],

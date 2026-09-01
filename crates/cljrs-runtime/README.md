@@ -132,6 +132,10 @@ tests/
                                      eager IR lowering: the lowerer must decline
                                      a `set!` on a local (own binary — it flips
                                      the process-wide eager-lowering switch)
+  destructure_or_default_eager.rs  — `:or` destructuring defaults are evaluated
+                                     eagerly (`(get m :k default)`), identically
+                                     in the tree-walker and the IR tier (own
+                                     binary — forced eager lowering; issue #363)
 ```
 
 ---
@@ -952,6 +956,23 @@ Each handler evaluates its key expressions under the correct allocation context:
 | `handle_agent_call` | initial value |
 | `handle_alter_var_root` | function return value |
 | `handle_intern` | value expression (3-arg form) |
+
+### Parameter binding: `bind_fn_params` vs `bind_fn_params_positional`
+
+```rust
+pub fn bind_fn_params(arity: &CljxFnArity, args: &[Value], env: &mut Env) -> EvalResult<()>;
+pub fn bind_fn_params_positional(arity: &CljxFnArity, args: &[Value], env: &mut Env) -> EvalResult<()>;
+```
+
+Both bind an arity's positional params and its rest list into the current frame.
+`bind_fn_params` additionally expands the arity's destructuring patterns, and is
+what the tree-walker (and `cljrs-async`) calls.  `bind_fn_params_positional`
+stops short of that, and is what `tiered::apply::execute_ir` calls: the lowered
+prologue already binds the destructured names as IR registers, and the ANF
+lowerer never emits `LoadLocal`, so the env copy is never read.  Producing it
+anyway would evaluate each `:or` default twice per call — destructuring defaults
+are eager, so a side-effecting one would fire once here and once in the prologue
+(issue #363).
 
 ### Value-level special form helpers (IR interpreter API)
 
