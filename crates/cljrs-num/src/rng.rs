@@ -139,6 +139,22 @@ impl NumRng {
         }
         out
     }
+
+    pub fn fill_poisson(&self, n: usize, lambda: f64) -> Vec<i64> {
+        (0..n).map(|_| self.poisson(lambda)).collect()
+    }
+
+    /// One `sample_idx(count, m)` per group, concatenated. Counts larger
+    /// than m are capped (sample_idx does the min). Draws consume the
+    /// stream exactly as the equivalent per-group calls would.
+    pub fn sample_groups(&self, counts: &[i64], m: usize) -> Vec<i64> {
+        let total: usize = counts.iter().map(|&c| (c.max(0) as usize).min(m)).sum();
+        let mut out = Vec::with_capacity(total);
+        for &c in counts {
+            out.extend(self.sample_idx(c.max(0) as usize, m));
+        }
+        out
+    }
 }
 
 /// Downcast a Value to the NumRng handle, or explain what went wrong.

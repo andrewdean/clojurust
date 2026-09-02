@@ -7,6 +7,7 @@
 //!   [:d double-array]   doubles, shortest round-trip repr; NaN → empty field
 //!   [:l long-array]     longs
 //!   [:date long-array]  epoch-day numbers rendered as YYYY-MM-DD
+//!   [:ts days secs]     two long-arrays rendered as "YYYY-MM-DD HH:MM:SS"
 //!   [:s vec]            per-row strings (nil → empty), CSV-escaped
 //!   [:const s]          the same string for every row (nil → empty)
 //!
@@ -22,6 +23,9 @@ use std::path::Path;
 use cljrs_value::Value;
 
 enum Column {
+    /// (epoch-day, seconds-of-day) pairs rendered as "YYYY-MM-DD HH:MM:SS";
+    /// seconds past 86400 carry into the next day.
+    Timestamps(Vec<i64>, Vec<i64>),
     Doubles(Vec<f64>),
     Longs(Vec<i64>),
     Dates(Vec<i64>),
@@ -34,6 +38,7 @@ impl Column {
         match self {
             Column::Doubles(v) => Some(v.len()),
             Column::Longs(v) | Column::Dates(v) => Some(v.len()),
+            Column::Timestamps(d, _) => Some(d.len()),
             Column::Strings(v) => Some(v.len()),
             Column::Const(_) => None,
         }
@@ -65,6 +70,18 @@ fn day_to_ymd(day: i64) -> (i64, i64, i64) {
 fn day_str(day: i64) -> String {
     let (y, m, d) = day_to_ymd(day);
     format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn ts_str(day: i64, secs: i64) -> String {
+    let day = day + secs.div_euclid(86_400);
+    let secs = secs.rem_euclid(86_400);
+    format!(
+        "{} {:02}:{:02}:{:02}",
+        day_str(day),
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 fn string_cell(v: &Value) -> Result<Option<String>, String> {
@@ -100,6 +117,21 @@ fn parse_column(spec: &Value) -> Result<Column, String> {
         ("d", Some(Value::DoubleArray(a))) => Ok(Column::Doubles(a.get().lock().unwrap().clone())),
         ("l", Some(Value::LongArray(a))) => Ok(Column::Longs(a.get().lock().unwrap().clone())),
         ("date", Some(Value::LongArray(a))) => Ok(Column::Dates(a.get().lock().unwrap().clone())),
+        ("ts", Some(Value::LongArray(d))) => match items.get(2) {
+            Some(Value::LongArray(sec)) => {
+                let days = d.get().lock().unwrap().clone();
+                let secs = sec.get().lock().unwrap().clone();
+                if days.len() != secs.len() {
+                    return Err(format!(
+                        "[:ts] day/second arrays differ: {} vs {}",
+                        days.len(),
+                        secs.len()
+                    ));
+                }
+                Ok(Column::Timestamps(days, secs))
+            }
+            _ => Err("[:ts] needs two long-arrays: epoch-days and seconds-of-day".to_string()),
+        },
         ("s", Some(Value::Vector(v))) => {
             let mut out = Vec::with_capacity(v.get().count());
             for cell in v.get().iter() {
@@ -170,6 +202,11 @@ pub fn write_csv(
                 .collect(),
             Column::Longs(v) => v.iter().map(|x| x.to_string()).collect(),
             Column::Dates(v) => v.iter().map(|&d| day_str(d)).collect(),
+            Column::Timestamps(d, sec) => d
+                .iter()
+                .zip(sec.iter())
+                .map(|(&day, &s)| ts_str(day, s))
+                .collect(),
             Column::Strings(v) => v
                 .iter()
                 .map(|s| s.as_deref().map(escape).unwrap_or_default())

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use cljrs_env::env::GlobalEnv;
 use cljrs_interop::Registry;
-use cljrs_value::{Arity, NativeFn, Value, ValueError, ValueResult};
+use cljrs_value::{Arity, NativeFn, Value, ValueError};
 
 use kernels as k;
 use rng::{NumRng, with_rng};
@@ -212,6 +212,24 @@ pub fn register(registry: &Registry) {
     );
     registry.define_in(
         NS,
+        "fill-poisson!",
+        fixed("fill-poisson!", 3, |args| {
+            let n = usize_arg(args, 1)?;
+            let lambda = f64_arg(args, 2)?;
+            with_rng(&args[0], |r| k::la(r.fill_poisson(n, lambda)))
+        }),
+    );
+    registry.define_in(
+        NS,
+        "sample-groups!",
+        fixed("sample-groups!", 3, |args| {
+            let counts = k::longs(&args[1])?;
+            let m = usize_arg(args, 2)?;
+            with_rng(&args[0], |r| k::la(r.sample_groups(&counts, m)))
+        }),
+    );
+    registry.define_in(
+        NS,
         "fill-integers!",
         fixed("fill-integers!", 4, |args| {
             let n = usize_arg(args, 1)?;
@@ -268,6 +286,59 @@ pub fn register(registry: &Registry) {
         fixed("constant", 2, |args| {
             k::constant(i64_arg(args, 0)?, f64_arg(args, 1)?)
         }),
+    );
+    registry.define_in(
+        NS,
+        "iota",
+        fixed("iota", 2, |args| {
+            k::iota(i64_arg(args, 0)?, i64_arg(args, 1)?)
+        }),
+    );
+    registry.define_in(
+        NS,
+        "lclamp-min",
+        fixed("lclamp-min", 2, |args| {
+            k::lclamp_min(&args[0], i64_arg(args, 1)?)
+        }),
+    );
+    registry.define_in(
+        NS,
+        "expand-counts",
+        fixed("expand-counts", 1, |args| k::expand_counts(&args[0])),
+    );
+    registry.define_in(
+        NS,
+        "dtake",
+        fixed("dtake", 2, |args| k::dtake(&args[0], &args[1])),
+    );
+    registry.define_in(
+        NS,
+        "ltake",
+        fixed("ltake", 2, |args| k::ltake(&args[0], &args[1])),
+    );
+    registry.define_in(
+        NS,
+        "gather2d",
+        fixed("gather2d", 4, |args| {
+            k::gather2d(&args[0], &args[1], &args[2], i64_arg(args, 3)?)
+        }),
+    );
+    registry.define_in(
+        NS,
+        "where-pos",
+        fixed("where-pos", 1, |args| k::where_pos(&args[0])),
+    );
+    registry.define_in(
+        NS,
+        "where-lt",
+        fixed("where-lt", 4, |args| {
+            k::where_lt(&args[0], f64_arg(args, 1)?, &args[2], &args[3])
+        }),
+    );
+    registry.define_in(
+        NS,
+        "stack",
+        fixed("stack", 2, |args| k::stack(&args[0], i64_arg(args, 1)?)),
     );
     registry.define_in(
         NS,

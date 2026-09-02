@@ -44,7 +44,10 @@ bits, Box-Muller normals, Knuth poisson.
   `(lognormal! r mu sigma)`, `(poisson! r lambda)`
 - Bulk fills → new arrays: `(fill-normal! r n mu sigma)`,
   `(fill-uniform! r n lo hi)`, `(fill-lognormal! r n mu sigma)`,
-  `(fill-integers! r n lo hi)`
+  `(fill-integers! r n lo hi)`, `(fill-poisson! r n lambda)`
+- `(sample-idx! r n m)` — n distinct indices from [0, m)
+- `(sample-groups! r counts m)` — one distinct sample per group,
+  concatenated (counts: long-array; each capped at m)
 
 ### Elementwise (pure; second operand broadcasts when scalar)
 
@@ -57,9 +60,22 @@ bits, Box-Muller normals, Knuth poisson.
 
 - `(cumsum a)`, `(sum a)`
 - `(lag a seed)` — `out[0]=seed, out[i]=a[i-1]`
-- `(stride a k)` — every k-th element from index 0
-- `(constant n x)` — n-element array of x
+- `(stride a k)` — every k-th element from index 0; `(expand-stride a k n)`
+  is the inverse (NaN-filled)
+- `(constant n x)` — n-element array of x; `(iota n start)` — sequential longs
 - `(to-longs a)` (truncates toward zero), `(to-doubles a)`
+- `(lclamp-min a x)` — elementwise long max
+- `(expand-counts counts)` — run-length expansion: emit i counts[i] times
+
+### Gather, mask, select (the columnar-simulation toolkit)
+
+- `(dtake a idxs)`, `(ltake a idxs)` — 1-D gathers (double/long)
+- `(stack rows row-len)` — vector of double-arrays (or nil → NaN row) into a
+  row-major flattened matrix
+- `(gather2d mat rows cols row-len)` — `out[i] = mat[rows[i]*row-len + cols[i]]`
+- `(where-pos a)` — indices where finite and > 0
+- `(where-lt a t then else)` — elementwise select; then/else broadcast when
+  scalar (NaN as `then`/`else` writes empty CSV cells downstream)
 
 ### Bulk CSV
 
@@ -72,6 +88,7 @@ column specs:
 | `[:d double-array]` | doubles, shortest round-trip repr; NaN → empty field |
 | `[:l long-array]` | longs |
 | `[:date long-array]` | epoch-day numbers rendered `YYYY-MM-DD` |
+| `[:ts days secs]` | two long-arrays rendered `YYYY-MM-DD HH:MM:SS` (seconds carry past midnight) |
 | `[:s vector]` | per-row strings/numbers/booleans (nil → empty), CSV-escaped |
 | `[:const s]` | the same string for every row (nil → empty) |
 
