@@ -1303,14 +1303,19 @@ impl cljrs_gc::Trace for Value {
             Value::Agent(p) => visitor.visit(p),
             Value::TypeInstance(p) => visitor.visit(p),
             Value::ObjectArray(p) => visitor.visit(p),
-            Value::BooleanArray(_)
-            | Value::ByteArray(_)
-            | Value::ShortArray(_)
-            | Value::IntArray(_)
-            | Value::LongArray(_)
-            | Value::FloatArray(_)
-            | Value::DoubleArray(_)
-            | Value::CharArray(_) => {}
+            // Primitive arrays hold no child Values, but the boxes
+            // themselves live on the GC heap and must be marked — a
+            // primitive array reachable only through a traced collection
+            // (e.g. a map of double-arrays) was previously never visited
+            // and got swept while still referenced (use-after-free).
+            Value::BooleanArray(p) => visitor.visit(p),
+            Value::ByteArray(p) => visitor.visit(p),
+            Value::ShortArray(p) => visitor.visit(p),
+            Value::IntArray(p) => visitor.visit(p),
+            Value::LongArray(p) => visitor.visit(p),
+            Value::FloatArray(p) => visitor.visit(p),
+            Value::DoubleArray(p) => visitor.visit(p),
+            Value::CharArray(p) => visitor.visit(p),
             Value::NativeObject(p) => visitor.visit(p),
             // Resource, SharedAtom, and ByteBlob are Arc-ref-counted outside the
             // GC heap — nothing to trace through the GC visitor.
