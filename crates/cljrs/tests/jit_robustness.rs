@@ -178,7 +178,11 @@ fn vswap_survives_jit_compilation() {
 "#,
     );
     assert!(run.stdout.contains("bad 0"), "stdout:\n{}", run.stdout);
-    assert!(run.stdout.contains("multi [1 2 3]"), "stdout:\n{}", run.stdout);
+    assert!(
+        run.stdout.contains("multi [1 2 3]"),
+        "stdout:\n{}",
+        run.stdout
+    );
     assert!(
         !run.stderr.contains("must be invoked through the evaluator"),
         "stderr:\n{}",
