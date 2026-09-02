@@ -1,0 +1,16 @@
+[package]
+name = "cljrs-num"
+version = "0.1.0"
+edition = "2024"
+description = "Bulk numeric kernels, deterministic RNG, and bulk CSV emission for clojurust"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cljrs-env     = { workspace = true }
+cljrs-interop = { workspace = true }
+cljrs-gc      = { workspace = true }
+cljrs-value   = { workspace = true }

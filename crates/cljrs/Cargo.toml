@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["async", "net", "charset", "base64"]
+default = ["async", "net", "charset", "base64", "num"]
 # Propagate no-gc to all direct dependencies; transitive deps pick it up through their own feature chains.
 no-gc = [
     "cljrs-gc/no-gc",
@@ -23,6 +23,7 @@ async   = ["dep:cljrs-async", "dep:cljrs-io", "dep:tokio"]
 net     = ["dep:cljrs-net", "async"]
 charset = ["dep:cljrs-charset"]
 base64  = ["dep:cljrs-base64"]
+num     = ["dep:cljrs-num"]
 
 [[bin]]
 name = "cljrs"
@@ -59,6 +60,7 @@ cljrs-io     = { workspace = true, optional = true }
 cljrs-net    = { workspace = true, optional = true }
 cljrs-charset = { workspace = true, optional = true }
 cljrs-base64  = { workspace = true, optional = true }
+cljrs-num     = { workspace = true, optional = true }
 tokio         = { workspace = true, optional = true }
 
 [dev-dependencies]
