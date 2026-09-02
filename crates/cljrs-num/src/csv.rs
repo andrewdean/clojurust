@@ -84,7 +84,12 @@ fn string_cell(v: &Value) -> Result<Option<String>, String> {
 fn parse_column(spec: &Value) -> Result<Column, String> {
     let items: Vec<Value> = match spec {
         Value::Vector(v) => v.get().iter().cloned().collect(),
-        other => return Err(format!("column spec must be a vector, got {}", other.type_name())),
+        other => {
+            return Err(format!(
+                "column spec must be a vector, got {}",
+                other.type_name()
+            ));
+        }
     };
     let tag = match items.first() {
         Some(Value::Keyword(k)) => k.get().name.to_string(),
@@ -104,9 +109,7 @@ fn parse_column(spec: &Value) -> Result<Column, String> {
         }
         ("const", Some(Value::Nil)) | ("const", None) => Ok(Column::Const(String::new())),
         ("const", Some(Value::Str(s))) => Ok(Column::Const(s.get().clone())),
-        ("const", Some(other)) => Ok(Column::Const(
-            string_cell(other)?.unwrap_or_default(),
-        )),
+        ("const", Some(other)) => Ok(Column::Const(string_cell(other)?.unwrap_or_default())),
         (t, Some(p)) => Err(format!(
             "bad column spec [:{t} {}]: expected [:d double-array], [:l long-array], \
              [:date long-array], [:s vector], or [:const string]",
@@ -157,7 +160,13 @@ pub fn write_csv(
         .map(|c| match c {
             Column::Doubles(v) => v
                 .iter()
-                .map(|x| if x.is_nan() { String::new() } else { x.to_string() })
+                .map(|x| {
+                    if x.is_nan() {
+                        String::new()
+                    } else {
+                        x.to_string()
+                    }
+                })
                 .collect(),
             Column::Longs(v) => v.iter().map(|x| x.to_string()).collect(),
             Column::Dates(v) => v.iter().map(|&d| day_str(d)).collect(),
@@ -180,8 +189,16 @@ pub fn write_csv(
     let mut out = std::io::BufWriter::with_capacity(1 << 20, file);
 
     if !(append && exists) {
-        writeln!(out, "{}", header.iter().map(|h| escape(h)).collect::<Vec<_>>().join(","))
-            .map_err(|e| format!("write {path}: {e}"))?;
+        writeln!(
+            out,
+            "{}",
+            header
+                .iter()
+                .map(|h| escape(h))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+        .map_err(|e| format!("write {path}: {e}"))?;
     }
 
     let mut line = String::with_capacity(128);

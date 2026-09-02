@@ -149,7 +149,10 @@ pub fn as_rng(v: &Value) -> Result<GcPtr<NativeObjectBox>, String> {
             "expected {RNG_TAG} handle, got native object {}",
             obj.get().type_tag()
         )),
-        other => Err(format!("expected {RNG_TAG} handle, got {}", other.type_name())),
+        other => Err(format!(
+            "expected {RNG_TAG} handle, got {}",
+            other.type_name()
+        )),
     }
 }
 

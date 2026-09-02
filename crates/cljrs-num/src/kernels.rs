@@ -59,7 +59,11 @@ pub fn zip_with(a: &Value, b: &Value, f: impl Fn(f64, f64) -> f64) -> Result<Val
             if xs.len() != ys.len() {
                 return Err(format!("length mismatch: {} vs {}", xs.len(), ys.len()));
             }
-            Ok(da(xs.iter().zip(ys.iter()).map(|(&x, &y)| f(x, y)).collect()))
+            Ok(da(xs
+                .iter()
+                .zip(ys.iter())
+                .map(|(&x, &y)| f(x, y))
+                .collect()))
         }
     }
 }

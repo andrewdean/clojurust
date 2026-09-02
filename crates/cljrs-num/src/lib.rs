@@ -48,30 +48,37 @@ fn fixed(
     n: usize,
     f: impl Fn(&[Value]) -> Result<Value, String> + Send + Sync + 'static,
 ) -> NativeFn {
-    NativeFn::with_closure(name, Arity::Fixed(n), move |args| {
-        f(args).map_err(err)
-    })
+    NativeFn::with_closure(name, Arity::Fixed(n), move |args| f(args).map_err(err))
 }
 
 fn f64_arg(args: &[Value], i: usize) -> Result<f64, String> {
     match &args[i] {
         Value::Double(x) => Ok(*x),
         Value::Long(n) => Ok(*n as f64),
-        other => Err(format!("argument {i}: expected number, got {}", other.type_name())),
+        other => Err(format!(
+            "argument {i}: expected number, got {}",
+            other.type_name()
+        )),
     }
 }
 
 fn i64_arg(args: &[Value], i: usize) -> Result<i64, String> {
     match &args[i] {
         Value::Long(n) => Ok(*n),
-        other => Err(format!("argument {i}: expected integer, got {}", other.type_name())),
+        other => Err(format!(
+            "argument {i}: expected integer, got {}",
+            other.type_name()
+        )),
     }
 }
 
 fn str_arg(args: &[Value], i: usize) -> Result<String, String> {
     match &args[i] {
         Value::Str(s) => Ok(s.get().clone()),
-        other => Err(format!("argument {i}: expected string, got {}", other.type_name())),
+        other => Err(format!(
+            "argument {i}: expected string, got {}",
+            other.type_name()
+        )),
     }
 }
 
@@ -269,7 +276,11 @@ pub fn register(registry: &Registry) {
             k::expand_stride(&args[0], i64_arg(args, 1)?, i64_arg(args, 2)?)
         }),
     );
-    registry.define_in(NS, "to-longs", fixed("to-longs", 1, |args| k::to_longs(&args[0])));
+    registry.define_in(
+        NS,
+        "to-longs",
+        fixed("to-longs", 1, |args| k::to_longs(&args[0])),
+    );
     registry.define_in(
         NS,
         "to-doubles",
@@ -279,46 +290,42 @@ pub fn register(registry: &Registry) {
     // ── bulk CSV ────────────────────────────────────────────────────────
     registry.define(
         "cljrs.num/write-csv!",
-        NativeFn::with_closure(
-            "write-csv!",
-            Arity::Variadic { min: 3 },
-            move |args| {
-                let go = || -> Result<Value, String> {
-                    let path = str_arg(args, 0)?;
-                    let header: Vec<String> = match &args[1] {
-                        Value::Vector(v) => v
-                            .get()
-                            .iter()
-                            .map(|h| match h {
-                                Value::Str(s) => Ok(s.get().clone()),
-                                other => Err(format!(
-                                    "header names must be strings, got {}",
-                                    other.type_name()
-                                )),
-                            })
-                            .collect::<Result<_, _>>()?,
-                        other => {
-                            return Err(format!(
-                                "header must be a vector, got {}",
+        NativeFn::with_closure("write-csv!", Arity::Variadic { min: 3 }, move |args| {
+            let go = || -> Result<Value, String> {
+                let path = str_arg(args, 0)?;
+                let header: Vec<String> = match &args[1] {
+                    Value::Vector(v) => v
+                        .get()
+                        .iter()
+                        .map(|h| match h {
+                            Value::Str(s) => Ok(s.get().clone()),
+                            other => Err(format!(
+                                "header names must be strings, got {}",
                                 other.type_name()
-                            ));
-                        }
-                    };
-                    let specs: Vec<Value> = match &args[2] {
-                        Value::Vector(v) => v.get().iter().cloned().collect(),
-                        other => {
-                            return Err(format!(
-                                "columns must be a vector, got {}",
-                                other.type_name()
-                            ));
-                        }
-                    };
-                    let append = matches!(args.get(3), Some(Value::Bool(true)));
-                    csv::write_csv(&path, &header, &specs, append).map(Value::Long)
+                            )),
+                        })
+                        .collect::<Result<_, _>>()?,
+                    other => {
+                        return Err(format!(
+                            "header must be a vector, got {}",
+                            other.type_name()
+                        ));
+                    }
                 };
-                go().map_err(err)
-            },
-        ),
+                let specs: Vec<Value> = match &args[2] {
+                    Value::Vector(v) => v.get().iter().cloned().collect(),
+                    other => {
+                        return Err(format!(
+                            "columns must be a vector, got {}",
+                            other.type_name()
+                        ));
+                    }
+                };
+                let append = matches!(args.get(3), Some(Value::Bool(true)));
+                csv::write_csv(&path, &header, &specs, append).map(Value::Long)
+            };
+            go().map_err(err)
+        }),
     );
 
     registry.env().mark_loaded(NS);
