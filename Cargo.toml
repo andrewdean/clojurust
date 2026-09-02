@@ -42,6 +42,7 @@ members = [
     "crates/cljrsh-aws",
     "crates/cljrsh-k8s",
     "crates/cljrs-base64",
+    "crates/cljrs-num",
     "crates/cljrs-jit",
     "crates/cljrs-dylib",
     "crates/cljrs-dom",
@@ -89,6 +90,7 @@ cljrsh-pods        = { path = "crates/cljrsh-pods",        version = "0.1.0" }
 cljrsh-aws         = { path = "crates/cljrsh-aws",         version = "0.1.0" }
 cljrsh-k8s         = { path = "crates/cljrsh-k8s",         version = "0.1.0" }
 cljrs-base64       = { path = "crates/cljrs-base64",       version = "0.1.0" }
+cljrs-num          = { path = "crates/cljrs-num",          version = "0.1.0" }
 cljrs-jit          = { path = "crates/cljrs-jit",          version = "0.1.0" }
 cljrs-dylib        = { path = "crates/cljrs-dylib",        version = "0.1.0" }
 cljrs-dom          = { path = "crates/cljrs-dom",          version = "0.1.0" }

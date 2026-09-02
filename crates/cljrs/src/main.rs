@@ -857,6 +857,8 @@ fn setup_globals(
     });
     #[cfg(feature = "base64")]
     cljrs_base64::init(&globals);
+    #[cfg(feature = "num")]
+    cljrs_num::init(&globals);
     globals
 }
 
