@@ -22,6 +22,7 @@ members = [
     "crates/cljrs-lsp",
     "crates/cljrs-nrepl",
     "crates/cljrs-base64",
+    "crates/cljrs-num",
     "crates/cljrs-tx",
 ]
 resolver = "2"
@@ -61,6 +62,7 @@ cljrs-charset      = { path = "crates/cljrs-charset",      version = "0.1.0", de
 cljrs-lsp          = { path = "crates/cljrs-lsp",          version = "0.1.0" }
 cljrs-nrepl        = { path = "crates/cljrs-nrepl",        version = "0.1.0", default-features = false }
 cljrs-base64       = { path = "crates/cljrs-base64",       version = "0.1.0", default-features = false }
+cljrs-num          = { path = "crates/cljrs-num",          version = "0.1.0" }
 cljrs-tx           = { path = "crates/cljrs-tx",           version = "0.1.0", default-features = false }
 
 tracing            = "0.1.44"

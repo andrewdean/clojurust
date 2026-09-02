@@ -752,6 +752,7 @@ dependencies = [
  "cljrs-lsp",
  "cljrs-net",
  "cljrs-nrepl",
+ "cljrs-num",
  "cljrs-project",
  "cljrs-reader",
  "cljrs-runtime",
@@ -961,6 +962,16 @@ dependencies = [
  "miette",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "cljrs-num"
+version = "0.1.0"
+dependencies = [
+ "cljrs-gc",
+ "cljrs-interop",
+ "cljrs-runtime",
+ "cljrs-value",
 ]
 
 [[package]]

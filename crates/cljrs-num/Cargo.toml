@@ -1,0 +1,25 @@
+[package]
+name = "cljrs-num"
+version = "0.1.0"
+edition = "2024"
+description = "Bulk numeric kernels, deterministic RNG, and bulk CSV emission for clojurust"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["regex-full", "deps"]
+
+# Pass-throughs: workspace dependencies are taken with default features off
+# (see the note in the root Cargo.toml), so re-export the engine choices here.
+regex-full  = ["cljrs-value/regex-full", "cljrs-runtime/regex-full", "cljrs-interop/regex-full"]
+small-regex = ["cljrs-value/small-regex", "cljrs-runtime/small-regex", "cljrs-interop/small-regex"]
+deps = ["cljrs-runtime/deps", "cljrs-interop/deps"]
+
+[dependencies]
+cljrs-runtime = { workspace = true }
+cljrs-interop = { workspace = true }
+cljrs-gc      = { workspace = true }
+cljrs-value   = { workspace = true }

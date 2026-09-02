@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["async", "net", "charset", "base64", "regex-full", "deps"]
+default = ["async", "net", "charset", "base64", "num", "regex-full", "deps"]
 
 # Regex engine and pass-throughs. Every workspace dependency below is taken
 # with default features off (see the note in the root Cargo.toml), so what
@@ -26,6 +26,7 @@ regex-full = [
     "cljrs-net?/regex-full",
     "cljrs-charset?/regex-full",
     "cljrs-base64?/regex-full",
+    "cljrs-num?/regex-full",
 ]
 small-regex = [
     "cljrs-value/small-regex",
@@ -39,6 +40,7 @@ small-regex = [
     "cljrs-net?/small-regex",
     "cljrs-charset?/small-regex",
     "cljrs-base64?/small-regex",
+    "cljrs-num?/small-regex",
 ]
 
 # Pass-through for cljrs-runtime's git-backed dependency support.
@@ -53,6 +55,7 @@ deps = [
     "cljrs-net?/deps",
     "cljrs-charset?/deps",
     "cljrs-base64?/deps",
+    "cljrs-num?/deps",
 ]
 
 # Propagate no-gc to all direct dependencies; transitive deps pick it up through their own feature chains.
@@ -70,6 +73,7 @@ async   = ["dep:cljrs-async", "dep:cljrs-io", "dep:tokio"]
 net     = ["dep:cljrs-net", "async"]
 charset = ["dep:cljrs-charset"]
 base64  = ["dep:cljrs-base64"]
+num     = ["dep:cljrs-num"]
 
 [lib]
 name = "cljrs"
@@ -107,6 +111,7 @@ cljrs-io     = { workspace = true, optional = true }
 cljrs-net    = { workspace = true, optional = true }
 cljrs-charset = { workspace = true, optional = true }
 cljrs-base64  = { workspace = true, optional = true }
+cljrs-num     = { workspace = true, optional = true }
 tokio         = { workspace = true, optional = true }
 
 [dev-dependencies]

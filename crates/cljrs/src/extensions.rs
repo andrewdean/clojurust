@@ -67,6 +67,12 @@ pub fn default_set() -> ExtensionSet {
         cljrs_base64::init,
         "cljrs_base64::init",
     ));
+    #[cfg(feature = "num")]
+    set.push(Extension::new(
+        "cljrs-num",
+        cljrs_num::init,
+        "cljrs_num::init",
+    ));
 
     set
 }
