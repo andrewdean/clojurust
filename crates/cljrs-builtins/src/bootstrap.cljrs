@@ -411,6 +411,14 @@
   "Atomically swaps the value of atom to be (apply f current-value args)."
   [a f & args] (reset! a (apply f (deref a) args)))
 
+(defn vswap!
+  "Non-atomically swaps the value of the volatile to be
+  (apply f current-value args). Defined here (like swap!) so the var holds a
+  real function: the interpreter fast-paths vswap! by name, but JIT-compiled
+  code calls through the var, and the previous native sentinel made every
+  hot vswap! call site error once its function was JIT-compiled."
+  [v f & args] (vreset! v (apply f (deref v) args)))
+
 (defmacro when
   "Evaluates test. If logical true, evaluates body in an implicit do."
   [test & body]

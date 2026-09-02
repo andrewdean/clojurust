@@ -154,3 +154,34 @@ fn contains_q_vector_non_integer_key_returns_false_under_jit() {
         run.stdout
     );
 }
+
+#[test]
+fn vswap_survives_jit_compilation() {
+    // Regression: vswap! was registered only as a native sentinel (the
+    // interpreter fast-paths it by name), so once a function using vswap!
+    // was JIT-compiled, the compiled code called through the var and hit
+    // "vswap! must be invoked through the evaluator" — or, in earlier
+    // lineages, silently corrupted results. vswap! is now a real bootstrap
+    // function over vreset!/deref, like swap!.
+    let run = run_jit(
+        r#"
+(defn build [s]
+  (let [sb (volatile! [])]
+    (doseq [ch s]
+      (vswap! sb conj (str ch)))
+    (apply str @sb)))
+(let [inputs (mapv #(str "item-" % "-payload") (range 500))
+      outs (mapv build inputs)
+      bad (count (filter false? (map = outs inputs)))]
+  (println "bad" bad)
+  (println "multi" (let [v (volatile! [1])] (vswap! v conj 2 3))))
+"#,
+    );
+    assert!(run.stdout.contains("bad 0"), "stdout:\n{}", run.stdout);
+    assert!(run.stdout.contains("multi [1 2 3]"), "stdout:\n{}", run.stdout);
+    assert!(
+        !run.stderr.contains("must be invoked through the evaluator"),
+        "stderr:\n{}",
+        run.stderr
+    );
+}
