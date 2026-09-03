@@ -1,6 +1,6 @@
 [package]
 name = "cljrsh-aws"
-version = "0.1.0"
+version = "0.2.40"
 edition = "2024"
 description = "Minimal data-driven AWS client for cljrsh: SigV4 + S3 (rest-xml) + generic awsJson invoke, Garage-compatible, static/IRSA auth"
 license.workspace = true
