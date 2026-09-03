@@ -46,6 +46,8 @@ bits, Box-Muller normals, Knuth poisson.
   `(fill-uniform! r n lo hi)`, `(fill-lognormal! r n mu sigma)`,
   `(fill-integers! r n lo hi)`, `(fill-poisson! r n lambda)`
 - `(sample-idx! r n m)` — n distinct indices from [0, m)
+- `(fill-chars! r alphabet n)` — an n-char string drawn per-character via
+  `integers!` (bulk synthetic-identifier construction)
 - `(sample-groups! r counts m)` — one distinct sample per group,
   concatenated (counts: long-array; each capped at m)
 

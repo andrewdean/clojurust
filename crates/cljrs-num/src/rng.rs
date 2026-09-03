@@ -144,6 +144,18 @@ impl NumRng {
         (0..n).map(|_| self.poisson(lambda)).collect()
     }
 
+    /// n characters drawn from `alphabet` via `integers(0, len)` — one
+    /// call replaces a per-character interpreted loop when building
+    /// synthetic identifiers. Draw-for-draw identical to
+    /// `(apply str (repeatedly n #(nth alphabet (integers! r 0 len))))`.
+    pub fn fill_chars(&self, alphabet: &str, n: usize) -> String {
+        let chars: Vec<char> = alphabet.chars().collect();
+        let m = chars.len() as i64;
+        (0..n)
+            .map(|_| chars[self.integers(0, m) as usize])
+            .collect()
+    }
+
     /// One `sample_idx(count, m)` per group, concatenated. Counts larger
     /// than m are capped (sample_idx does the min). Draws consume the
     /// stream exactly as the equivalent per-group calls would.

@@ -203,6 +203,17 @@ pub fn register(registry: &Registry) {
     );
     registry.define_in(
         NS,
+        "fill-chars!",
+        fixed("fill-chars!", 3, |args| {
+            let alphabet = str_arg(args, 1)?;
+            let n = usize_arg(args, 2)?;
+            with_rng(&args[0], |r| {
+                Value::Str(cljrs_gc::GcPtr::new(r.fill_chars(&alphabet, n)))
+            })
+        }),
+    );
+    registry.define_in(
+        NS,
         "sample-idx!",
         fixed("sample-idx!", 3, |args| {
             let n = usize_arg(args, 1)?;
