@@ -189,3 +189,29 @@ fn vswap_survives_jit_compilation() {
         run.stderr
     );
 }
+
+#[test]
+fn delay_creation_survives_jit_compilation() {
+    // Regression: make-delay (the delay macro's expansion target) was a
+    // native sentinel, and the interpreted helper only accepted plain
+    // Value::Fn closures — a JIT-compiled caller allocates BoundFn
+    // closures and either hit "make-delay requires a fn, got fn" (IR
+    // interpreter) or "make-delay must be invoked through the evaluator"
+    // (fully compiled). make-delay is now a real builtin that wraps any
+    // callable for force-time application.
+    let run = run_jit(
+        r#"
+(defn make-thunk [i] (delay (* i 2)))
+(let [outs (mapv #(deref (make-thunk %)) (range 500))
+      bad (count (filter false? (map = outs (map #(* % 2) (range 500)))))]
+  (println "bad" bad))
+"#,
+    );
+    assert!(run.stdout.contains("bad 0"), "stdout:\n{}", run.stdout);
+    for msg in [
+        "must be invoked through the evaluator",
+        "make-delay requires a fn",
+    ] {
+        assert!(!run.stderr.contains(msg), "stderr:\n{}", run.stderr);
+    }
+}

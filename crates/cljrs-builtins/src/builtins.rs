@@ -1314,7 +1314,7 @@ pub fn register_all(globals: &Arc<GlobalEnv>, ns: &str) {
         ),
         ("send", Arity::Variadic { min: 2 }, builtin_send),
         ("send-off", Arity::Variadic { min: 2 }, builtin_send),
-        ("make-delay", Arity::Fixed(1), builtin_make_delay_sentinel),
+        ("make-delay", Arity::Fixed(1), builtin_make_delay),
         // I/O
         ("print", Arity::Variadic { min: 0 }, builtin_print),
         ("println", Arity::Variadic { min: 0 }, builtin_println),
@@ -9314,10 +9314,49 @@ fn builtin_restart_agent(args: &[Value]) -> ValueResult<Value> {
     }
 }
 
-fn builtin_make_delay_sentinel(_args: &[Value]) -> ValueResult<Value> {
-    Err(ValueError::Other(
-        "make-delay must be invoked through the evaluator".into(),
-    ))
+/// Zero-arg callable wrapped for force-time application. The interpreter
+/// fast-paths `(make-delay f)` by name and never reaches this builtin, but
+/// JIT-compiled callers load the var and call it directly — this used to be
+/// a sentinel that unconditionally errored, so any delay-creating function
+/// broke once it was JIT-compiled.
+#[derive(Debug)]
+struct DelayCallableThunk {
+    callee: Value,
+    globals: std::sync::Arc<cljrs_env::env::GlobalEnv>,
+    ns: std::sync::Arc<str>,
+}
+
+impl cljrs_gc::Trace for DelayCallableThunk {
+    fn trace(&self, visitor: &mut cljrs_gc::MarkVisitor) {
+        self.callee.trace(visitor);
+    }
+}
+
+impl cljrs_value::Thunk for DelayCallableThunk {
+    fn force(&self) -> Result<Value, String> {
+        let mut env = cljrs_env::env::Env::new(self.globals.clone(), self.ns.as_ref());
+        cljrs_env::apply::apply_value(&self.callee, Vec::new(), &mut env)
+            .map_err(|e| format!("{e}"))
+    }
+}
+
+fn builtin_make_delay(args: &[Value]) -> ValueResult<Value> {
+    let callee = args[0].unwrap_meta();
+    if callee.type_name() != "fn" {
+        return Err(ValueError::WrongType {
+            expected: "fn",
+            got: callee.type_name().to_string(),
+        });
+    }
+    let (globals, ns) = cljrs_env::callback::capture_eval_context()
+        .ok_or_else(|| ValueError::Other("make-delay called outside an eval context".into()))?;
+    Ok(Value::Delay(GcPtr::new(cljrs_value::Delay::new(Box::new(
+        DelayCallableThunk {
+            callee: callee.clone(),
+            globals,
+            ns,
+        },
+    )))))
 }
 
 // ── Records / reify ──────────────────────────────────────────────────────────

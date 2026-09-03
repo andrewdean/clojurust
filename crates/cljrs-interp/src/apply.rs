@@ -943,21 +943,7 @@ fn handle_make_delay(arg_forms: &[Form], env: &mut Env) -> EvalResult {
         });
     }
     let f_val = eval(&arg_forms[0], env)?;
-    let f = match f_val {
-        Value::Fn(f) => f.get().clone(),
-        other => {
-            return Err(EvalError::Runtime(format!(
-                "make-delay requires a fn, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    let thunk = ClosureThunk {
-        f,
-        globals: env.globals.clone(),
-        ns: env.current_ns.clone(),
-    };
-    Ok(Value::Delay(GcPtr::new(Delay::new(Box::new(thunk)))))
+    make_delay_from_fn(&f_val, env.globals.clone(), env.current_ns.clone())
 }
 
 /// Handle `(vswap! vol f & args)` — apply f to current volatile value and store.
@@ -1513,16 +1499,30 @@ pub fn make_delay_from_fn(
     globals: std::sync::Arc<cljrs_env::env::GlobalEnv>,
     ns: std::sync::Arc<str>,
 ) -> EvalResult {
-    let f = match f_val {
-        Value::Fn(f) => f.get().clone(),
-        other => {
-            return Err(EvalError::Runtime(format!(
-                "make-delay requires a fn, got {}",
-                other.type_name()
-            )));
-        }
+    let unwrapped = f_val.unwrap_meta();
+    if let Value::Fn(g) = unwrapped {
+        let thunk = ClosureThunk {
+            f: g.get().clone(),
+            globals,
+            ns,
+        };
+        return Ok(Value::Delay(GcPtr::new(Delay::new(Box::new(thunk)))));
+    }
+    // Anything else with type-name "fn" is acceptable — a JIT-compiled
+    // caller allocates its closures as BoundFn/NativeFunction values, not
+    // plain Value::Fn (mirrors make_lazy_seq_from_fn). Route through
+    // apply_value at force-time; reject non-callable values up front.
+    if unwrapped.type_name() != "fn" {
+        return Err(EvalError::Runtime(format!(
+            "make-delay requires a fn, got {}",
+            unwrapped.type_name(),
+        )));
+    }
+    let thunk = CallableValueThunk {
+        callee: unwrapped.clone(),
+        globals,
+        ns,
     };
-    let thunk = ClosureThunk { f, globals, ns };
     Ok(Value::Delay(GcPtr::new(Delay::new(Box::new(thunk)))))
 }
 
