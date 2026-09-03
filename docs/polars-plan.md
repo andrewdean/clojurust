@@ -146,7 +146,14 @@ binding also registers `div`.
 - Exit criteria: reproduce fibo's `position_eod` derivation (trade cumsum ×
   date spine, asof-priced) as a LazyFrame program and match DuckDB's output.
 
-### Phase 3 — ergonomics and integration
+### Phase 3 — ergonomics and integration — DONE 2026-09-03
+
+`from-arrays` (single-copy from primitive arrays/vectors/[:date] specs —
+zero-copy deferred as planned), transparent eager→lazy lifting in every
+relational op plus explicit `lazy`, `collect-streaming`, and the one-shot
+`sql` context. 24 clojure.test tests / 63 assertions in the package;
+tutorial at docs/tutorials/06-dataframes.md. Package repo:
+github.com/andrewdean/cljrs-polars (private).
 
 - Zero-copy or single-copy `Series ↔ cljrs.num` arrays both directions;
   `pl/from-arrays {"col" double-array ...}` frame constructor.
