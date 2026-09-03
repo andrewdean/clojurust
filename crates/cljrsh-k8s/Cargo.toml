@@ -1,6 +1,6 @@
 [package]
 name = "cljrsh-k8s"
-version = "0.1.0"
+version = "0.2.43"
 edition = "2024"
 description = "Data-driven Kubernetes client for cljrsh on kube-rs dynamic API: any resource (CRDs included) as Clojure maps"
 license.workspace = true

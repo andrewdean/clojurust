@@ -1,6 +1,6 @@
 [package]
 name = "cljrs-interp"
-version = "0.1.0"
+version = "0.2.43"
 edition = "2024"
 description = "Tree-walking interpreter for clojurust (special forms, macros, destructuring)"
 license.workspace = true
@@ -16,9 +16,9 @@ host-dependencies = [
 no-gc = ["cljrs-gc/no-gc", "cljrs-env/no-gc", "cljrs-value/no-gc", "cljrs-builtins/no-gc"]
 
 [dependencies]
-cljrs-env = { path = "../cljrs-env", version = "0.1.0", default-features = false }
+cljrs-env = { path = "../cljrs-env", version = "0.2.43", default-features = false }
 cljrs-types = { workspace = true }
-cljrs-builtins = { path = "../cljrs-builtins", version = "0.1.0", default-features = false }
+cljrs-builtins = { path = "../cljrs-builtins", version = "0.2.43", default-features = false }
 cljrs-value = { workspace = true }
 cljrs-gc = { workspace = true }
 cljrs-reader = { workspace = true }

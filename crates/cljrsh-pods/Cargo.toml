@@ -1,6 +1,6 @@
 [package]
 name = "cljrsh-pods"
-version = "0.1.0"
+version = "0.2.43"
 edition = "2024"
 description = "babashka pod protocol client for cljrsh: bencode over stdio, pod namespaces registered as native fns"
 license.workspace = true
