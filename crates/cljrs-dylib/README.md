@@ -65,7 +65,11 @@ pub const INIT_SYMBOL: &[u8];  // b"cljrs_dylib_init\0"
    (`~/.cljrs/cache/dylibs/<crate>@<commit>/fp-<hash>/`), pinning the same
    `cljrs-interop` as the host (local checkout path when found —
    `CLJRS_WORKSPACE_ROOT` override honored — else the published `=version`),
-   and built with cargo **in the host's profile** (debug/release —
+   **seeded with the host workspace's `Cargo.lock`** so shared third-party
+   crates resolve to the exact versions the host binary was built with
+   (observed failure without this: archery 1.2.2 host vs 1.2.3 wrapper
+   changed rpds vector node layout, corrupting every collection the package
+   returned), and built with cargo **in the host's profile** (debug/release —
    `cljrs-gc` object headers differ between profiles).
 5. dlopen → `cljrs_dylib_abi()` fingerprint must equal
    `abi_fingerprint()` exactly, else refuse → `cljrs_dylib_init(*mut

@@ -282,6 +282,20 @@ panic = "unwind"
     );
     std::fs::write(wrapper_dir.join("Cargo.toml"), cargo_toml).map_err(|e| e.to_string())?;
 
+    // Seed the wrapper's Cargo.lock from the host workspace so shared
+    // third-party crates resolve to the exact versions the host binary was
+    // built with. Without this, a patch-version drift in a crate whose
+    // values cross the ABI boundary (observed: archery 1.2.2 host vs 1.2.3
+    // wrapper, changing rpds vector node layout) corrupts collections
+    // returned by the package. cargo keeps compatible seeded entries and
+    // resolves only what the wrapper adds on top.
+    if let Some(root) = find_workspace_root() {
+        let host_lock = root.join("Cargo.lock");
+        if host_lock.exists() {
+            std::fs::copy(&host_lock, wrapper_dir.join("Cargo.lock")).map_err(|e| e.to_string())?;
+        }
+    }
+
     let build_rs = r#"fn main() {
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let version = std::process::Command::new(rustc)
