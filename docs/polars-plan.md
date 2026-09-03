@@ -122,7 +122,18 @@ dtype list.
 - Exit criteria: round-trip fibo-gen-clj's parquet output — scan, schema,
   head, collect, write — from the REPL.
 
-### Phase 2 — the lazy relational core
+### Phase 2 — the lazy relational core — DONE 2026-09-03
+
+All listed ops and expressions implemented (18 clojure.test tests / 48
+assertions). Exit criterion met: the position_eod LazyFrame program matches
+DuckDB's 1,201,941-row output exactly on keys and to float epsilon / the
+DECIMAL(20,4) quantum on values (gated: CLJRS_POLARS_FIBO=1 cargo test in
+the package). Findings: polars' `AsOfOptions` derives `allow_eq: false` —
+equal keys silently don't match unless set (we default to true, matching
+DuckDB ASOF and python-polars); off-spine trade dates need an explicit
+forward-asof alignment step where SQL's `trade_date <= as_of_date` filter
+is implicit; the interpreter special-cases `/` in call position, so the
+binding also registers `div`.
 
 - `select`, `with-columns`, `filter`, `sort`, `limit`, `rename`, `drop`.
 - `group-by` + `agg`; the aggregation expr family (sum/mean/min/max/count/
