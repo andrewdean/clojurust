@@ -164,12 +164,23 @@ github.com/andrewdean/cljrs-polars (private).
 - Docs: crate README per repo convention, a tutorial in `docs/tutorials`,
   and a worked fibo example.
 
-### Phase 4 (optional, later) — sugar and depth
+### Phase 4 (optional) — sugar and depth — data literals + Arrow IPC DONE 2026-09-03
 
-- `pl/expr` data-literal compiler; threading-macro-friendly aliases.
-- Categorical/struct/list dtypes beyond passthrough.
-- Arrow IPC interop with external processes (hand frames to DuckDB via IPC
-  instead of CSV).
+- **`pl/expr` data-literal compiler** — done. `(pl/expr [:op & args])`
+  with a keyword op head compiles to an expression, same op set as the
+  function DSL; bare scalars are literals, built handles pass through. For
+  programmatic query construction.
+- **Arrow IPC interop** — done. `read-ipc`/`scan-ipc` complete the round
+  trip (write-ipc! existed). Verified as a real cross-process handoff:
+  cljrs.polars → IPC file → pyarrow in a separate process, decimals
+  preserved losslessly (Arrow-native, unlike the f64 column marshalling).
+  Note: DuckDB 1.5.3 in this sandbox has only `arrow_scan` (C-data
+  pointer) and the file-reading `arrow` extension 404s, so the specific
+  "hand to DuckDB via IPC" demo isn't reproducible here — pyarrow is the
+  stand-in Arrow consumer. Any Arrow tool (pandas, DataFusion, DuckDB with
+  the extension) reads these files.
+- Still open (deferred): categorical/struct/list dtypes beyond passthrough;
+  threading-macro sugar.
 
 ---
 
