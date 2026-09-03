@@ -98,7 +98,18 @@ layered on later for programmatic query construction.
 
 ## Phases
 
-### Phase 1 — skeleton + IO + collect (the "it works" milestone)
+### Phase 1 — skeleton + IO + collect (the "it works" milestone) — DONE 2026-09-03
+
+Implemented at `~/dev/cljrs-polars` (git, pinned Polars 0.46.0); loaded
+end-to-end through the real `:rust/load :dylib` path and exercised against
+fibo-gen-clj's parquet (flat files, Hive-partitioned globs, DECIMAL columns).
+9 clojure.test tests / 27 assertions via an embedded-interpreter harness.
+Learnings folded back into clojurust: the dylib wrapper now seeds its
+Cargo.lock from the host workspace (an archery patch-version skew between
+host and wrapper corrupted every rpds collection crossing the boundary), and
+Polars *panics* abort the process across the dylib boundary (PolarsErrors
+propagate cleanly). Decimal → f64 marshalling added beyond the original v0
+dtype list.
 
 - Crate skeleton, dylib packaging, `cljrs.polars` registration, version pin.
 - `scan-parquet`, `scan-csv`, `read-parquet`, `read-csv` → LazyFrame/DataFrame
