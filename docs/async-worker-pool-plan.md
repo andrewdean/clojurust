@@ -246,6 +246,12 @@ mutable state is copied at the boundary.
 
 ## Memory pressure signaling
 
+> **Built** in isolates phase C5 (2026-09-10): `cljrs_gc::pressure` (levels, budget, chunked
+> live-byte publish, listeners, `effective_soft_limit`) and `cljrs_async::pressure` (the
+> `watch` mirror, `wait_until_below`, the `memory-pressure` builtins); the `cljrs-net` accept
+> loops park under Red. PSI/RSS inputs remain optional and unbuilt. Outcomes and deviations
+> are recorded in `user-reachable-isolates-plan.md`, "C5 outcomes".
+
 - **Per-isolate accounting** plus a global `AtomicUsize` of total live bytes (each isolate adjusts on
   collect). A coordinator watches per-isolate `GcStats` (live set, alloc rate).
 - The coordinator drives a `tokio::sync::watch<PressureLevel>` (Green/Yellow/Red) that every isolate

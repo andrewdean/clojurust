@@ -74,7 +74,7 @@ impl Default for GcConfig {
 }
 
 /// Get default hard limit: 1/4 of available RAM or 256MB minimum.
-fn default_hard_limit() -> usize {
+pub(crate) fn default_hard_limit() -> usize {
     // Try to get total RAM from system info
     #[cfg(target_os = "linux")]
     fn get_total_ram() -> Option<usize> {

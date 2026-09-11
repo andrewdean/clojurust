@@ -15,6 +15,12 @@
 | `src/lib.rs` | `init()` entry point; loads `clojure.rust.net.tcp`, `clojure.rust.net.frame`, `clojure.rust.net.udp`, `clojure.rust.net.tls`, `clojure.rust.net.unix`, `clojure.rust.net.quic`, `clojure.rust.net.h3`, `clojure.rust.net.http2`, and `clojure.rust.net` |
 | `src/pool_io.rs` | Shared pool tasks and bridge helpers: `ReadMsg`, `PoolStreamSetup`, `pool_reader`, `pool_writer`, `read_bridge`, `write_bridge`, `bytes_value`, `net_error` |
 | `src/tcp.rs` | `TcpStreamResource` (Vec<AbortHandle>), `TcpListenerResource` (Vec<AbortHandle>), pool-based connect/accept, `connect`/`listen`/`close` builtins |
+
+Every accept loop (`tcp`, `tls`, `unix`, `quic`) parks on
+`cljrs_async::pressure::wait_until_below(PressureLevel::Red)` before each
+accept: while the process is at Red memory pressure no new connection is
+accepted, so the kernel backlog pushes back on peers instead of the heap
+growing (isolates plan C5). Accepting resumes as soon as the level drops.
 | `src/frame.rs` | `FramerSpec` native object, stateful framers (`LinesFramer`, `DelimiterFramer`, `LengthPrefixedFramer`), `frame`/encode builtins |
 | `src/udp.rs` | `UdpSocketResource`, reader/writer tasks, `socket`/`close` builtins |
 | `src/tls.rs` | `TlsStreamResource` (Vec<AbortHandle>), `TlsListenerResource` (Vec<AbortHandle>), pool-based TLS connect/accept, `build_client_config`, `build_server_config`, `tls_connect_to`/`tls_listen_on`/`connect`/`listen`/`close` builtins |

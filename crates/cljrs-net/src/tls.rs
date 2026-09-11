@@ -262,6 +262,10 @@ async fn pool_tls_accept_loop(
         .unwrap_or_default();
 
     loop {
+        // C5: while the process is at Red memory pressure, stop accepting so
+        // the kernel backlog pushes back on peers instead of this heap growing
+        // (docs/user-reachable-isolates-plan.md).
+        cljrs_async::pressure::wait_until_below(cljrs_async::pressure::PressureLevel::Red).await;
         match listener.accept().await {
             Err(e) => {
                 let _ = conn_info_tx.send(Err(format!("accept error: {e}"))).await;

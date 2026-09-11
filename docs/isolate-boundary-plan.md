@@ -163,7 +163,7 @@ benchmark question, not settled against — but it is not the default we ship.
 | Step | Deliverable | Status |
 |---|---|---|
 | B2 (this doc) | Deep-copy-on-send + the four visibility guarantees (typed target, distinct parallel primitive, metered seam, located errors) | **first version — ship it** |
-| later | `shared-vec`/`shared-map` born-`Arc` payloads, demote-on-contamination; same boundary, refcount instead of copy | deferred, design recorded above |
+| later | `shared-vec`/`shared-map` born-`Arc` payloads, demote-on-contamination; same boundary, refcount instead of copy | **no-go for now** (isolates C5 review, 2026-09-10): deserialize dominates the measured cost, so the payload form alone saves at most a third; go criteria and numbers in `user-reachable-isolates-plan.md` |
 
 Landing the first version — isolates that run in parallel, each collecting independently, with an
 honest and observable copy boundary — is a real step forward on its own. The zero-copy fast path is

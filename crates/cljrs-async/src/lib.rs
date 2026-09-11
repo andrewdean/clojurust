@@ -25,6 +25,7 @@ pub mod isolate;
 mod isolate_builtins;
 mod isolate_call;
 pub mod isolate_channel;
+pub mod pressure;
 mod runtime;
 pub mod state_machine;
 pub mod worker_pool;
@@ -73,6 +74,7 @@ pub fn init(globals: &Arc<cljrs_env::env::GlobalEnv>) {
     builtins::register(globals, ns);
     isolate_builtins::register(globals, ns);
     isolate_call::register(globals, ns);
+    pressure::register(globals, ns);
     load_source(globals, ns, CORE_ASYNC_SOURCE);
     globals.mark_loaded(ns);
 

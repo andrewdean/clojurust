@@ -233,8 +233,14 @@ while Clojure logic stays on its isolate.
   larger message over chattering many small ones, and don't fan a large value out
   to many workers without expecting the copy cost.
 - **Watch the meter.** Run with `--gc-stats` to see bytes copied and time spent
-  at the boundary. If one value dominates, that is the value to restructure (or,
-  later, to make zero-copy).
+  at the boundary, the largest single crossing, and how crossings split across
+  the `<=4 KiB` / `<=256 KiB` / `>256 KiB` buckets. If the large bucket
+  dominates, that is the value to restructure (or, later, to make zero-copy).
+- **Mind process-wide pressure.** Isolates collect independently, but the
+  process shares one memory budget. Under `:yellow` every heap collects
+  earlier; under `:red` the built-in accept loops stop taking connections.
+  `(memory-pressure)` reports the level and `(await (memory-pressure-below :red))`
+  parks until shedding ends; see the [memory chapter](../memory/index.md#process-memory-pressure).
 - **Let failures guide you.** A located "cannot cross" error usually means a
   closure or a stateful object slipped into your message. Replace it with plain
   data.
@@ -242,10 +248,11 @@ while Clojure logic stays on its isolate.
 ## Looking ahead
 
 The boundary that ships today is **deep-copy-on-send** with the four visibility
-guarantees above. A future phase adds a **zero-copy fast path** — explicitly
-constructed `shared-vec`/`shared-map` values that are born in the `Arc`-backed
-shared representation and cross by refcount instead of by copy, demoting back to
-ordinary GC-backed collections the moment they hold something non-shareable. The
-boundary itself does not move; the telemetry from the metered seam is what will
-tell you which values are worth promoting to that form. See
-`docs/isolate-boundary-plan.md` for the full design.
+guarantees above. The designed **zero-copy fast path** — explicitly constructed
+`shared-vec`/`shared-map` values born in the `Arc`-backed shared representation
+that cross by refcount instead of by copy — was reviewed against the boundary
+telemetry in isolates phase C5 and is **not scheduled**: the measured copy cost
+is small for the payload sizes that cross today, and the fast path only pays
+off once the `>256 KiB` bucket dominates a real workload. The go criteria are
+recorded in `docs/user-reachable-isolates-plan.md`; the boundary itself does not
+move either way. See `docs/isolate-boundary-plan.md` for the full design.

@@ -40,6 +40,11 @@ a collection is triggered at the next safepoint.
 Hard memory limit for the GC in megabytes. When live heap exceeds this value,
 a collection is forced immediately.
 
+Both limits are per isolate heap. The process-wide budget that drives the
+memory-pressure level across all isolates is set with the
+`CLJRS_GC_PROCESS_LIMIT_MB` environment variable (see
+[Process memory pressure](../memory/index.md#process-memory-pressure)).
+
 ## Examples
 
 ```

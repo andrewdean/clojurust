@@ -58,6 +58,33 @@ CLJRS_GC_STATS=stats.txt ./myapp # write the summary to a file
 
 The summary reports GC allocations and bytes, **region (bump) allocations and
 bytes**, GC collection count, total pause time, and objects/bytes freed — so
-you can see how much work the bump allocator is taking off the GC. The
-interpreter exposes the same counters through the `cljrs --gc-stats [FILE]`
-flag.
+you can see how much work the bump allocator is taking off the GC. It also
+reports isolate-boundary crossings (count, bytes copied, the largest single
+crossing, and a `<=4 KiB` / `<=256 KiB` / `>256 KiB` size histogram) and the
+process memory-pressure line described below. The interpreter exposes the
+same counters through the `cljrs --gc-stats [FILE]` flag.
+
+## Process memory pressure
+
+Every isolate owns its own heap and collects on its own schedule, so no single
+heap can see that the *process* is close to its memory budget. A process-wide
+coordinator sums the live bytes of every heap and derives a graduated level:
+
+| Level | Enters at | Leaves below | Response |
+|---|---|---|---|
+| `:green` | — | — | none |
+| `:yellow` | 75 % of budget | 70 % | every heap collects at half its soft limit |
+| `:red` | 90 % of budget | 85 % | heaps collect at a quarter of their soft limit; network accept loops stop accepting until the level drops |
+
+The budget defaults to the same RAM-derived value as a single heap's hard
+limit (a quarter of RAM, capped at 4 GiB). Set `CLJRS_GC_PROCESS_LIMIT_MB` to
+override it, or to `0` to turn the coordinator off. Heaps report in 1 MiB
+steps, so the hot allocation path touches the shared counter once per
+megabyte rather than per object.
+
+From Clojure, `(clojure.core.async/memory-pressure)` returns the current
+level as a keyword and `(await (memory-pressure-below :red))` parks an async
+body until load shedding ends — the hook for a server loop that wants to stop
+taking from `:conns` itself. Transitions are counted on the
+`Memory pressure:` line of the GC stats summary and logged under the `gc`
+debug feature.
