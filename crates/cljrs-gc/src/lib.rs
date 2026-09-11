@@ -16,6 +16,7 @@ pub mod config;
 #[cfg(feature = "no-gc")]
 pub mod alloc_ctx;
 pub mod debug_modes;
+pub mod pressure;
 pub mod stack_scan;
 #[cfg(feature = "no-gc")]
 pub mod static_arena;
@@ -540,6 +541,10 @@ mod gc_full {
         suppressed_threshold: AtomicUsize,
         /// Current headroom used for exponential backoff after zero-yield cycles.
         zero_yield_headroom: AtomicUsize,
+        /// Live bytes this heap last reported to the process-wide pressure
+        /// coordinator (`crate::pressure`).  Updated in `PUBLISH_CHUNK`
+        /// steps from `alloc`, exactly from `collect`, and released on drop.
+        published_live: AtomicUsize,
     }
 
     struct GcHeapInner {
@@ -625,6 +630,32 @@ mod gc_full {
                 gc_suppressed: std::sync::atomic::AtomicBool::new(false),
                 suppressed_threshold: AtomicUsize::new(0),
                 zero_yield_headroom: AtomicUsize::new(0),
+                published_live: AtomicUsize::new(0),
+            }
+        }
+
+        /// Report this heap's live bytes to the process-wide pressure
+        /// coordinator.  Unless `force`d, only a drift of at least
+        /// `PUBLISH_CHUNK` from the last report is published, so the
+        /// allocation path touches the shared counter once per chunk.
+        fn publish_live(&self, current: usize, force: bool) {
+            let published = self.published_live.load(Ordering::Relaxed);
+            if !force && current.abs_diff(published) < crate::pressure::PUBLISH_CHUNK {
+                return;
+            }
+            // A heap is used from its own thread, but `collect` and `alloc`
+            // may both publish; the CAS keeps two publishes from double
+            // counting the same delta.
+            if self
+                .published_live
+                .compare_exchange(published, current, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                if current >= published {
+                    crate::pressure::add_live(current - published);
+                } else {
+                    crate::pressure::sub_live(published - current);
+                }
             }
         }
 
@@ -679,9 +710,13 @@ mod gc_full {
             crate::stats::GC_STATS.record_gc_alloc(obj_size);
             let current_usage =
                 self.memory_in_use.fetch_add(obj_size, Ordering::Relaxed) + obj_size;
+            self.publish_live(current_usage, false);
 
+            // The soft limit shrinks under process-wide memory pressure
+            // (Yellow: half, Red: a quarter) so every isolate collects
+            // earlier while the process as a whole is near its budget.
             if let Some(config) = self.config.lock().unwrap().as_ref()
-                && config.soft_limit_exceeded(current_usage)
+                && current_usage > crate::pressure::effective_soft_limit(config.soft_limit())
             {
                 if self.gc_suppressed.load(Ordering::Relaxed) {
                     // Suppression active: only re-enable GC once memory has
@@ -813,6 +848,9 @@ mod gc_full {
             // freed objects are subtracted.  This keeps memory pressure
             // accurate so GC fires again when the heap genuinely grows.
             self.memory_in_use.fetch_sub(freed_bytes, Ordering::Relaxed);
+            // Collections are rare and are where live bytes drop, so report
+            // exactly rather than waiting for the next chunk of growth.
+            self.publish_live(self.memory_in_use.load(Ordering::Relaxed), true);
             let sweep_elapsed = sweep_start.elapsed();
             crate::stats::GC_STATS.record_gc_pause(
                 mark_elapsed + sweep_elapsed,
@@ -885,6 +923,16 @@ mod gc_full {
             };
             self.collect(|visitor| self.trace_registered_roots(visitor));
             true
+        }
+    }
+
+    impl Drop for GcHeap {
+        /// An isolate thread exiting takes its heap with it: give the bytes
+        /// back to the process-wide pressure count so a pool that churns
+        /// workers cannot ratchet the level upward.
+        fn drop(&mut self) {
+            let published = self.published_live.load(Ordering::Relaxed);
+            crate::pressure::sub_live(published);
         }
     }
 

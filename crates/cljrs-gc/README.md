@@ -77,6 +77,11 @@ src/
                     register_mutator also records the stack-scan ceiling
   config.rs       — (GC mode) GcConfig, GcCancellation (zero-sized proxy),
                     IsolateCancellation thread-local (per-isolate STW state), GcParked
+  pressure.rs     — process-wide memory-pressure coordinator (isolates plan
+                    C5): PressureLevel (Green/Yellow/Red), the summed live
+                    bytes of every heap against a process budget
+                    (CLJRS_GC_PROCESS_LIMIT_MB), hysteresis thresholds,
+                    transition listeners, effective_soft_limit scaling
   stack_scan.rs   — (GC mode) conservative stack scan: an additional root
                     source that marks live objects whose address appears in
                     a word of the collecting thread's stack (closes the
@@ -89,8 +94,9 @@ src/
                     collection every Nth safepoint)
   stats.rs        — process-global GcStats counters: GC allocations,
                     region (bump) allocations, GC pauses + freed bytes/objects,
-                    conservative-scan rescues,
-                    isolate-boundary crossings (bytes copied + serialize time)
+                    conservative-scan rescues, pressure-level transitions,
+                    isolate-boundary crossings (bytes copied + serialize time,
+                    largest crossing, three-bucket size histogram)
 tests/
   no_gc_alloc.rs  — (no-gc mode) integration tests for the allocation context stack:
                     ScratchGuard, StaticCtxGuard, InvocationGuard,
@@ -308,6 +314,49 @@ Every rescue — an object precise marking missed — increments the
 `Conservative rescues` counter in `GcStats` and logs at debug level.  A
 nonzero count is the audit signal for a remaining unrooted path.
 
+### `pressure`
+
+```rust
+#[repr(u8)]
+pub enum PressureLevel { Green = 0, Yellow = 1, Red = 2 }   // Ord: Green < Yellow < Red
+impl PressureLevel { pub fn as_str(self) -> &'static str; pub fn parse(&str) -> Option<Self>; }
+
+pub const CLJRS_GC_PROCESS_LIMIT_ENV: &str;   // = "CLJRS_GC_PROCESS_LIMIT_MB"
+pub const PUBLISH_CHUNK: usize;               // 1 MiB: per-heap publish granularity
+
+pub fn level() -> PressureLevel;              // one relaxed atomic load
+pub fn live_bytes() -> usize;                 // sum of every heap's published live bytes
+pub fn peak_live_bytes() -> usize;
+pub fn budget() -> usize;                     // 0 = coordinator off
+pub fn budget_from_env() -> usize;
+pub fn set_budget(bytes: usize);              // re-derives the level
+pub fn on_change(f: impl Fn(PressureLevel) + Send + Sync + 'static);
+pub fn effective_soft_limit(soft_limit: usize) -> usize;  // Green ×1, Yellow ×½, Red ×¼
+pub fn add_live(bytes: usize);                // embedders with their own allocators
+pub fn sub_live(bytes: usize);                // saturating
+```
+
+Every isolate heap collects on its own, so none of them can see that the
+*process* is near its budget.  Each `GcHeap` publishes its live bytes to a
+process-global counter in `PUBLISH_CHUNK` steps from `alloc` (so the hot path
+touches the shared cache line once per megabyte, not per object), exactly
+after every `collect`, and releases them on drop when its isolate thread
+exits.  The coordinator derives the level from that sum against the budget:
+Yellow enters at 75 % and leaves below 70 %, Red enters at 90 % and leaves
+below 85 % (hysteresis so a heap oscillating around a threshold does not
+flap the level).  The budget defaults to the same RAM-derived value as a
+single heap's default hard limit; `CLJRS_GC_PROCESS_LIMIT_MB` overrides it and
+`0` disables the coordinator.
+
+Responses are local and graduated.  `GcHeap::alloc` compares its live bytes
+against `effective_soft_limit`, so every isolate collects earlier under
+Yellow and Red (the zero-yield suppression still applies, so an all-live
+heap does not storm).  `cljrs-async` mirrors transitions into a
+`tokio::sync::watch` (`cljrs_async::pressure`) so async code can park until
+the level drops; the `cljrs-net` accept loops use that to stop accepting under
+Red, letting the kernel backlog push back on peers.  Transitions are counted
+in `GcStats` and logged at debug level.
+
 ### `debug_modes` (GC mode)
 
 ```rust
@@ -404,10 +453,14 @@ impl GcStats {
     pub fn record_gc_pause(&self, pause: Duration, freed_objects: u64, freed_bytes: u64)
     pub fn record_boundary_crossing(&self, bytes: u64, copy_time: Duration)
     pub fn record_conservative_rescues(&self, count: u64)
+    pub fn record_pressure_transition(&self)
     pub fn snapshot(&self) -> GcStatsSnapshot
 }
 
-pub struct GcStatsSnapshot { /* immutable view of counters */ }
+pub struct GcStatsSnapshot { /* immutable view of counters; also the pressure level,
+                                 live/peak/budget bytes, and boundary max + buckets */ }
+pub const BOUNDARY_SMALL_MAX: u64;    // 4 KiB   — a typical request map
+pub const BOUNDARY_MEDIUM_MAX: u64;   // 256 KiB — above this a copy shows up as latency
 impl GcStatsSnapshot {
     pub fn total_pause(&self) -> Duration
     pub fn total_boundary_copy(&self) -> Duration
@@ -426,10 +479,14 @@ flag prints a snapshot of these counters at program exit.
 
 `record_boundary_crossing` is the **metered isolate-boundary seam** required by
 `docs/isolate-boundary-plan.md`: every value deep-copied across an isolate
-boundary (the Phase B2 structured-clone in `cljrs-async`'s `IsolateSender::send`)
-records its estimated bytes copied and serialize time here, so a silent fan-out
-copy shows up in `--gc-stats` as `Boundary crossings: N (B bytes copied)` rather
-than as mystery latency.
+boundary (the Phase B2 structured-clone in `cljrs-async`'s `IsolateSender::send`
+and `isolate-call`) records its estimated bytes copied and serialize time here,
+so a silent fan-out copy shows up in `--gc-stats` as
+`Boundary crossings: N (B bytes copied, largest L bytes)` rather than as mystery
+latency.  The C5 telemetry review added the largest single crossing and a
+three-bucket size histogram (`<=4 KiB`, `<=256 KiB`, `>256 KiB`): the
+`shared-vec` zero-copy path only pays off for the large bucket, so those two
+lines are what the go/no-go in `docs/user-reachable-isolates-plan.md` reads.
 
 `dump_stats_from_env()` is the AOT-binary equivalent: it reads the
 `CLJRS_GC_STATS` environment variable and, if set, writes a snapshot to

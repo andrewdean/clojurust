@@ -16,7 +16,11 @@
 //!    `boundary_crossings`, accumulates the estimated bytes copied, and the
 //!    time spent serializing. This is the metering the isolate-boundary plan
 //!    requires so a silent fan-out copy shows up as a number, not mystery
-//!    latency.
+//!    latency.  The largest single crossing and a three-bucket size
+//!    histogram (C5 telemetry review) say *which* values dominate: the
+//!    `shared-vec` zero-copy path only pays off for the large bucket.
+//! 5. **Memory-pressure transitions** — every change of the process-wide
+//!    [`crate::pressure::PressureLevel`].
 //!
 //! Counters are process-global ([`GC_STATS`]) and thread-safe via atomics.
 //! Reset is not supported — the counters live for the lifetime of the process.
@@ -39,8 +43,26 @@ pub struct GcStats {
     boundary_crossings: AtomicU64,
     boundary_bytes_copied: AtomicU64,
     boundary_copy_total_nanos: AtomicU64,
+    boundary_max_bytes: AtomicU64,
+    boundary_small: AtomicU64,
+    boundary_medium: AtomicU64,
+    boundary_large: AtomicU64,
     conservative_rescues: AtomicU64,
+    pressure_transitions: AtomicU64,
 }
+
+/// Upper bound (inclusive) of the "small" boundary-crossing bucket.
+///
+/// 4 KiB is a typical request or reply map: a crossing this size costs
+/// about as much as the channel operation carrying it, so nothing here is
+/// worth making zero-copy.
+pub const BOUNDARY_SMALL_MAX: u64 = 4 * 1024;
+/// Upper bound (inclusive) of the "medium" bucket.
+///
+/// Up to 256 KiB the deep copy is still tens of microseconds; above it a
+/// crossing starts to show up as latency, which is where a refcount bump
+/// instead of a copy would matter.
+pub const BOUNDARY_MEDIUM_MAX: u64 = 256 * 1024;
 
 impl GcStats {
     pub const fn new() -> Self {
@@ -57,7 +79,12 @@ impl GcStats {
             boundary_crossings: AtomicU64::new(0),
             boundary_bytes_copied: AtomicU64::new(0),
             boundary_copy_total_nanos: AtomicU64::new(0),
+            boundary_max_bytes: AtomicU64::new(0),
+            boundary_small: AtomicU64::new(0),
+            boundary_medium: AtomicU64::new(0),
+            boundary_large: AtomicU64::new(0),
             conservative_rescues: AtomicU64::new(0),
+            pressure_transitions: AtomicU64::new(0),
         }
     }
 
@@ -108,6 +135,21 @@ impl GcStats {
             .fetch_add(bytes, Ordering::Relaxed);
         self.boundary_copy_total_nanos
             .fetch_add(copy_time.as_nanos() as u64, Ordering::Relaxed);
+        self.boundary_max_bytes.fetch_max(bytes, Ordering::Relaxed);
+        let bucket = if bytes <= BOUNDARY_SMALL_MAX {
+            &self.boundary_small
+        } else if bytes <= BOUNDARY_MEDIUM_MAX {
+            &self.boundary_medium
+        } else {
+            &self.boundary_large
+        };
+        bucket.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record one transition of the process-wide memory-pressure level.
+    #[inline]
+    pub fn record_pressure_transition(&self) {
+        self.pressure_transitions.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record objects the conservative stack scan rescued in one
@@ -135,7 +177,16 @@ impl GcStats {
             boundary_crossings: self.boundary_crossings.load(Ordering::Relaxed),
             boundary_bytes_copied: self.boundary_bytes_copied.load(Ordering::Relaxed),
             boundary_copy_total_nanos: self.boundary_copy_total_nanos.load(Ordering::Relaxed),
+            boundary_max_bytes: self.boundary_max_bytes.load(Ordering::Relaxed),
+            boundary_small: self.boundary_small.load(Ordering::Relaxed),
+            boundary_medium: self.boundary_medium.load(Ordering::Relaxed),
+            boundary_large: self.boundary_large.load(Ordering::Relaxed),
             conservative_rescues: self.conservative_rescues.load(Ordering::Relaxed),
+            pressure_transitions: self.pressure_transitions.load(Ordering::Relaxed),
+            pressure_level: crate::pressure::level(),
+            pressure_live_bytes: crate::pressure::live_bytes() as u64,
+            pressure_peak_bytes: crate::pressure::peak_live_bytes() as u64,
+            pressure_budget_bytes: crate::pressure::budget() as u64,
         }
     }
 }
@@ -161,7 +212,25 @@ pub struct GcStatsSnapshot {
     pub boundary_crossings: u64,
     pub boundary_bytes_copied: u64,
     pub boundary_copy_total_nanos: u64,
+    /// Largest single crossing, in estimated bytes.
+    pub boundary_max_bytes: u64,
+    /// Crossings of at most [`BOUNDARY_SMALL_MAX`] bytes.
+    pub boundary_small: u64,
+    /// Crossings above small and at most [`BOUNDARY_MEDIUM_MAX`] bytes.
+    pub boundary_medium: u64,
+    /// Crossings above [`BOUNDARY_MEDIUM_MAX`] bytes.
+    pub boundary_large: u64,
     pub conservative_rescues: u64,
+    /// Level changes of the process-wide pressure coordinator.
+    pub pressure_transitions: u64,
+    /// Pressure level at snapshot time.
+    pub pressure_level: crate::pressure::PressureLevel,
+    /// Process live bytes as published by every heap at snapshot time.
+    pub pressure_live_bytes: u64,
+    /// High-water mark of `pressure_live_bytes`.
+    pub pressure_peak_bytes: u64,
+    /// Process memory budget; zero means the coordinator is off.
+    pub pressure_budget_bytes: u64,
 }
 
 impl GcStatsSnapshot {
@@ -196,15 +265,29 @@ impl fmt::Display for GcStatsSnapshot {
         writeln!(f, "  Bytes freed by GC:     {}", self.gc_bytes_freed)?;
         writeln!(
             f,
-            "  Boundary crossings:    {} ({} bytes copied)",
-            self.boundary_crossings, self.boundary_bytes_copied
+            "  Boundary crossings:    {} ({} bytes copied, largest {} bytes)",
+            self.boundary_crossings, self.boundary_bytes_copied, self.boundary_max_bytes
+        )?;
+        writeln!(
+            f,
+            "  Boundary size buckets: <=4 KiB: {}, <=256 KiB: {}, >256 KiB: {}",
+            self.boundary_small, self.boundary_medium, self.boundary_large
         )?;
         writeln!(
             f,
             "  Boundary copy time:    {:.3?}",
             self.total_boundary_copy()
         )?;
-        write!(f, "  Conservative rescues:  {}", self.conservative_rescues)
+        writeln!(f, "  Conservative rescues:  {}", self.conservative_rescues)?;
+        write!(
+            f,
+            "  Memory pressure:       {} ({} live of {} budget bytes, peak {}, {} transitions)",
+            self.pressure_level,
+            self.pressure_live_bytes,
+            self.pressure_budget_bytes,
+            self.pressure_peak_bytes,
+            self.pressure_transitions
+        )
     }
 }
 
@@ -299,6 +382,29 @@ mod tests {
         assert_eq!(snap.boundary_crossings, 2);
         assert_eq!(snap.boundary_bytes_copied, 3072);
         assert_eq!(snap.total_boundary_copy(), Duration::from_micros(50));
+        assert_eq!(snap.boundary_max_bytes, 2048);
+        assert_eq!(snap.boundary_small, 2);
+        assert_eq!(snap.boundary_medium, 0);
+        assert_eq!(snap.boundary_large, 0);
+    }
+
+    #[test]
+    fn boundary_buckets_split_on_documented_edges() {
+        let stats = GcStats::new();
+        stats.record_boundary_crossing(BOUNDARY_SMALL_MAX, Duration::ZERO);
+        stats.record_boundary_crossing(BOUNDARY_SMALL_MAX + 1, Duration::ZERO);
+        stats.record_boundary_crossing(BOUNDARY_MEDIUM_MAX, Duration::ZERO);
+        stats.record_boundary_crossing(BOUNDARY_MEDIUM_MAX + 1, Duration::ZERO);
+        let snap = stats.snapshot();
+        assert_eq!(
+            (
+                snap.boundary_small,
+                snap.boundary_medium,
+                snap.boundary_large
+            ),
+            (1, 2, 1)
+        );
+        assert_eq!(snap.boundary_max_bytes, BOUNDARY_MEDIUM_MAX + 1);
     }
 
     #[test]
@@ -316,7 +422,16 @@ mod tests {
             boundary_crossings: 4,
             boundary_bytes_copied: 8192,
             boundary_copy_total_nanos: 2_000_000,
+            boundary_max_bytes: 4096,
+            boundary_small: 3,
+            boundary_medium: 1,
+            boundary_large: 0,
             conservative_rescues: 1,
+            pressure_transitions: 2,
+            pressure_level: crate::pressure::PressureLevel::Yellow,
+            pressure_live_bytes: 800,
+            pressure_peak_bytes: 900,
+            pressure_budget_bytes: 1000,
         };
         let s = format!("{snap}");
         assert!(s.contains("GC allocations:"));
@@ -328,6 +443,11 @@ mod tests {
         assert!(s.contains("Conservative rescues:"));
         assert!(s.contains("Bytes freed by GC:"));
         assert!(s.contains("Boundary crossings:"));
+        assert!(s.contains("largest 4096 bytes"));
+        assert!(s.contains("Boundary size buckets: <=4 KiB: 3, <=256 KiB: 1, >256 KiB: 0"));
         assert!(s.contains("Boundary copy time:"));
+        assert!(s.contains(
+            "Memory pressure:       yellow (800 live of 1000 budget bytes, peak 900, 2 transitions)"
+        ));
     }
 }

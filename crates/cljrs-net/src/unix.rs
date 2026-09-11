@@ -333,6 +333,10 @@ async fn accept_loop(
     out_buf: usize,
 ) {
     loop {
+        // C5: while the process is at Red memory pressure, stop accepting so
+        // the kernel backlog pushes back on peers instead of this heap growing
+        // (docs/user-reachable-isolates-plan.md).
+        cljrs_async::pressure::wait_until_below(cljrs_async::pressure::PressureLevel::Red).await;
         match listener.accept().await {
             Err(e) => {
                 chan_put(&conns_chan, net_error(format!("unix accept error: {e}"))).await;

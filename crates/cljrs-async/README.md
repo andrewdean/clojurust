@@ -46,6 +46,14 @@ Done (Phases A–H, A2, B1):
   never sleeps — an idle daemon parked on `(await (a/timeout ...))` pinned a full core.
   Every `FutureState` writer must settle via `CljxFuture::notify_settled`.
   Regression: `tests/await_parks.rs`.
+- Phase C5 (isolates plan): `pressure` — mirrors `cljrs_gc::pressure` transitions into
+  a `tokio::sync::watch` (`subscribe`, `wait_until_below`) so async code on the LocalSet
+  or the worker pool parks until process memory pressure drops; Clojure-level
+  `(memory-pressure)` → `:green`/`:yellow`/`:red` and `(memory-pressure-below level)` →
+  a future that resolves once the level is strictly below `level`. The `cljrs-net`
+  accept loops call `wait_until_below(Red)` before every accept. Tests: `tests/pressure.rs`;
+  `tests/boundary_throughput.rs` is the ignored copy-cost measurement behind the
+  `shared-vec` go/no-go.
 - Phase A2: `WorkerPool` singleton — multi-thread Tokio runtime for `Send` byte-level tasks
   (`WorkerPool::global()`, `offload`, `handle`). Pool tasks carry only `Vec<u8>`, `String`, and
   `Send` channel types; `GcPtr`/`Value` construction is confined to LocalSet bridge tasks.
@@ -201,12 +209,15 @@ blocking bridge is a later phase.
 | `src/isolate.rs` | `Isolate` — per-isolate execution context: dedicated OS thread, `current_thread` Tokio runtime + `LocalSet`, and independent GC heap (thread-local). `Isolate::spawn` initializes GC state and runs the entry-point future |
 | `src/isolate_channel.rs` | `IsolateSender` / `IsolateReceiver` / `isolate_channel()` — cross-isolate copy boundary (Phase B2): structured-clone of `Value` through a `SerializedValue` wire form over a tokio unbounded MPSC channel; `IsolateRecv`/`try_recv_status` distinguish empty from disconnected for the Clojure builtins |
 | `src/isolate_builtins.rs` | Clojure-level surface for the copy boundary: `CljIsolateTx`/`CljIsolateRx` native objects and the `isolate-chan` / `isolate-put!` / `isolate-poll!` / `isolate-take!` builtins |
+| `src/pressure.rs` | Process memory-pressure mirror (isolates plan C5): `subscribe()` → `watch::Receiver<PressureLevel>`, `wait_until_below(level)`, `level()`, re-exported `PressureLevel`; Clojure builtins `memory-pressure` and `memory-pressure-below` registered into `clojure.core.async` |
 | `src/worker_pool.rs` | `WorkerPool` singleton: multi-thread Tokio runtime (`new_multi_thread`) for `Send` pool tasks; wasm32 stub; `offload` bridges pool results to LocalSet via oneshot; `handle` for direct multi-task spawning |
 | `tests/error_propagation.rs` | integration tests for the `<?` family and `clojure.rust.error` helpers |
 | `tests/async_fn.rs` | integration tests for dispatch, `await`, `deref` enforcement, `timeout`/`alts`/`alt`, channels, Phase F utilities, and `<!!`/`>!!` |
 | `tests/worker_pool.rs` | Phase A2 integration tests: offload, concurrent tasks, handle spawning, LocalSet context, singleton invariant, byte processing round-trip |
 | `tests/isolate_channel_clj.rs` | Clojure-level Phase B2 tests: `isolate-chan` pair, put/poll round-trip, FIFO order, located error on a non-shareable value, async `isolate-take!` |
 | `tests/loop_alloc_roots.rs` | regression: async `loop*` back-edges release per-iteration alloc roots (the 42 GiB inbox-watch leak) |
+| `tests/pressure.rs` | C5: the watch mirror follows GC-side transitions, a parked `wait_until_below(Red)` waiter wakes when the level drops, and the `memory-pressure` / `memory-pressure-below` builtins report and await the level |
+| `tests/boundary_throughput.rs` | C5 (ignored): serialize/deserialize cost of one boundary crossing at 100 / 10k / 100k items — the measurement behind the `shared-vec` go/no-go in `docs/user-reachable-isolates-plan.md` |
 | `tests/await_parks.rs` | regression: `await` on a pending future/promise parks (waker-registered) instead of spinning; idle-runtime CPU guard (the mised.cljrs pegged-core bug) |
 
 ## Public API

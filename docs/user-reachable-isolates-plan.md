@@ -27,7 +27,7 @@ Status survey that produced this plan (2026-08-30):
 | Waker-based parking | **done** — core paths 2026-08-27; residual spins converted in C1 |
 | Clojure-level isolate spawn | missing |
 | Agents | missing — `send` errors "not yet implemented" |
-| Memory-pressure coordinator | designed, not built |
+| Memory-pressure coordinator | **built** — C5, 2026-09-10 (`cljrs-gc/src/pressure.rs`, `cljrs-async/src/pressure.rs`) |
 | `ref`/STM | absent (declared a non-goal below) |
 
 ## Decisions
@@ -112,8 +112,8 @@ README ("agent (with send/await)" complete), TODO Phase 7, and CLAUDE.md
 change that lands D3. Declare `ref`/`dosync` a **non-goal**: STM exists to
 coordinate shared mutable state across threads, and the model's answer to that
 is isolates + `shared-atom`; a same-thread STM would be ceremony. The
-memory-pressure coordinator stays designed-not-built until a multi-isolate
-workload exists to signal — it is sequenced after D2, not before.
+memory-pressure coordinator was sequenced after D2, not before, so that a
+multi-isolate workload existed to signal; it landed in C5.
 
 ## Phase plan
 
@@ -123,11 +123,83 @@ workload exists to signal — it is sequenced after D2, not before.
 | C2 | Isolate handles, `isolate-call`, reply futures, `pfuture` + default pool (D1, D2) — **done 2026-08-30** (`isolate_call.rs`; two concurrent calls verified ≈1× wall-clock of one) | `cljrs-async` |
 | C3 | Agents as loop-async mailboxes; docs truth pass rides along (D3, D6) — **done 2026-08-30** (`schedule_agent_drain` on the AsyncRuntime hook; `(await agent)`; README/TODO/CLAUDE.md/divergences corrected) | `cljrs-async`, `cljrs-value`, `cljrs-builtins`, docs |
 | C4 | Arc-backed `SharedValue` collections; `shared-atom` holds maps (D4) — **done 2026-08-30** (flat `Arc<[SharedValue]>` slices, promote-on-publish, demote-on-read; the zero-copy read view stays deferred with `shared-vec`) | `cljrs-value` |
-| C5 | Pressure coordinator (`watch<PressureLevel>` per the existing design), boundary-telemetry review, `shared-vec` go/no-go | `cljrs-gc`, `cljrs-async` |
+| C5 | Pressure coordinator (`watch<PressureLevel>` per the existing design), boundary-telemetry review, `shared-vec` go/no-go — **done 2026-09-10** (see "C5 outcomes") | `cljrs-gc`, `cljrs-async`, `cljrs-net` |
 
 C1 is a prerequisite for C2. C3 and C4 are independent of each other and can
 interleave. C5 is deliberately last — it consumes telemetry the earlier phases
 produce.
+
+## C5 outcomes (2026-09-10)
+
+### Pressure coordinator — built
+
+`cljrs_gc::pressure` sums every heap's live bytes into one process counter
+and derives `PressureLevel` (Green/Yellow/Red) against a process budget
+(`CLJRS_GC_PROCESS_LIMIT_MB`, default = the RAM-derived single-heap hard
+limit; `0` = off). Yellow enters at 75 % and leaves below 70 %; Red enters at
+90 % and leaves below 85 % — hysteresis so a heap oscillating around a
+threshold does not flap the level. Deviations from the ADR sketch, each
+deliberate:
+
+- **Chunked publish, not per-alloc.** A heap reports in 1 MiB steps from
+  `alloc`, exactly after every `collect`, and releases its bytes on drop
+  when its isolate thread exits. One shared atomic per megabyte keeps the
+  isolates from bouncing a cache line on every `conj`, which is the traffic
+  the isolate model exists to avoid.
+- **The `watch` lives in `cljrs-async`, not `cljrs-gc`.** The GC crate has no
+  Tokio dependency; it exposes `on_change` listeners, and
+  `cljrs_async::pressure` mirrors transitions into a `tokio::sync::watch`
+  (`subscribe`, `wait_until_below`).
+- **Responses are local and graduated, as designed.** `GcHeap::alloc`
+  compares against `effective_soft_limit` (Yellow ×½, Red ×¼; the
+  zero-yield suppression still applies). Every `cljrs-net` accept loop
+  (`tcp`, `tls`, `unix`, `quic`) parks on `wait_until_below(Red)` before each
+  accept, so Red stops accepting and the kernel backlog pushes back on peers.
+  Clojure sees `(memory-pressure)` and `(await (memory-pressure-below :red))`
+  for loops that want to stop taking from `:conns` themselves.
+- **No PSI / RSS inputs.** The Linux cgroup-v2 PSI and RSS-watermark signals
+  stay optional and unbuilt; the published live-byte sum is the only input
+  until a deployment shows the heap sum diverging from real RSS.
+
+### Boundary-telemetry review
+
+The B2 meter reported only totals (crossings, bytes, time), which cannot say
+*which* values would justify a zero-copy form. `GcStats` now also records the
+largest single crossing and a three-bucket size histogram (`<=4 KiB`,
+`<=256 KiB`, `>256 KiB`), shown on the `--gc-stats` `Boundary` lines. The
+buckets are the decision input below.
+
+### `shared-vec` go/no-go — **no-go for now**
+
+Measured on arm64 macOS, release build, `cargo test --release -p cljrs-async
+--test boundary_throughput -- --ignored --nocapture`, one crossing of a
+vector of `{:id :name :tags :score}` maps:
+
+| items | est. bytes | serialize | deserialize |
+|---|---|---|---|
+| 100 | 72 KiB | 17 µs | 95 µs |
+| 10 000 | 7.0 MiB | 3.1 ms | 12.5 ms |
+| 100 000 | 69.7 MiB | 105 ms | 114 ms |
+
+Two things follow. First, at request-sized payloads a crossing costs on the
+order of 100 µs, comparable to the channel operation carrying it; nothing in
+the small or medium bucket is worth a second representation. Second,
+**deserialize dominates at every size**, and `shared-vec` as designed only
+removes the serialize half — the zero-copy *read view* on the receiving side
+is a separate deferred item (C4 left `shared-atom` reads as demote-on-read).
+Shipping the payload form alone would save at most a third of the cost.
+
+Go criteria, any of which reopens the decision:
+
+1. A real workload's `--gc-stats` shows the `>256 KiB` bucket carrying the
+   majority of boundary bytes.
+2. Boundary copy time exceeds 5 % of the workload's wall time.
+3. A shipped program fans one large value out to N isolates (the 2 MB-to-8-
+   workers case in the boundary plan) rather than sending one message.
+
+If any fires, build the zero-copy read view first and the born-`Arc` payload
+form second; together they remove the whole copy, which is the only version
+the numbers above justify.
 
 ## Risks and open questions
 
