@@ -1271,10 +1271,12 @@ mod tests {
     /// A GcPtr held only in a Rust local (no shadow-stack root, no alloc
     /// frame, no env) must survive collections when the conservative stack
     /// scan is on: this is the in-flight rooting class from
-    /// docs/gc-inflight-rooting-bug.md. Linux-only: other hosts without a
-    /// recorded stack base skip the scan.
+    /// docs/gc-inflight-rooting-bug.md. The test thread never calls
+    /// `register_mutator`, so the scan ceiling comes from the OS fallback
+    /// (`pthread_getattr_np` on Linux, `pthread_get_stackaddr_np` on
+    /// macOS); the test therefore also proves that fallback on each host.
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
     fn conservative_scan_keeps_rust_local_alive() {
         crate::stack_scan::set_conservative(true);
         let heap = fresh_heap();

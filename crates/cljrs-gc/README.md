@@ -73,11 +73,23 @@ src/
                     poison/retire protocol (Phase 10.5 heap-promotion fallback):
                     poison_active_regions(), close_region(), retired-region
                     root tracing
-  cancellation.rs — (GC mode) STW coordination, MutatorGuard, safepoints
+  cancellation.rs — (GC mode) STW coordination, MutatorGuard, safepoints;
+                    register_mutator also records the stack-scan ceiling
   config.rs       — (GC mode) GcConfig, GcCancellation (zero-sized proxy),
                     IsolateCancellation thread-local (per-isolate STW state), GcParked
+  stack_scan.rs   — (GC mode) conservative stack scan: an additional root
+                    source that marks live objects whose address appears in
+                    a word of the collecting thread's stack (closes the
+                    in-flight rooting class, docs/gc-inflight-rooting-bug.md);
+                    CLJRS_GC_CONSERVATIVE switch, per-thread stack ceiling,
+                    callee-saved register spill (x86_64, aarch64)
+  debug_modes.rs  — (GC mode) opt-in use-after-free hunting: CLJRS_GC_QUARANTINE
+                    (sweep poisons and leaks dead boxes so later access panics
+                    deterministically) and CLJRS_GC_STRESS=N (request a
+                    collection every Nth safepoint)
   stats.rs        — process-global GcStats counters: GC allocations,
                     region (bump) allocations, GC pauses + freed bytes/objects,
+                    conservative-scan rescues,
                     isolate-boundary crossings (bytes copied + serialize time)
 tests/
   no_gc_alloc.rs  — (no-gc mode) integration tests for the allocation context stack:
@@ -209,6 +221,7 @@ impl GcHeap {
     pub const fn new() -> Self
     pub fn alloc<T: Trace + 'static>(&self, value: T) -> GcPtr<T>
     pub fn collect<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F)
+    pub fn collect_with_stack_scan<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F)
     pub fn count(&self) -> usize
     pub fn total_allocated(&self) -> usize
     pub fn total_freed(&self) -> usize
@@ -216,7 +229,14 @@ impl GcHeap {
 ```
 
 `collect` is stop-the-world: must only be called when no other thread is
-creating or dereferencing `GcPtr` values.
+creating or dereferencing `GcPtr` values.  It is precise-only, so tests
+that assert exact free behavior stay deterministic.
+
+`collect_with_stack_scan` is the production entry (`gc_safepoint`,
+`force_collect`, and `async_gc_collect` in `cljrs-env` all use it): after
+precise marking drains it runs the conservative stack scan (below) and
+marks anything it rescues, unless `CLJRS_GC_CONSERVATIVE=0` disabled the
+scan, in which case it behaves exactly like `collect`.
 
 ### `MarkVisitor`
 
@@ -244,6 +264,7 @@ impl HeapProxy {
     pub fn total_allocated(&self) -> usize
     pub fn total_freed(&self) -> usize
     pub fn collect<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F)
+    pub fn collect_with_stack_scan<F: FnOnce(&mut MarkVisitor)>(&self, trace_roots: F)
     pub fn collect_auto(&self) -> bool
 }
 
@@ -255,6 +276,53 @@ thread's `ISOLATE_HEAP` thread-local `GcHeap`. Each OS thread (isolate) owns
 an independent heap; GC runs fully in parallel across threads with no
 cross-isolate stop-the-world coordination. All `GcPtr::new` calls allocate
 into the current thread's heap via this proxy.
+
+### `stack_scan` (GC mode)
+
+```rust
+pub fn conservative_enabled() -> bool;   // CLJRS_GC_CONSERVATIVE, default on
+pub fn set_conservative(on: bool);       // override (tests, embedders)
+pub fn record_stack_base();              // called by register_mutator
+```
+
+The conservative scan is the root source that closes the in-flight rooting
+class (`docs/gc-inflight-rooting-bug.md`): a `Value` held only in a Rust
+local while a builtin re-enters evaluation is invisible to precise rooting.
+After precise marking drains, the collector spills its callee-saved
+registers, then compares every word of `[sp, stack top)` against the sorted
+live-object list and marks the hits (and their children).  Sound because
+the heap is non-moving and `GcPtr` is `!Send`: heaps are per-thread, so only
+the collecting thread's own stack can reference the heap being collected, and
+a false positive only retains garbage for one extra cycle.
+
+The stack ceiling is the address `record_stack_base` captured at
+`register_mutator` time; a thread that never registered falls back to the
+pthread stack bounds (`pthread_getattr_np` on Linux/Android,
+`pthread_get_stackaddr_np` on macOS) and other hosts skip the scan.
+`/proc/self/maps` is deliberately not used: the kernel merges adjacent
+same-permission VMAs, so a thread stack's mapping can extend into a
+neighbor's allocation that later unmaps.  Register spill is implemented for
+x86_64 and aarch64; other architectures still scan spilled slots.
+
+Every rescue — an object precise marking missed — increments the
+`Conservative rescues` counter in `GcStats` and logs at debug level.  A
+nonzero count is the audit signal for a remaining unrooted path.
+
+### `debug_modes` (GC mode)
+
+```rust
+pub fn quarantine_enabled() -> bool;     // CLJRS_GC_QUARANTINE, default off
+pub fn set_quarantine(on: bool);
+pub fn set_stress_period(period: usize); // CLJRS_GC_STRESS=N, 0 = off
+pub fn stress_due() -> bool;             // called at each safepoint
+```
+
+Quarantine makes the sweep drop each dead value in place but leak the
+`GcBox`, so the debug-build `GC_MAGIC_FREED` poison survives and any later
+`GcPtr` access panics with an exact message instead of racing allocator
+reuse.  Stress requests a collection at every Nth safepoint, shrinking the
+window between a value becoming unrooted and the collection that would free
+it.  Combined, they turn latent rooting holes into deterministic panics.
 
 ### `region::Region`
 
@@ -335,6 +403,7 @@ impl GcStats {
     pub fn record_region_poison(&self)
     pub fn record_gc_pause(&self, pause: Duration, freed_objects: u64, freed_bytes: u64)
     pub fn record_boundary_crossing(&self, bytes: u64, copy_time: Duration)
+    pub fn record_conservative_rescues(&self, count: u64)
     pub fn snapshot(&self) -> GcStatsSnapshot
 }
 
